@@ -1,0 +1,33 @@
+title: Plotting
+description: A macOS SwiftUI app for analyst review of clinical ECG findings over PhysioNet WFDB recordings.
+remote_theme: just-the-docs/just-the-docs
+
+# Site URL — let GitHub Pages set baseurl automatically for project pages.
+url: https://kvnlng.github.io
+baseurl: /Plotting
+
+# Just-the-docs config
+color_scheme: light
+search_enabled: true
+heading_anchors: true
+nav_external_links:
+  - title: View on GitHub
+    url: https://github.com/kvnlng/Plotting
+    hide_icon: false
+
+# Aux links rendered at the top right of every page.
+aux_links:
+  Repository: "https://github.com/kvnlng/Plotting"
+  Roadmap:    "https://github.com/kvnlng/Plotting/blob/main/ROADMAP.md"
+
+# Footer
+footer_content: "© 2026 Kevin Long. Plotting is MIT-licensed."
+
+# Markdown
+markdown: kramdown
+kramdown:
+  syntax_highlighter: rouge
+
+plugins:
+  - jekyll-remote-theme
+  - jekyll-seo-tag
