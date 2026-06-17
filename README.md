@@ -8,6 +8,8 @@ analysis machines (VF/VT onset, AFib, PVCs, disease vectors). The findings
 themselves are the primary data surface — the trace is what makes them
 readable.
 
+![Plotting bedside view — record sidebar, Metal-backed ECG paper canvas on the focused MLII lead of MIT-BIH record 107, and the findings inspector.](docs/assets/bedside-overview.png)
+
 ## Status
 
 Hobby / research project. Not yet shipping. Built against macOS 14+ with

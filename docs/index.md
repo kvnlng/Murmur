@@ -31,20 +31,13 @@ ECG paper canvas with the cluster's findings overlaid.
 
 ## At a glance
 
-```
-┌─────────────┬──────────────────────────────────────┬────────────────┐
-│  Records    │  Bedside view (Metal canvas)         │  Findings      │
-│             │                                      │                │
-│  100.hea  ✓ │   ░░░░░░ pink ECG paper ░░░░░░░     │  PVC  18s ▸    │
-│  101.hea    │   ─╱╲──╱╲──╱╲──╱╲──╱╲──╱╲──╱─       │  VT   1:24 ▸   │
-│  102.hea    │   ▲                                  │  AFib 2:10 ▸   │
-│             │                                      │                │
-│             │  ▭ overview ribbon ▭ ▭ ▭ ▭ ▭ ▭      │  filters: …    │
-└─────────────┴──────────────────────────────────────┴────────────────┘
-```
+![Plotting bedside view — record sidebar on the left, Metal-backed ECG paper canvas in the middle with the focused MLII lead and three-tier grid, and the findings inspector on the right.]({{ site.baseurl }}/assets/bedside-overview.png)
 
-Drag the chart to pan; pinch to zoom; click the ribbon to scrub. All
-channels in a record share the viewport so leads stay time-locked.
+Three columns: the record sidebar on the left, the bedside canvas in the
+middle (lead chip bar + record-context header + Metal-backed ECG paper +
+overview ribbon), and the findings inspector on the right. Drag the
+chart to pan; pinch to zoom; click the ribbon to scrub. All channels in
+a record share the viewport so leads stay time-locked.
 
 ## Source
 
