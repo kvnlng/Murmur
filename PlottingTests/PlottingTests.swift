@@ -1724,15 +1724,22 @@ struct WFDBMultiFileImporterTests {
         let heaURL = try SyntheticRecording.makeMultiFrequencyRecord(into: srcDir)
         let summary = try WFDBImporter.importRecord(heaURL: heaURL, outputDirectory: outDir)
 
-        // 8 ECG signals + 2 trend signals.
-        #expect(summary.recording.channels.count == 10)
+        // 8 ECG signals + 5 low-rate signals (HR, SpO₂, alarm,
+        // P(spontaneous), P(assist-control)) = 13 total.
+        #expect(summary.recording.channels.count == 13)
 
         let ecg = summary.recording.channels.first { $0.name == "II" }
         let hr  = summary.recording.channels.first { $0.name == "HR_bpm" }
         let spo2 = summary.recording.channels.first { $0.name == "SpO2_pct" }
+        let alarm = summary.recording.channels.first { $0.name == "had_high_priority_alarm" }
+        let probSpontaneous = summary.recording.channels.first { $0.name == "prob_state_spontaneous" }
         try #require(ecg != nil)
         try #require(hr != nil)
         try #require(spo2 != nil)
+        try #require(alarm != nil)
+        try #require(probSpontaneous != nil)
+        #expect(alarm!.isTrendChannel)
+        #expect(probSpontaneous!.isTrendChannel)
 
         #expect(ecg!.sampleRate == 250.0)
         #expect(ecg!.sampleCount == 2_500)
@@ -1804,5 +1811,131 @@ struct ChannelDiscriminatorTests {
     @Test("5 Hz boundary is non-trend — leave room for slow ECG variants")
     func boundaryIsNotTrend() {
         #expect(!channel(rate: 5).isTrendChannel)
+    }
+}
+
+// MARK: - Boolean channel scanner
+
+@Suite("Boolean channel scanner")
+struct BooleanChannelScannerTests {
+
+    @Test("Empty input → no ranges")
+    func emptyInput() {
+        #expect(BooleanChannelScanner.scan(samples: []).isEmpty)
+    }
+
+    @Test("All-inactive samples → no ranges")
+    func allInactive() {
+        #expect(BooleanChannelScanner.scan(samples: [0, 0, 0, 0]).isEmpty)
+    }
+
+    @Test("All-active samples → single full-extent range")
+    func allActive() {
+        let ranges = BooleanChannelScanner.scan(samples: [1, 1, 1])
+        #expect(ranges == [Int64(0)...Int64(2)])
+    }
+
+    @Test("Single active sample → one one-sample range")
+    func singleActiveSample() {
+        let ranges = BooleanChannelScanner.scan(samples: [0, 0, 1, 0, 0])
+        #expect(ranges == [Int64(2)...Int64(2)])
+    }
+
+    @Test("Two runs separated by inactive sample → two ranges")
+    func twoRunsSplitByInactive() {
+        let ranges = BooleanChannelScanner.scan(samples: [1, 1, 0, 1, 1])
+        #expect(ranges == [Int64(0)...Int64(1), Int64(3)...Int64(4)])
+    }
+
+    @Test("Threshold can be customized to e.g. 0.7")
+    func customThreshold() {
+        let samples: [Float] = [0.6, 0.8, 0.5, 0.9]
+        let ranges = BooleanChannelScanner.scan(samples: samples, threshold: 0.7)
+        #expect(ranges == [Int64(1)...Int64(1), Int64(3)...Int64(3)])
+    }
+
+    @Test("NaN samples are treated as inactive and split runs")
+    func nanIsInactive() {
+        let samples: [Float] = [1, 1, .nan, 1, 1]
+        let ranges = BooleanChannelScanner.scan(samples: samples)
+        #expect(ranges == [Int64(0)...Int64(1), Int64(3)...Int64(4)])
+    }
+
+    @Test("Open run at end of buffer is closed correctly")
+    func closesAtEnd() {
+        let samples: [Float] = [0, 0, 1, 1]
+        let ranges = BooleanChannelScanner.scan(samples: samples)
+        #expect(ranges == [Int64(2)...Int64(3)])
+    }
+}
+
+// MARK: - Low-rate channel partitioning
+
+@Suite("Low-rate channel partition")
+struct LowRatePartitionTests {
+
+    private func channel(_ name: String, rate: Double = 1) -> Channel {
+        Channel(
+            id: UUID(),
+            name: name,
+            unit: "",
+            sampleRate: rate,
+            startTimeUnixMS: 0,
+            sampleCount: 10,
+            storageFileName: "\(name).bin",
+            pyramid: []
+        )
+    }
+
+    @Test("Vital trend channels route to `trends`")
+    func vitalsAreTrends() {
+        let p = LowRatePartition(channels: [
+            channel("HR_bpm"),
+            channel("SpO2_pct"),
+            channel("etco2_avg_60s")
+        ])
+        #expect(p.trends.map(\.name) == ["HR_bpm", "SpO2_pct", "etco2_avg_60s"])
+        #expect(p.alarms.isEmpty)
+        #expect(p.spontaneous == nil)
+        #expect(p.assistControl == nil)
+    }
+
+    @Test("Channel names ending in `_alarm`, `_status`, or `_silenced` route to `alarms`")
+    func alarmSuffixDetection() {
+        let p = LowRatePartition(channels: [
+            channel("had_high_priority_alarm"),
+            channel("had_suction_alarm"),
+            channel("nebulizer_status"),
+            channel("had_alarm_silenced")
+        ])
+        #expect(p.alarms.count == 4)
+        #expect(p.trends.isEmpty)
+    }
+
+    @Test("`prob_state_spontaneous` + `prob_state_assist_control` route to state pair")
+    func stateProbabilityPair() {
+        let p = LowRatePartition(channels: [
+            channel("prob_state_spontaneous"),
+            channel("prob_state_assist_control")
+        ])
+        #expect(p.spontaneous?.name == "prob_state_spontaneous")
+        #expect(p.assistControl?.name == "prob_state_assist_control")
+        #expect(p.trends.isEmpty)
+        #expect(p.alarms.isEmpty)
+    }
+
+    @Test("Mixed channel set partitions cleanly across all three buckets")
+    func mixedPartition() {
+        let p = LowRatePartition(channels: [
+            channel("HR_bpm"),
+            channel("had_high_priority_alarm"),
+            channel("prob_state_spontaneous"),
+            channel("SpO2_pct"),
+            channel("nebulizer_status")
+        ])
+        #expect(p.trends.map(\.name) == ["HR_bpm", "SpO2_pct"])
+        #expect(p.alarms.map(\.name) == ["had_high_priority_alarm", "nebulizer_status"])
+        #expect(p.spontaneous?.name == "prob_state_spontaneous")
+        #expect(p.assistControl == nil)
     }
 }

@@ -8,6 +8,23 @@ data surface.
 
 ## Current state (updated 2026-06-18)
 
+**Alarm & ventilation state strips**
+- `BooleanChannelScanner` — pure utility that turns a boolean-ish trend
+  channel (alarm flag, status indicator) into `[ClosedRange<Int64>]`
+  active spans. NaN is inactive; threshold is configurable.
+- `AlarmStrip` — one thin lane per alarm channel (`had_high_priority_alarm`,
+  `had_suction_alarm`, `nebulizer_status`, `had_alarm_silenced`, …)
+  spanning the full recording. Active runs render as colored bars at the
+  appropriate fractional position; tapping any bar jumps the viewport.
+- `StateBackdropStrip` — one-row colored band driven by the Medallion GMM
+  state probability pair (`prob_state_spontaneous` +
+  `prob_state_assist_control`). Each 1-min cell colored by the dominant
+  state with opacity tracking certainty. Tap to jump.
+- `BedsideView.LowRatePartition` routes low-rate channels by name into
+  vitals (sparkline trend strip), alarms (alarm strip), and the state
+  pair (backdrop strip). Each strip renders only when its inputs exist —
+  plain ECG records show none of the new chrome.
+
 **Multi-frequency WFDB + low-rate trends**
 - `WFDBHeaderParser` honors the per-signal `format[xspf]` suffix, so a
   record can mix 250 Hz ECG signals (`16x250`) with 1 Hz feature signals
@@ -140,7 +157,7 @@ data surface.
   the imported bundle and records its filename on the manifest so the
   context panel can read/write it.
 
-**Tests** — 113 total (109 unit + 4 UI).
+**Tests** — 125 total (121 unit + 4 UI).
 
 ## Architecture
 

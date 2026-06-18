@@ -104,8 +104,11 @@ enum SyntheticRecording {
         let ecgGain: Double = 200.0
         let baseline = 0
 
+        // 8 ECG signals + 5 low-rate signals (HR, SpO₂, alarm flag,
+        // P(spontaneous), P(assist-control)) = 13 total.
+        let lowRateSignalCount = 5
         var heaLines: [String] = [
-            "\(recordName) \(ecgLabels.count + 2) \(Int(baseFrameRate)) \(frameCount)"
+            "\(recordName) \(ecgLabels.count + lowRateSignalCount) \(Int(baseFrameRate)) \(frameCount)"
         ]
 
         // Write each ECG signal to its own per-signal .dat file (format 16, 250 spf).
@@ -134,18 +137,33 @@ enum SyntheticRecording {
             try int16Data.write(to: datURL, options: .atomic)
         }
 
-        // Two low-rate trend signals: fake HR bpm and fake SpO₂ percent.
-        // Stored as raw Int16 (gain = 1) — the value in the .dat IS the
-        // physical value, no scaling.
-        let trendSignals: [(label: String, unit: String, values: (Int) -> Int)] = [
-            ("HR_bpm",   "bpm", { frame in 72 + Int(round(8 * sin(Double(frame) * .pi / 5))) }),   // 64…80
-            ("SpO2_pct", "%",   { frame in max(90, 98 - frame / 2) })                                // 98 → 93
+        // Low-rate signals — vitals, alarm flags, and GMM state
+        // probabilities. Each is one sample per frame (spf = 1) at the
+        // base rate of 1 Hz. Probabilities use gain = 100 so the raw
+        // int16 holds 0…100 representing 0.0…1.0; everything else uses
+        // gain = 1 (raw value == physical value).
+        let trendSignals: [LowRateSignalSpec] = [
+            LowRateSignalSpec(label: "HR_bpm", unit: "bpm", gain: 1) {
+                72 + Int(round(8 * sin(Double($0) * .pi / 5)))                       // 64…80
+            },
+            LowRateSignalSpec(label: "SpO2_pct", unit: "%", gain: 1) {
+                max(90, 98 - $0 / 2)                                                 // 98 → 93
+            },
+            LowRateSignalSpec(label: "had_high_priority_alarm", unit: "bool", gain: 1) {
+                ($0 == 3 || $0 == 7) ? 1 : 0
+            },
+            LowRateSignalSpec(label: "prob_state_spontaneous", unit: "p", gain: 100) {
+                50 + Int(round(40 * sin(Double($0) * .pi / 4)))                       // 0.10…0.90
+            },
+            LowRateSignalSpec(label: "prob_state_assist_control", unit: "p", gain: 100) {
+                100 - (50 + Int(round(40 * sin(Double($0) * .pi / 4))))
+            }
         ]
 
         for trend in trendSignals {
             let datFilename = "\(recordName)_\(safeFileName(trend.label)).dat"
             heaLines.append(
-                "\(datFilename) 16x1 1(\(trend.unit))/\(baseline) 16 0 0 0 0 \(trend.label)"
+                "\(datFilename) 16x1 \(trend.gain)(\(trend.unit))/\(baseline) 16 0 0 0 0 \(trend.label)"
             )
 
             var int16Data = Data(count: frameCount * 2)
@@ -167,6 +185,16 @@ enum SyntheticRecording {
     }
 
     // MARK: - Helpers
+
+    /// One low-rate (1 Hz) signal in the synthetic fixture. Carries a
+    /// frame-index → int16-value generator so each fake series can be
+    /// expressed as a one-liner above.
+    private struct LowRateSignalSpec {
+        let label: String
+        let unit: String
+        let gain: Int
+        let values: (Int) -> Int
+    }
 
     private static func safeFileName(_ name: String) -> String {
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))

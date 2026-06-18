@@ -65,8 +65,21 @@ before you ever scrub:
 
 If the record carries low-rate signals — Plotting treats anything below
 5 Hz as a "trend" channel: HR, SpO₂, etCO₂, tidal volume, GMM state
-probabilities, alarm flags, and so on — they render as a stacked
-sparkline strip below the ECG canvas, time-locked to the same viewport.
+probabilities, alarm flags, and so on — they render in their own strips
+below the ECG canvas, time-locked to the same viewport:
+
+- **Vitals sparkline strip.** Continuous-valued trend channels (HR, SpO₂,
+  etCO₂, tidal volume) appear as small line plots with a side label
+  showing the value at the middle of the visible window.
+- **Alarm strip.** Boolean alarm / status channels — anything whose name
+  ends in `_alarm`, `_status`, or `_silenced` — get one lane each.
+  Active runs render as colored bars; click any bar to jump the viewport
+  to that minute.
+- **State backdrop.** When both `prob_state_spontaneous` and
+  `prob_state_assist_control` are present, a one-row colored band shows
+  the dominant ventilation state per minute (warm = spontaneous breath,
+  cool = assist-control), with opacity tied to certainty.
+
 WFDB multi-frequency records (per-signal `.dat` files with `format[xspf]`
 suffixes on each signal line) feed straight in via the existing folder
 picker; no separate ingest step.

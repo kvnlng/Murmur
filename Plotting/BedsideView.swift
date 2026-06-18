@@ -50,10 +50,25 @@ struct BedsideView: View {
         recording.channels.filter { !$0.isTrendChannel }
     }
 
-    /// Low-rate vital / state / feature channels — rendered in
-    /// `ChannelTrendStrip` below the canvas.
-    private var trendChannels: [Channel] {
-        recording.channels.filter(\.isTrendChannel)
+    /// Low-rate channels split by intent. Alarms and state probabilities
+    /// get their own dedicated strips; everything else (continuous-valued
+    /// vital trends) goes through the sparkline strip.
+    private var lowRatePartition: LowRatePartition {
+        LowRatePartition(channels: recording.channels.filter(\.isTrendChannel))
+    }
+
+    /// Pure-numeric vital trends (HR, SpO₂, etCO₂, BPM, tidal volume…)
+    /// rendered as sparklines in `ChannelTrendStrip`.
+    private var vitalTrendChannels: [Channel] { lowRatePartition.trends }
+
+    /// Boolean-valued alarm / status channels rendered in `AlarmStrip`.
+    private var alarmChannels: [Channel] { lowRatePartition.alarms }
+
+    /// The matched `prob_state_*` channel pair for `StateBackdropStrip`.
+    /// Either side may be nil — the strip still renders with whatever's
+    /// present and falls silent only if both are missing.
+    private var stateChannels: (spontaneous: Channel?, assist: Channel?) {
+        (lowRatePartition.spontaneous, lowRatePartition.assistControl)
     }
 
     /// Annotations that survive the current filter. Drives the canvas, the
@@ -143,6 +158,8 @@ struct BedsideView: View {
                     )
                     .frame(maxHeight: .infinity)
                     trendStrip
+                    alarmStrip
+                    stateStrip
                 }
                 .padding(16)
             } else {
@@ -167,20 +184,55 @@ struct BedsideView: View {
                         )
                     }
                     trendStrip
+                    alarmStrip
+                    stateStrip
                 }
                 .padding(16)
             }
         }
     }
 
-    /// Sparkline panel for low-rate channels. Hidden when the recording
-    /// has no trend channels (the legacy single-rate case stays unchanged).
+    /// Sparkline panel for the continuous-valued vital trend channels.
+    /// Hidden when no such channels exist (the legacy single-rate case
+    /// stays unchanged).
     @ViewBuilder
     private var trendStrip: some View {
-        if !trendChannels.isEmpty {
+        if !vitalTrendChannels.isEmpty {
             ChannelTrendStrip(
-                channels: trendChannels,
+                channels: vitalTrendChannels,
                 recordingDirectory: recordingDirectory,
+                viewport: viewport
+            )
+        }
+    }
+
+    /// Per-channel alarm / status lanes. Hidden when the recording carries
+    /// no alarm channels.
+    @ViewBuilder
+    private var alarmStrip: some View {
+        if !alarmChannels.isEmpty, let primary = ecgChannels.first {
+            AlarmStrip(
+                channels: alarmChannels,
+                recordingDirectory: recordingDirectory,
+                totalSamplesPrimary: primary.sampleCount,
+                primarySampleRate: primary.sampleRate,
+                viewport: viewport
+            )
+        }
+    }
+
+    /// One-row colored strip showing ventilation state (spontaneous vs
+    /// assist-control). Hidden when neither probability channel is present.
+    @ViewBuilder
+    private var stateStrip: some View {
+        let (spontaneous, assist) = stateChannels
+        if (spontaneous != nil || assist != nil), let primary = ecgChannels.first {
+            StateBackdropStrip(
+                spontaneousChannel: spontaneous,
+                assistControlChannel: assist,
+                recordingDirectory: recordingDirectory,
+                totalSamplesPrimary: primary.sampleCount,
+                primarySampleRate: primary.sampleRate,
                 viewport: viewport
             )
         }
@@ -799,5 +851,56 @@ private struct CanvasSizeKey: PreferenceKey {
     static let defaultValue: CGSize = .zero
     static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
         value = nextValue()
+    }
+}
+
+// MARK: - Low-rate channel partitioning
+
+/// Splits the low-rate (`isTrendChannel == true`) subset of a recording's
+/// channels into three intent-based buckets so the bedside view can render
+/// each kind in its own strip.
+///
+/// Matching is name-based and matches what the Medallion feature store
+/// emits today; producers that want explicit control can name their
+/// channels to opt in or out (e.g. naming a channel `notes_status` would
+/// flag it as an alarm because of the `_status` suffix).
+struct LowRatePartition {
+    let trends: [Channel]
+    let alarms: [Channel]
+    let spontaneous: Channel?
+    let assistControl: Channel?
+
+    init(channels: [Channel]) {
+        var trends: [Channel] = []
+        var alarms: [Channel] = []
+        var spontaneous: Channel? = nil
+        var assist: Channel? = nil
+
+        for channel in channels {
+            let name = channel.name
+            if name == "prob_state_spontaneous" {
+                spontaneous = channel
+            } else if name == "prob_state_assist_control" {
+                assist = channel
+            } else if Self.looksLikeAlarmFlag(name) {
+                alarms.append(channel)
+            } else {
+                trends.append(channel)
+            }
+        }
+
+        self.trends = trends
+        self.alarms = alarms
+        self.spontaneous = spontaneous
+        self.assistControl = assist
+    }
+
+    /// Conservative — matches the Medallion-emitted alarm/status flags and
+    /// any future channel whose name carries the same suffix.
+    private static func looksLikeAlarmFlag(_ name: String) -> Bool {
+        let lower = name.lowercased()
+        return lower.hasSuffix("_alarm")
+            || lower.hasSuffix("_status")
+            || lower.hasSuffix("_silenced")
     }
 }
