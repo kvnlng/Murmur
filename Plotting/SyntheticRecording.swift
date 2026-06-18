@@ -2,15 +2,15 @@
 //  SyntheticRecording.swift
 //  Plotting
 //
-//  Generates a minimal WFDB record (8-lead ECG, format 16) for UI tests and
-//  unit tests. Wrapped in `#if DEBUG` so it never ships in release builds.
+//  Generates a minimal WFDB record (8-lead ECG, format 16) for UI tests,
+//  unit tests, and the welcome screen's "Try a sample recording" affordance.
 //
 //  Public API:
-//    • makeFixture()          → Recording bundle directory (for UI tests)
+//    • makeFixture()          → Recording bundle directory ready for
+//                               `RecordingStore.loadManifest`
 //    • makeWFDBRecord(into:)  → URL of the .hea file (for unit tests)
 //
 
-#if DEBUG
 import Foundation
 
 enum SyntheticRecording {
@@ -93,4 +93,3 @@ enum SyntheticRecording {
         return sin(t * 2 * .pi * 1.2) * 0.05                     // baseline wander
     }
 }
-#endif

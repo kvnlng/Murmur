@@ -6,7 +6,22 @@ The PhysioNet WFDB record (`.hea` + `.dat`) is the *context* the analyst
 needs to interpret each finding; the findings themselves are the primary
 data surface.
 
-## Current state (updated 2026-06-17)
+## Current state (updated 2026-06-18)
+
+**Welcome screen**
+- `WelcomeView` is the first-launch experience: a centered card on a
+  faint ECG-paper backdrop with the app name, a one-line tagline, three
+  feature bullets, and primary / secondary actions.
+- **Open Record Folder** opens the file picker (same as the toolbar
+  action). **Try a sample recording** synthesizes a small 8-lead WFDB
+  fixture on demand via `SyntheticRecording.makeFixture()` so a
+  first-launch user has an instant on-ramp.
+- **Recent folders** — `RecentFoldersStore` persists up to ten
+  security-scoped bookmarks to `UserDefaults` and exposes them as
+  clickable rows under the card; remove (✕) drops a single entry.
+- **Drop a folder** anywhere on the welcome view to open it (or any
+  file in a record folder — the welcome view promotes a file drop to
+  its enclosing folder).
 
 **Bedside layout**
 - `LeadChipBar` across the top of `BedsideView` with a per-lead color chip
@@ -95,7 +110,7 @@ data surface.
   the imported bundle and records its filename on the manifest so the
   context panel can read/write it.
 
-**Tests** — 83 total (79 unit + 4 UI).
+**Tests** — 91 total (87 unit + 4 UI).
 
 ## Architecture
 

@@ -1325,3 +1325,134 @@ struct ClippedRangeScannerTests {
         #expect(ranges[0].sampleCount == 3)
     }
 }
+
+// MARK: - Recent folders store
+
+@Suite("Recent folders store")
+struct RecentFoldersStoreTests {
+
+    /// Each test gets its own UserDefaults suite so persistence assertions
+    /// don't bleed across tests or pollute the host process's `.standard`
+    /// defaults.
+    private static func makeDefaults() -> UserDefaults {
+        let suiteName = "RecentFoldersStoreTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        return defaults
+    }
+
+    private static func makeTempFolder() throws -> URL {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("PlottingRecentsTest-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
+    }
+
+    @Test("A fresh store starts empty")
+    func startsEmpty() {
+        let store = RecentFoldersStore(defaults: Self.makeDefaults())
+        #expect(store.entries.isEmpty)
+    }
+
+    @Test("Recording a folder adds an entry with the right display data")
+    func recordsAFolder() throws {
+        let folder = try Self.makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let store = RecentFoldersStore(defaults: Self.makeDefaults())
+
+        store.record(folder: folder)
+        try #require(!store.entries.isEmpty)
+        let entry = store.entries[0]
+        #expect(entry.displayName == folder.lastPathComponent)
+        #expect(entry.resolvedPath == folder.path)
+    }
+
+    @Test("Persisted entries survive a fresh store instance")
+    func persistsAcrossReload() throws {
+        let defaults = Self.makeDefaults()
+        let folder = try Self.makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+
+        let store = RecentFoldersStore(defaults: defaults)
+        store.record(folder: folder)
+        try #require(!store.entries.isEmpty)
+
+        let reloaded = RecentFoldersStore(defaults: defaults)
+        #expect(reloaded.entries.first?.resolvedPath == folder.path)
+    }
+
+    @Test("Re-recording the same folder moves it to the top without duplicating")
+    func dedupsAndReorders() throws {
+        let folderA = try Self.makeTempFolder()
+        let folderB = try Self.makeTempFolder()
+        defer {
+            try? FileManager.default.removeItem(at: folderA)
+            try? FileManager.default.removeItem(at: folderB)
+        }
+        let store = RecentFoldersStore(defaults: Self.makeDefaults())
+
+        store.record(folder: folderA)
+        store.record(folder: folderB)
+        store.record(folder: folderA)
+
+        #expect(store.entries.count == 2)
+        #expect(store.entries[0].resolvedPath == folderA.path)
+        #expect(store.entries[1].resolvedPath == folderB.path)
+    }
+
+    @Test("Cap at 10 entries — oldest fall off when the eleventh is added")
+    func capsAtTen() throws {
+        let store = RecentFoldersStore(defaults: Self.makeDefaults())
+        var folders: [URL] = []
+        defer { folders.forEach { try? FileManager.default.removeItem(at: $0) } }
+
+        for _ in 0..<11 {
+            let folder = try Self.makeTempFolder()
+            folders.append(folder)
+            store.record(folder: folder)
+        }
+        #expect(store.entries.count == 10)
+        #expect(store.entries[0].resolvedPath == folders.last!.path)
+    }
+
+    @Test("Remove drops a single entry and persists the change")
+    func removeDropsEntry() throws {
+        let defaults = Self.makeDefaults()
+        let folder = try Self.makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+
+        let store = RecentFoldersStore(defaults: defaults)
+        store.record(folder: folder)
+        let entry = try #require(store.entries.first)
+
+        store.remove(entry)
+        #expect(store.entries.isEmpty)
+        #expect(RecentFoldersStore(defaults: defaults).entries.isEmpty)
+    }
+
+    @Test("Clear wipes every entry")
+    func clearWipesAll() throws {
+        let defaults = Self.makeDefaults()
+        let folder = try Self.makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+
+        let store = RecentFoldersStore(defaults: defaults)
+        store.record(folder: folder)
+        store.clear()
+        #expect(store.entries.isEmpty)
+        #expect(RecentFoldersStore(defaults: defaults).entries.isEmpty)
+    }
+
+    @Test("Resolving a freshly recorded bookmark returns a usable URL")
+    func resolvesBookmark() throws {
+        let folder = try Self.makeTempFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let store = RecentFoldersStore(defaults: Self.makeDefaults())
+
+        store.record(folder: folder)
+        let entry = try #require(store.entries.first)
+
+        let resolved = try #require(store.resolve(entry))
+        #expect(resolved.path == folder.path)
+    }
+}

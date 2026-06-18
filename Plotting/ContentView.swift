@@ -12,6 +12,7 @@ struct ContentView: View {
     @State private var isImporterPresented = false
     @State private var errorMessage: String?
     @State private var currentImportTask: Task<Void, Never>?
+    @State private var recentsStore = RecentFoldersStore()
 
     enum AppState {
         case empty
@@ -64,21 +65,33 @@ struct ContentView: View {
 
     private var emptyShell: some View {
         NavigationStack {
-            VStack(spacing: 16) {
-                Image(systemName: "waveform.path.ecg")
-                    .font(.system(size: 56))
-                    .foregroundStyle(.secondary)
-                Text("Pick a folder containing WFDB records (.hea + .dat)")
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("empty-state-prompt")
-                Button("Open Record Folder") { isImporterPresented = true }
-                    .buttonStyle(.borderedProminent)
-                    .accessibilityIdentifier("empty-state-open-button")
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            WelcomeView(
+                onOpenFolder: { isImporterPresented = true },
+                onTrySample: sampleAction,
+                recents: recentsStore.entries,
+                onPickRecent: { reopen($0) },
+                onRemoveRecent: { recentsStore.remove($0) },
+                onDropFolder: { openFolder($0) }
+            )
             .navigationTitle("Plotting")
             .toolbar { openFolderToolbarItem }
+        }
+    }
+
+    /// Welcome view's secondary "Try a sample recording" action. Synthesizes
+    /// a small 8-lead WFDB record on demand so first-launch users have an
+    /// instant on-ramp without hunting down a PhysioNet record first.
+    private var sampleAction: (() -> Void)? {
+        { loadSampleFixture() }
+    }
+
+    private func loadSampleFixture() {
+        do {
+            let directory = try SyntheticRecording.makeFixture()
+            let recording = try RecordingStore.shared.loadManifest(at: directory)
+            state = .directView(directory: directory, recording: recording)
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
@@ -181,26 +194,46 @@ struct ContentView: View {
     private func handleFolderPick(_ result: Result<URL, Error>) {
         switch result {
         case .success(let folderURL):
-            do {
-                let records = try scanFolder(folderURL)
-                guard !records.isEmpty else {
-                    errorMessage = "No WFDB records (.hea files) found in \(folderURL.lastPathComponent)."
-                    return
-                }
-                currentImportTask?.cancel()
-                importStates = [:]
-                state = .browsing(folder: folderURL, records: records)
-                let firstFilename = records.first?.filename
-                selection = firstFilename
-                if let firstFilename {
-                    startImport(filename: firstFilename, folder: folderURL)
-                }
-            } catch {
-                errorMessage = error.localizedDescription
-            }
+            openFolder(folderURL)
         case .failure(let error):
             errorMessage = error.localizedDescription
         }
+    }
+
+    /// Common open-folder path used by both the file picker and the
+    /// recents list. Records the folder in `recentsStore` on success so
+    /// every successful open gets a one-click re-entry next launch.
+    private func openFolder(_ folderURL: URL) {
+        do {
+            let records = try scanFolder(folderURL)
+            guard !records.isEmpty else {
+                errorMessage = "No WFDB records (.hea files) found in \(folderURL.lastPathComponent)."
+                return
+            }
+            currentImportTask?.cancel()
+            importStates = [:]
+            state = .browsing(folder: folderURL, records: records)
+            recentsStore.record(folder: folderURL)
+            let firstFilename = records.first?.filename
+            selection = firstFilename
+            if let firstFilename {
+                startImport(filename: firstFilename, folder: folderURL)
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Resolves a recents-row bookmark and routes it through the same
+    /// open-folder path as a fresh pick. Drops the entry if the bookmark
+    /// is unrecoverable.
+    private func reopen(_ entry: RecentFolder) {
+        guard let url = recentsStore.resolve(entry) else {
+            recentsStore.remove(entry)
+            errorMessage = "Couldn't reopen \(entry.displayName) — the folder may have moved or its access was revoked."
+            return
+        }
+        openFolder(url)
     }
 
     private func scanFolder(_ folderURL: URL) throws -> [WFDBRecordEntry] {
@@ -263,15 +296,10 @@ struct ContentView: View {
     #if DEBUG
     private func loadUITestSampleIfRequested() {
         guard ProcessInfo.processInfo.arguments.contains("--ui-test-sample") else { return }
-        do {
-            let directory = try SyntheticRecording.makeFixture()
-            let recording = try RecordingStore.shared.loadManifest(at: directory)
-            state = .directView(directory: directory, recording: recording)
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        loadSampleFixture()
     }
     #endif
+
 }
 
 // MARK: - Sidebar

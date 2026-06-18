@@ -22,15 +22,26 @@ cd Plotting
 open Plotting.xcodeproj
 ```
 
-Press ⌘R. The empty state prompts you for a record folder.
+Press ⌘R. The welcome screen offers four entry points.
 
 ## Loading a record
 
-1. Click **Open Record Folder** (toolbar or empty state) and pick a
-   directory containing one or more `.hea` files.
-2. The left sidebar lists every record found — record name, signal count,
+The welcome screen on first launch gives you four ways in:
+
+- **Open Record Folder** opens the system file picker.
+- **Try a sample recording** generates a small 8-lead 10 s WFDB fixture
+  on the fly — useful for kicking the tires before downloading real data.
+- **Recent** — folders you've opened before are listed under the card
+  and reopen with one click. Sandbox-safe: each row stores a
+  security-scoped bookmark, not a raw path.
+- **Drag a folder onto the window** — drop either the record folder
+  itself, or any file inside it, and the app opens the enclosing folder.
+
+Once a folder is open:
+
+1. The left sidebar lists every record found — record name, signal count,
    sample rate, and duration.
-3. Click a record to import. The first import on a record runs the WFDB
+2. Click a record to import. The first import on a record runs the WFDB
    decoder + min/max pyramid + manifest writer. Subsequent visits load
    instantly from the cache.
 
