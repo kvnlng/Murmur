@@ -17,6 +17,10 @@ import SwiftUI
 struct FindingsSummaryHeader: View {
     let summary: AnnotationSummary
     @Binding var filter: FindingFilter
+    /// Optional disposition tally rendered alongside the total count.
+    /// `nil` keeps the chip row backwards-compatible for callers that
+    /// don't surface analyst review state.
+    var dispositionTally: DispositionStore.Tally? = nil
 
     var body: some View {
         if summary.rollups.isEmpty {
@@ -62,13 +66,32 @@ struct FindingsSummaryHeader: View {
     }
 
     private var totalChip: some View {
-        HStack(spacing: 4) {
-            Text("\(summary.totalCount)")
-                .font(.caption.weight(.semibold).monospacedDigit())
-            Text(summary.totalCount == 1 ? "finding" : "findings")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+        HStack(spacing: 6) {
+            HStack(spacing: 3) {
+                Text("\(summary.totalCount)")
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                Text(summary.totalCount == 1 ? "finding" : "findings")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            if let tally = dispositionTally, tally.total > 0 {
+                tallyBadge(count: tally.confirmed, color: .green, systemImage: "checkmark")
+                tallyBadge(count: tally.dismissed, color: .secondary, systemImage: "xmark")
+                if tally.unreviewed > 0 {
+                    tallyBadge(count: tally.unreviewed, color: .orange, systemImage: "questionmark")
+                }
+            }
         }
+    }
+
+    private func tallyBadge(count: Int, color: Color, systemImage: String) -> some View {
+        HStack(spacing: 2) {
+            Image(systemName: systemImage)
+                .font(.caption2)
+            Text("\(count)")
+                .font(.caption2.monospacedDigit().weight(.semibold))
+        }
+        .foregroundStyle(color)
     }
 
     private func isCategoryActive(_ category: String) -> Bool {

@@ -24,6 +24,11 @@ struct FindingDensityTimeline: View {
     /// Optional jump override. Defaults to calling
     /// `viewport.jump(toFraction:)` directly.
     var onJump: ((Double) -> Void)? = nil
+    /// Optional disposition state per annotation — drives the
+    /// dimmed-for-dismissed / outlined-for-confirmed visual treatment.
+    /// Empty dictionary keeps the timeline backward-compatible for
+    /// callers that don't yet plumb disposition state.
+    var dispositionsByID: [UUID: AnnotationDisposition] = [:]
 
     /// Lane height — tight enough that 8–10 categories fit without scrolling.
     private let laneHeight: CGFloat = 14
@@ -117,10 +122,12 @@ struct FindingDensityTimeline: View {
             let x1 = CGFloat(min(1.0, endSample / total)) * widthF
             let rectWidth = max(2.0, x1 - x0)         // ranges always visible
             let rect = CGRect(x: x0, y: 0, width: rectWidth, height: heightF)
+            let alpha = severityAlpha(entry.severity, base: 0.55) * dispositionDimmer(entry.dispositionState)
             ctx.fill(
                 Path(rect),
-                with: .color(lane.color.opacity(severityAlpha(entry.severity, base: 0.55)))
+                with: .color(lane.color.opacity(alpha))
             )
+            paintDispositionAccent(entry: entry, rect: rect, in: ctx)
         }
 
         // Points: 3-pt-wide vertical ticks.
@@ -128,10 +135,32 @@ struct FindingDensityTimeline: View {
         for entry in lane.entries where entry.kind == .point {
             let x = CGFloat(max(0.0, min(1.0, Double(entry.start) / total))) * widthF
             let rect = CGRect(x: x - pointWidth * 0.5, y: 0, width: pointWidth, height: heightF)
+            let alpha = severityAlpha(entry.severity, base: 0.85) * dispositionDimmer(entry.dispositionState)
             ctx.fill(
                 Path(rect),
-                with: .color(lane.color.opacity(severityAlpha(entry.severity, base: 0.85)))
+                with: .color(lane.color.opacity(alpha))
             )
+            paintDispositionAccent(entry: entry, rect: rect, in: ctx)
+        }
+    }
+
+    /// Confirmed entries get a small green ring; dismissed entries are
+    /// already dimmed via `dispositionDimmer` so no extra paint is needed.
+    private func paintDispositionAccent(entry: LaneEntry, rect: CGRect, in ctx: GraphicsContext) {
+        guard entry.dispositionState == .confirmed else { return }
+        let outline = rect.insetBy(dx: -1.5, dy: -1.5)
+        ctx.stroke(
+            Path(roundedRect: outline, cornerRadius: 2),
+            with: .color(.green.opacity(0.85)),
+            lineWidth: 1.2
+        )
+    }
+
+    private func dispositionDimmer(_ state: AnnotationDisposition.State?) -> Double {
+        switch state {
+        case .dismissed: return 0.30
+        case .confirmed: return 1.0
+        case nil:        return 1.0
         }
     }
 
@@ -167,7 +196,7 @@ struct FindingDensityTimeline: View {
                 category: ann.category,
                 color: CategoryPalette.swiftUIColor(for: ann.category)
             )
-            builder.append(ann)
+            builder.append(ann, dispositionState: dispositionsByID[ann.id]?.state)
             buckets[ann.category] = builder
         }
         return buckets.values
@@ -199,6 +228,7 @@ struct FindingDensityTimeline: View {
         let end: Int64
         let kind: Annotation.Kind
         let severity: Annotation.Severity
+        let dispositionState: AnnotationDisposition.State?
     }
 
     private struct LaneBuilder {
@@ -207,13 +237,14 @@ struct FindingDensityTimeline: View {
         var entries: [LaneEntry] = []
         var maxSeverity: Annotation.Severity = .info
 
-        mutating func append(_ ann: Annotation) {
+        mutating func append(_ ann: Annotation, dispositionState: AnnotationDisposition.State?) {
             entries.append(
                 LaneEntry(
                     start: ann.sampleIndex,
                     end: ann.renderEndSample,
                     kind: ann.kind,
-                    severity: ann.severity
+                    severity: ann.severity,
+                    dispositionState: dispositionState
                 )
             )
             if ann.severity > maxSeverity { maxSeverity = ann.severity }

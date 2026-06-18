@@ -21,9 +21,13 @@ struct BedsideView: View {
     @State private var filter = FindingFilter()
     @State private var showFindings = true
     @State private var layoutMode: BedsideLayoutMode
-    /// App-wide read/write latch. Governs the context-notes editor today and
-    /// will gate annotation create/edit/delete affordances when those land.
+    /// App-wide read/write latch. Governs the context-notes editor and the
+    /// per-finding disposition trio; new annotation create/edit/delete will
+    /// hang off the same latch.
     @State private var isEditing: Bool = false
+    /// Analyst review state for this recording's findings — confirm /
+    /// dismiss / reset. Persisted to `<bundle>/dispositions.json`.
+    @State private var dispositionStore: DispositionStore
 
     static let initialDurationSeconds: Double = 10
 
@@ -43,6 +47,7 @@ struct BedsideView: View {
         // Default: focus the first lead. Single-lead is the typical analyst
         // workflow; strips mode is opt-in for cross-lead comparison.
         _layoutMode = State(initialValue: firstECG.map { .focus($0.id) } ?? .strips)
+        _dispositionStore = State(initialValue: DispositionStore(bundleDirectory: recordingDirectory))
     }
 
     /// ECG / pressure channels — rendered on the Metal canvas.
@@ -112,7 +117,9 @@ struct BedsideView: View {
                 annotations: recording.annotations,
                 viewport: viewport,
                 sampleRate: recording.channels.first?.sampleRate ?? 250,
-                filter: $filter
+                filter: $filter,
+                dispositionStore: dispositionStore,
+                isEditing: isEditing
             )
             .inspectorColumnWidth(min: 220, ideal: 320, max: 480)
         }
@@ -268,14 +275,16 @@ struct BedsideView: View {
             VStack(alignment: .leading, spacing: 6) {
                 FindingsSummaryHeader(
                     summary: unfilteredSummary,
-                    filter: $filter
+                    filter: $filter,
+                    dispositionTally: dispositionStore.tally(for: recording.annotations)
                 )
                 if let firstChannel = recording.channels.first {
                     FindingDensityTimeline(
                         annotations: filteredAnnotations,
                         totalSamples: firstChannel.sampleCount,
                         sampleRate: firstChannel.sampleRate,
-                        viewport: viewport
+                        viewport: viewport,
+                        dispositionsByID: dispositionStore.records
                     )
                 }
             }

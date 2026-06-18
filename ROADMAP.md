@@ -8,6 +8,25 @@ data surface.
 
 ## Current state (updated 2026-06-18)
 
+**Analyst disposition workflow**
+- `AnnotationDisposition` + `DispositionFile` schema-versioned sidecar at
+  `<bundle>/dispositions.json`. Three logical states — `unreviewed`
+  (implicit by absence), `confirmed` (with optional VT/VF sub-kind), and
+  `dismissed`. Re-running the producer never overwrites analyst work.
+- `DispositionStore` is the `@Observable` source of truth: reads the
+  sidecar at recording load, writes on every `confirm` / `dismiss` /
+  `reset`. Mutations require the toolbar's `Editing` latch (same lock
+  semantics as notes editing).
+- `FindingsPanel` rows show inline confirm/dismiss/reset controls when
+  unlocked; row chrome reflects state (green border + ✓ for confirmed,
+  strikethrough + ✗ for dismissed). The panel header shows a compact
+  `confirmed · dismissed · unreviewed` tally.
+- `FindingsSummaryHeader` total chip carries the same tally so analyst
+  progress is visible even when the inspector is hidden.
+- `FindingDensityTimeline` lanes dim dismissed events to ~30% and
+  outline confirmed events with a green ring, so triage state is
+  scannable at the full-recording level.
+
 **Quality shading**
 - `QualityStrip` — one heat band per quality / artifact-ratio channel
   (the Medallion `ecg_artifact_ratio` is the canonical case). Each
@@ -167,7 +186,7 @@ data surface.
   the imported bundle and records its filename on the manifest so the
   context panel can read/write it.
 
-**Tests** — 126 total (122 unit + 4 UI).
+**Tests** — 135 total (131 unit + 4 UI).
 
 ## Architecture
 

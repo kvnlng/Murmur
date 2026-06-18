@@ -125,3 +125,23 @@ conduction, slate = noise). Severity drives alpha.
 
 See the [annotation schema]({{ site.baseurl }}/annotation-schema) for
 the wire format.
+
+## Reviewing and triaging findings
+
+Unlock editing from the toolbar lock icon, then each row in the findings
+panel exposes three inline buttons:
+
+- **Confirm** (✓) — opens a menu so you can record the finding as VT,
+  VF, or "confirmed (unsure)." Confirmed rows pick up a green border, a
+  ✓ marker, and an outline on their tick in the density timeline.
+- **Dismiss** (✗) — marks the finding as a false positive. Dismissed
+  rows strikethrough and dim to ~55% opacity; their density-timeline
+  tick drops to ~30% alpha.
+- **Reset** (↶) — clears the disposition back to unreviewed.
+
+Tally chips at the top of the findings panel and inside the summary
+chip row above the canvas show your progress at a glance — confirmed,
+dismissed, and unreviewed counts. Dispositions persist to
+`dispositions.json` inside the imported bundle, so re-running the
+upstream producer (which regenerates `<recordName>.annotations.json`)
+never overwrites your work.

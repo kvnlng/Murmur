@@ -192,7 +192,56 @@ enum SyntheticRecording {
         let heaText = heaLines.joined(separator: "\n") + "\n"
         let heaURL = directory.appendingPathComponent("\(recordName).hea")
         try heaText.write(to: heaURL, atomically: true, encoding: .utf8)
+
+        try writeAnnotationsSidecar(recordName: recordName, into: directory)
+
         return heaURL
+    }
+
+    /// Writes a small synthetic `<recordName>.annotations.json` next to the
+    /// header so the welcome demo / `--ui-test-sample` flag has visible VT
+    /// and VF findings to exercise the disposition workflow against.
+    private static func writeAnnotationsSidecar(recordName: String, into directory: URL) throws {
+        let json = """
+        {
+          "schemaVersion": 1,
+          "source": "synth.se-reslstm.v1",
+          "findings": [
+            {
+              "kind": "range",
+              "startSample": 500,
+              "endSample": 750,
+              "category": "VT",
+              "label": "VT",
+              "confidence": 0.91,
+              "severity": "warning",
+              "note": "Sustained ventricular tachycardia, ~120 BPM"
+            },
+            {
+              "kind": "point",
+              "startSample": 1500,
+              "category": "VF",
+              "label": "VF",
+              "confidence": 0.78,
+              "severity": "critical",
+              "note": "Possible ventricular fibrillation — confirm morphology"
+            },
+            {
+              "kind": "range",
+              "startSample": 1900,
+              "endSample": 2100,
+              "category": "VT",
+              "label": "VT",
+              "confidence": 0.85,
+              "severity": "warning",
+              "note": "Short VT run"
+            }
+          ]
+        }
+
+        """
+        let url = directory.appendingPathComponent("\(recordName).annotations.json")
+        try json.write(to: url, atomically: true, encoding: .utf8)
     }
 
     // MARK: - Helpers

@@ -1954,3 +1954,138 @@ struct LowRatePartitionTests {
         #expect(p.alarms.isEmpty)
     }
 }
+
+// MARK: - Disposition store
+
+@Suite("Disposition store")
+struct DispositionStoreTests {
+
+    private static func makeBundle() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DispositionStoreTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private func annotation(_ category: String = "VT", severity: Annotation.Severity = .warning) -> Annotation {
+        Annotation(kind: .point, sampleIndex: 0, category: category, severity: severity, source: "test")
+    }
+
+    @Test("Fresh store starts empty")
+    func startsEmpty() throws {
+        let dir = try Self.makeBundle()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = DispositionStore(bundleDirectory: dir, defaultReviewerName: "tester")
+        #expect(store.records.isEmpty)
+        #expect(store.state(for: UUID()) == nil)
+    }
+
+    @Test("Confirm records a confirmed disposition with the chosen kind")
+    func confirmRecords() throws {
+        let dir = try Self.makeBundle()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = DispositionStore(bundleDirectory: dir, defaultReviewerName: "tester")
+        let ann = annotation()
+        store.confirm(ann.id, kind: .vt)
+        let record = try #require(store.record(for: ann.id))
+        #expect(record.state == .confirmed)
+        #expect(record.confirmedKind == .vt)
+        #expect(record.reviewedBy == "tester")
+    }
+
+    @Test("Dismiss records a dismissed disposition")
+    func dismissRecords() throws {
+        let dir = try Self.makeBundle()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = DispositionStore(bundleDirectory: dir, defaultReviewerName: "tester")
+        let ann = annotation()
+        store.dismiss(ann.id, note: "obvious noise")
+        let record = try #require(store.record(for: ann.id))
+        #expect(record.state == .dismissed)
+        #expect(record.confirmedKind == nil)
+        #expect(record.note == "obvious noise")
+    }
+
+    @Test("Reset returns an annotation to unreviewed")
+    func resetReturnsToUnreviewed() throws {
+        let dir = try Self.makeBundle()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = DispositionStore(bundleDirectory: dir, defaultReviewerName: "tester")
+        let ann = annotation()
+        store.confirm(ann.id, kind: .vf)
+        store.reset(ann.id)
+        #expect(store.record(for: ann.id) == nil)
+    }
+
+    @Test("Confirm overwrites a prior dismiss")
+    func confirmOverwritesDismiss() throws {
+        let dir = try Self.makeBundle()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = DispositionStore(bundleDirectory: dir, defaultReviewerName: "tester")
+        let ann = annotation()
+        store.dismiss(ann.id)
+        store.confirm(ann.id, kind: nil)
+        let record = try #require(store.record(for: ann.id))
+        #expect(record.state == .confirmed)
+        #expect(record.confirmedKind == nil)
+    }
+
+    @Test("Records persist to the sidecar and reload on a fresh store")
+    func persistsAcrossReload() throws {
+        let dir = try Self.makeBundle()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = DispositionStore(bundleDirectory: dir, defaultReviewerName: "tester")
+        let ann = annotation()
+        store.confirm(ann.id, kind: .vt, note: "sustained")
+
+        let reloaded = DispositionStore(bundleDirectory: dir, defaultReviewerName: "tester")
+        let record = try #require(reloaded.record(for: ann.id))
+        #expect(record.state == .confirmed)
+        #expect(record.confirmedKind == .vt)
+        #expect(record.note == "sustained")
+    }
+
+    @Test("Tally returns confirmed / dismissed / unreviewed counts across an annotation list")
+    func tallyCounts() throws {
+        let dir = try Self.makeBundle()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = DispositionStore(bundleDirectory: dir, defaultReviewerName: "tester")
+        let a = annotation()
+        let b = annotation()
+        let c = annotation()
+        let d = annotation()
+        store.confirm(a.id, kind: .vt)
+        store.confirm(b.id, kind: nil)
+        store.dismiss(c.id)
+        // d remains unreviewed
+        let tally = store.tally(for: [a, b, c, d])
+        #expect(tally.confirmed == 2)
+        #expect(tally.dismissed == 1)
+        #expect(tally.unreviewed == 1)
+        #expect(tally.total == 4)
+    }
+
+    @Test("Clear wipes every record and survives a reload")
+    func clearWipesAll() throws {
+        let dir = try Self.makeBundle()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = DispositionStore(bundleDirectory: dir, defaultReviewerName: "tester")
+        let ann = annotation()
+        store.confirm(ann.id, kind: .vt)
+        store.clear()
+        #expect(store.records.isEmpty)
+        let reloaded = DispositionStore(bundleDirectory: dir, defaultReviewerName: "tester")
+        #expect(reloaded.records.isEmpty)
+    }
+
+    @Test("Empty / whitespace-only note is normalized to nil")
+    func emptyNoteBecomesNil() throws {
+        let dir = try Self.makeBundle()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = DispositionStore(bundleDirectory: dir, defaultReviewerName: "tester")
+        let ann = annotation()
+        store.dismiss(ann.id, note: "   ")
+        let record = try #require(store.record(for: ann.id))
+        #expect(record.note == nil)
+    }
+}

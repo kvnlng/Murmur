@@ -43,6 +43,13 @@ struct FindingsPanel: View {
     let viewport: RecordingViewport
     let sampleRate: Double
     @Binding var filter: FindingFilter
+    /// Source of truth for analyst review state. Passed in so the bedside
+    /// view owns its lifetime and the same store feeds the canvas overlays
+    /// and the density timeline alongside the panel.
+    let dispositionStore: DispositionStore
+    /// Read/write latch from the toolbar — disposition buttons only appear
+    /// when editing is unlocked.
+    let isEditing: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -54,6 +61,10 @@ struct FindingsPanel: View {
         }
     }
 
+    private var tally: DispositionStore.Tally {
+        dispositionStore.tally(for: annotations)
+    }
+
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Findings")
@@ -61,10 +72,34 @@ struct FindingsPanel: View {
             Text("\(filtered.count) of \(annotations.count)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            // Compact disposition tally so the analyst sees triage progress
+            // without opening the panel rows.
+            HStack(spacing: 8) {
+                tallyChip(count: tally.confirmed, label: "confirmed",
+                          systemImage: "checkmark.circle.fill",
+                          color: .green)
+                tallyChip(count: tally.dismissed, label: "dismissed",
+                          systemImage: "xmark.circle.fill",
+                          color: .secondary)
+                tallyChip(count: tally.unreviewed, label: "unreviewed",
+                          systemImage: "questionmark.circle",
+                          color: .orange)
+            }
+            .padding(.top, 2)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func tallyChip(count: Int, label: String, systemImage: String, color: Color) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: systemImage)
+                .foregroundStyle(color)
+            Text("\(count)")
+                .font(.caption2.monospacedDigit().weight(.semibold))
+        }
+        .accessibilityLabel("\(count) \(label)")
     }
 
     private var filtered: [Annotation] {
@@ -89,7 +124,12 @@ struct FindingsPanel: View {
                         FindingRow(
                             annotation: ann,
                             sampleRate: sampleRate,
-                            onJump: { jump(to: ann) }
+                            disposition: dispositionStore.record(for: ann.id),
+                            isEditing: isEditing,
+                            onJump: { jump(to: ann) },
+                            onConfirm: { kind in dispositionStore.confirm(ann.id, kind: kind) },
+                            onDismiss: { dispositionStore.dismiss(ann.id) },
+                            onReset: { dispositionStore.reset(ann.id) }
                         )
                         Divider()
                     }
@@ -223,47 +263,148 @@ private struct FilterChip: View {
 private struct FindingRow: View {
     let annotation: Annotation
     let sampleRate: Double
+    let disposition: AnnotationDisposition?
+    let isEditing: Bool
     let onJump: () -> Void
+    let onConfirm: (AnnotationDisposition.ConfirmedKind?) -> Void
+    let onDismiss: () -> Void
+    let onReset: () -> Void
 
     var body: some View {
-        Button(action: onJump) {
-            HStack(alignment: .top, spacing: 8) {
-                kindIndicator
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(annotation.displayLabel)
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(CategoryPalette.swiftUIColor(for: annotation.category))
-                        Spacer()
-                        Text(timeLabel)
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                    }
-                    HStack(spacing: 6) {
-                        SeverityBadge(severity: annotation.severity)
-                        if let conf = annotation.confidence {
-                            Text("\(Int(conf * 100))%")
-                                .font(.caption2.monospacedDigit())
+        HStack(alignment: .top, spacing: 8) {
+            Button(action: onJump) {
+                HStack(alignment: .top, spacing: 8) {
+                    kindIndicator
+                    VStack(alignment: .leading, spacing: 3) {
+                        titleRow
+                        metadataRow
+                        if let note = annotation.note, !note.isEmpty {
+                            Text(note)
+                                .font(.caption)
                                 .foregroundStyle(.secondary)
+                                .lineLimit(2)
                         }
-                        Text(annotation.source)
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                    }
-                    if let note = annotation.note, !note.isEmpty {
-                        Text(note)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
                     }
                 }
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if isEditing {
+                dispositionTrio
+            }
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(rowBackground)
+        .opacity(disposition?.state == .dismissed ? 0.55 : 1.0)
+    }
+
+    private var titleRow: some View {
+        HStack(alignment: .firstTextBaseline) {
+            stateMarker
+            Text(annotation.displayLabel)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(CategoryPalette.swiftUIColor(for: annotation.category))
+                .strikethrough(disposition?.state == .dismissed)
+            if case .confirmed = disposition?.state, let kind = disposition?.confirmedKind {
+                Text(kind.shortLabel)
+                    .font(.caption2.weight(.bold).monospaced())
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(Color.green.opacity(0.18)))
+                    .foregroundStyle(.green)
+            }
+            Spacer()
+            Text(timeLabel)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var metadataRow: some View {
+        HStack(spacing: 6) {
+            SeverityBadge(severity: annotation.severity)
+            if let conf = annotation.confidence {
+                Text("\(Int(conf * 100))%")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            Text(annotation.source)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+        }
+    }
+
+    /// Small leading marker reflecting the disposition state — visible in
+    /// both editing and locked modes so the analyst's prior decisions are
+    /// readable at a glance.
+    @ViewBuilder
+    private var stateMarker: some View {
+        switch disposition?.state {
+        case .confirmed:
+            Image(systemName: "checkmark.seal.fill")
+                .foregroundStyle(.green)
+                .font(.caption)
+        case .dismissed:
+            Image(systemName: "xmark.seal.fill")
+                .foregroundStyle(.secondary)
+                .font(.caption)
+        case nil:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private var rowBackground: some View {
+        switch disposition?.state {
+        case .confirmed:
+            Color.green.opacity(0.07)
+        case .dismissed:
+            Color.secondary.opacity(0.05)
+        case nil:
+            Color.clear
+        }
+    }
+
+    private var dispositionTrio: some View {
+        HStack(spacing: 4) {
+            // Confirm: a menu lets the analyst pick VT/VF or "unsure."
+            Menu {
+                Button("Confirm as VT") { onConfirm(.vt) }
+                Button("Confirm as VF") { onConfirm(.vf) }
+                Button("Confirm (unsure)") { onConfirm(nil) }
+            } label: {
+                Image(systemName: "checkmark.circle")
+                    .foregroundStyle(.green)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .help("Confirm this finding")
+            .accessibilityIdentifier("disposition-confirm-\(annotation.id.uuidString)")
+
+            Button(action: onDismiss) {
+                Image(systemName: "xmark.circle")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Dismiss this finding as a false positive")
+            .accessibilityIdentifier("disposition-dismiss-\(annotation.id.uuidString)")
+
+            if disposition != nil {
+                Button(action: onReset) {
+                    Image(systemName: "arrow.uturn.backward.circle")
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Mark as unreviewed")
+                .accessibilityIdentifier("disposition-reset-\(annotation.id.uuidString)")
+            }
+        }
+        .font(.title3)
+        .imageScale(.large)
     }
 
     private var timeLabel: String {
