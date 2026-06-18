@@ -1724,22 +1724,25 @@ struct WFDBMultiFileImporterTests {
         let heaURL = try SyntheticRecording.makeMultiFrequencyRecord(into: srcDir)
         let summary = try WFDBImporter.importRecord(heaURL: heaURL, outputDirectory: outDir)
 
-        // 8 ECG signals + 5 low-rate signals (HR, SpO₂, alarm,
-        // P(spontaneous), P(assist-control)) = 13 total.
-        #expect(summary.recording.channels.count == 13)
+        // 8 ECG signals + 6 low-rate signals (HR, SpO₂, alarm,
+        // P(spontaneous), P(assist-control), ecg_artifact_ratio) = 14 total.
+        #expect(summary.recording.channels.count == 14)
 
         let ecg = summary.recording.channels.first { $0.name == "II" }
         let hr  = summary.recording.channels.first { $0.name == "HR_bpm" }
         let spo2 = summary.recording.channels.first { $0.name == "SpO2_pct" }
         let alarm = summary.recording.channels.first { $0.name == "had_high_priority_alarm" }
         let probSpontaneous = summary.recording.channels.first { $0.name == "prob_state_spontaneous" }
+        let quality = summary.recording.channels.first { $0.name == "ecg_artifact_ratio" }
         try #require(ecg != nil)
         try #require(hr != nil)
         try #require(spo2 != nil)
         try #require(alarm != nil)
         try #require(probSpontaneous != nil)
+        try #require(quality != nil)
         #expect(alarm!.isTrendChannel)
         #expect(probSpontaneous!.isTrendChannel)
+        #expect(quality!.isTrendChannel)
 
         #expect(ecg!.sampleRate == 250.0)
         #expect(ecg!.sampleCount == 2_500)
@@ -1937,5 +1940,17 @@ struct LowRatePartitionTests {
         #expect(p.alarms.map(\.name) == ["had_high_priority_alarm", "nebulizer_status"])
         #expect(p.spontaneous?.name == "prob_state_spontaneous")
         #expect(p.assistControl == nil)
+    }
+
+    @Test("`_ratio` suffix or `artifact_ratio` substring routes to `quality`")
+    func qualityRatioDetection() {
+        let p = LowRatePartition(channels: [
+            channel("ecg_artifact_ratio"),
+            channel("ppg_quality_ratio"),
+            channel("HR_bpm")
+        ])
+        #expect(p.quality.map(\.name) == ["ecg_artifact_ratio", "ppg_quality_ratio"])
+        #expect(p.trends.map(\.name) == ["HR_bpm"])
+        #expect(p.alarms.isEmpty)
     }
 }

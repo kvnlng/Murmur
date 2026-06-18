@@ -79,6 +79,11 @@ below the ECG canvas, time-locked to the same viewport:
   `prob_state_assist_control` are present, a one-row colored band shows
   the dominant ventilation state per minute (warm = spontaneous breath,
   cool = assist-control), with opacity tied to certainty.
+- **Quality strip.** Channels whose name ends in `_ratio` or contains
+  `artifact_ratio` (the Medallion `ecg_artifact_ratio` is the canonical
+  case) render as a gray heat band — opacity proportional to the ratio,
+  with an orange outline on cells past the 0.1 threshold so problematic
+  minutes are scannable at a glance.
 
 WFDB multi-frequency records (per-signal `.dat` files with `format[xspf]`
 suffixes on each signal line) feed straight in via the existing folder

@@ -104,9 +104,9 @@ enum SyntheticRecording {
         let ecgGain: Double = 200.0
         let baseline = 0
 
-        // 8 ECG signals + 5 low-rate signals (HR, SpO₂, alarm flag,
-        // P(spontaneous), P(assist-control)) = 13 total.
-        let lowRateSignalCount = 5
+        // 8 ECG signals + 6 low-rate signals (HR, SpO₂, alarm flag,
+        // P(spontaneous), P(assist-control), ecg_artifact_ratio) = 14 total.
+        let lowRateSignalCount = 6
         var heaLines: [String] = [
             "\(recordName) \(ecgLabels.count + lowRateSignalCount) \(Int(baseFrameRate)) \(frameCount)"
         ]
@@ -157,6 +157,17 @@ enum SyntheticRecording {
             },
             LowRateSignalSpec(label: "prob_state_assist_control", unit: "p", gain: 100) {
                 100 - (50 + Int(round(40 * sin(Double($0) * .pi / 4))))
+            },
+            // Quality / artifact ratio — mostly clean (0.02 baseline)
+            // with two visibly noisy minutes at frames 5 and 8 so the
+            // heatmap gradient and the threshold outline are both
+            // exercised by the demo fixture.
+            LowRateSignalSpec(label: "ecg_artifact_ratio", unit: "ratio", gain: 100) {
+                switch $0 {
+                case 5: return 60     // 0.60 — well over the 0.10 threshold
+                case 8: return 85     // 0.85 — heavily artifacted
+                default: return 2     // 0.02 baseline
+                }
             }
         ]
 

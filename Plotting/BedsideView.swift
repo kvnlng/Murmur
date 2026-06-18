@@ -64,6 +64,9 @@ struct BedsideView: View {
     /// Boolean-valued alarm / status channels rendered in `AlarmStrip`.
     private var alarmChannels: [Channel] { lowRatePartition.alarms }
 
+    /// Continuous quality / artifact-ratio channels rendered in `QualityStrip`.
+    private var qualityChannels: [Channel] { lowRatePartition.quality }
+
     /// The matched `prob_state_*` channel pair for `StateBackdropStrip`.
     /// Either side may be nil — the strip still renders with whatever's
     /// present and falls silent only if both are missing.
@@ -160,6 +163,7 @@ struct BedsideView: View {
                     trendStrip
                     alarmStrip
                     stateStrip
+                    qualityStrip
                 }
                 .padding(16)
             } else {
@@ -186,6 +190,7 @@ struct BedsideView: View {
                     trendStrip
                     alarmStrip
                     stateStrip
+                    qualityStrip
                 }
                 .padding(16)
             }
@@ -230,6 +235,21 @@ struct BedsideView: View {
             StateBackdropStrip(
                 spontaneousChannel: spontaneous,
                 assistControlChannel: assist,
+                recordingDirectory: recordingDirectory,
+                totalSamplesPrimary: primary.sampleCount,
+                primarySampleRate: primary.sampleRate,
+                viewport: viewport
+            )
+        }
+    }
+
+    /// Heat-band strip for `ecg_artifact_ratio` and other 0-to-1 quality
+    /// metrics. Hidden when the recording carries none.
+    @ViewBuilder
+    private var qualityStrip: some View {
+        if !qualityChannels.isEmpty, let primary = ecgChannels.first {
+            QualityStrip(
+                channels: qualityChannels,
                 recordingDirectory: recordingDirectory,
                 totalSamplesPrimary: primary.sampleCount,
                 primarySampleRate: primary.sampleRate,
@@ -867,12 +887,14 @@ private struct CanvasSizeKey: PreferenceKey {
 struct LowRatePartition {
     let trends: [Channel]
     let alarms: [Channel]
+    let quality: [Channel]
     let spontaneous: Channel?
     let assistControl: Channel?
 
     init(channels: [Channel]) {
         var trends: [Channel] = []
         var alarms: [Channel] = []
+        var quality: [Channel] = []
         var spontaneous: Channel? = nil
         var assist: Channel? = nil
 
@@ -884,6 +906,8 @@ struct LowRatePartition {
                 assist = channel
             } else if Self.looksLikeAlarmFlag(name) {
                 alarms.append(channel)
+            } else if Self.looksLikeQualityRatio(name) {
+                quality.append(channel)
             } else {
                 trends.append(channel)
             }
@@ -891,6 +915,7 @@ struct LowRatePartition {
 
         self.trends = trends
         self.alarms = alarms
+        self.quality = quality
         self.spontaneous = spontaneous
         self.assistControl = assist
     }
@@ -902,5 +927,13 @@ struct LowRatePartition {
         return lower.hasSuffix("_alarm")
             || lower.hasSuffix("_status")
             || lower.hasSuffix("_silenced")
+    }
+
+    /// Quality / artifact-ratio channels — anything ending in `_ratio`
+    /// or whose name contains `artifact_ratio`. The Medallion paper's
+    /// canonical example is `ecg_artifact_ratio`.
+    private static func looksLikeQualityRatio(_ name: String) -> Bool {
+        let lower = name.lowercased()
+        return lower.hasSuffix("_ratio") || lower.contains("artifact_ratio")
     }
 }

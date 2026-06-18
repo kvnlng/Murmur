@@ -8,6 +8,16 @@ data surface.
 
 ## Current state (updated 2026-06-18)
 
+**Quality shading**
+- `QualityStrip` — one heat band per quality / artifact-ratio channel
+  (the Medallion `ecg_artifact_ratio` is the canonical case). Each
+  1-min cell renders as gray with opacity proportional to the ratio;
+  cells over the configurable threshold (default 0.1, per Medallion's
+  suggested floor) gain a thin orange outline for quick scan.
+- Routed via `LowRatePartition` by name pattern (`_ratio` suffix or
+  `artifact_ratio` substring), so future quality channels (PPG, etc.)
+  surface without code changes.
+
 **Alarm & ventilation state strips**
 - `BooleanChannelScanner` — pure utility that turns a boolean-ish trend
   channel (alarm flag, status indicator) into `[ClosedRange<Int64>]`
@@ -157,7 +167,7 @@ data surface.
   the imported bundle and records its filename on the manifest so the
   context panel can read/write it.
 
-**Tests** — 125 total (121 unit + 4 UI).
+**Tests** — 126 total (122 unit + 4 UI).
 
 ## Architecture
 
