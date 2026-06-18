@@ -17,13 +17,18 @@ every finding to a sample index at import time.
 some-record-folder/
 ├─ 100.hea
 ├─ 100.dat
-├─ 100.annotations.json   ← this file
+├─ 100.annotations.json   ← producer findings (this file)
+├─ 100.notes.md           ← optional analyst-editable Markdown notes
 └─ 100.atr                ← optional legacy WFDB beat marks
 ```
 
 Both an `.atr` and a JSON file can coexist for the same record. Their
 annotations are concatenated; the JSON ones are tagged with the
 producer-supplied `source`, the `.atr` ones get `source = "wfdb.atr"`.
+
+A separate **disposition sidecar** lives inside the imported bundle
+(not in the producer's folder) — see [Analyst dispositions](#analyst-dispositions)
+below.
 
 ## Format
 
@@ -135,3 +140,57 @@ xcodebuild test -project Plotting.xcodeproj -scheme Plotting \
 The `AnnotationLoaderTests` suite covers schema round-trip with both
 timestamp forms, sample-index precedence, missing-timestamp errors, and
 unsupported schema versions.
+
+## Analyst dispositions
+
+Analyst review state (confirm / dismiss / reset) is stored *inside the
+imported bundle*, not in the producer's source folder, so re-running
+the producer never overwrites the analyst's work. The file is
+`<bundle>/dispositions.json`.
+
+### Format
+
+```json
+{
+  "schemaVersion": 1,
+  "dispositions": [
+    {
+      "annotationID": "B8A4E2C8-…",
+      "state": "confirmed",
+      "confirmedKind": "vt",
+      "note": "Sustained run, ~160 BPM",
+      "reviewedAt": "2026-06-18T17:21:33Z",
+      "reviewedBy": "kevin"
+    },
+    {
+      "annotationID": "1D7F4A9C-…",
+      "state": "dismissed",
+      "note": "Clear motion artifact, not VF",
+      "reviewedAt": "2026-06-18T17:22:01Z",
+      "reviewedBy": "kevin"
+    }
+  ]
+}
+```
+
+### Fields
+
+| Field | Required | Type | Meaning |
+|---|---|---|---|
+| `annotationID` | yes | uuid string | Must match the corresponding `Annotation.id` from the producer file. |
+| `state` | yes | `"confirmed"` \| `"dismissed"` | Three-way conceptually — *unreviewed* is the absence of a record. |
+| `confirmedKind` | no | `"vt"` \| `"vf"` \| `"unclassified"` | Only meaningful when `state == "confirmed"`. `null` is acceptable when the analyst can't tell. |
+| `note` | no | string | Free-form analyst-readable text. Empty / whitespace-only notes get normalized to `null`. |
+| `reviewedAt` | yes | ISO-8601 string | Wall-clock time when the disposition was last changed. |
+| `reviewedBy` | no | string | Default = macOS user name. Free-form. |
+
+### Lifecycle
+
+- Reading: the viewer loads the sidecar at recording open and uses
+  absence-of-record to mean "unreviewed."
+- Writing: every mutation rewrites the whole file (it's small).
+- Stale records (`annotationID` no longer in the producer file) survive
+  intact — useful if a producer drops and reintroduces a finding.
+
+The `DispositionStoreTests` suite covers round-trip persistence,
+state transitions, tally counts, and whitespace-note normalization.

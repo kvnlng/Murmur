@@ -19,11 +19,13 @@ calls:
 | Range annotations | 4 × (#categories with ranges) | per-category draw call |
 | Grid minor | 2 × #minor gridlines (bounded ~few hundred) | one draw |
 | Grid major | 2 × #major gridlines (bounded ~few hundred) | one draw |
-| Trace OR envelope | viewport-range samples OR 4 × #bins | one draw |
+| Grid landmark | 2 × #landmark gridlines (bounded ~tens) | one draw |
+| Trace OR envelope | 2 × viewport-range samples (triangle-strip ribbon) OR 4 × #bins | one draw |
 | Point annotations | 2 × #points × (#categories) | per-category draw call |
 
-Total draw calls: typically 6-12. Total vertices: bounded under 10k for
-the trace at any zoom because of the LOD selector.
+Total draw calls: typically 6-13. Total vertices: bounded under 20k for
+the trace at any zoom (LOD selector keeps the per-pixel sample count
+under one, and the triangle strip doubles to two vertices per sample).
 
 ## LOD selector
 
@@ -45,17 +47,21 @@ density is constant.
 
 The whole channel's Float32 samples go into one `MTLBuffer` once at
 channel load. The trace vertex shader uses `vertex_id` as the implicit
-sample index, so the shader fetches `samples[vid]` directly without any
-attribute decoding:
+sample index — each sample produces two vertices (above + below the
+centerline) so the shader fetches `samples[vid / 2]` directly without
+any attribute decoding:
 
 ```metal
 vertex VertexOut traceVertex(uint vid [[vertex_id]],
                               constant float* samples [[buffer(0)]],
-                              constant Uniforms& u [[buffer(1)]]) { … }
+                              constant TraceUniforms& u [[buffer(1)]]) { … }
 ```
 
-Pan/zoom updates the 16-byte `Uniforms` block via `setVertexBytes` per
-frame. No vertex buffer ever moves at interactive rates.
+The shader extrudes each sample perpendicular to the local segment
+direction in screen-pixel space, giving the trace a constant
+on-screen width at any zoom — without ever moving a vertex buffer.
+Pan/zoom updates the 32-byte `TraceUniforms` block via
+`setVertexBytes` per frame.
 
 ## Pyramid memory
 
