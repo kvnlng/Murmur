@@ -8,6 +8,12 @@ data surface.
 
 ## Current state (updated 2026-06-18)
 
+**Project rename (2026-06-18)** — `Plotting` → `Murmur` across Xcode
+project, sources, docs, and GitHub repo. First-launch migration in
+`RecentFoldersStore` and `RecordingStore` carries the legacy
+UserDefaults key and Application Support recordings subtree forward
+so existing analyst data stays intact.
+
 **Analyst disposition workflow**
 - `AnnotationDisposition` + `DispositionFile` schema-versioned sidecar at
   `<bundle>/dispositions.json`. Three logical states — `unreviewed`
