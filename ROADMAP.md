@@ -242,3 +242,147 @@ Three layers as agreed; all three now built:
 - [ ] Export imported recordings to a portable bundle
 - [ ] HDR/wide-color-gamut Metal canvas
 - [ ] Two-finger trackpad swipe → pan via an NSScrollView bridge
+
+## Paid features roadmap (In-App Purchases)
+
+Two planned IAPs that turn Murmur Studio from a free analyst review tool
+into a research-oriented platform. The base review experience stays free
+and unchanged — these layer additional compute on top, gated by
+entitlements. Both will be added in *future* versions; nothing here
+applies to the v1.0 build currently in App Store review.
+
+### Strategic framing
+
+- **Silver Layer Metrics IAP** — calculates the Cardiopulmonary Telemetry
+  Silver-Layer metrics from the user's paper *"Modular Feature
+  Architecture for Mechanical Ventilation and Cardiopulmonary
+  Telemetry."* Pure Swift port (Accelerate / vDSP where it helps).
+  Deterministic, reviewable, no regulatory exposure — surfaces
+  engineered features, not diagnoses. Lower technical risk; ship first
+  to validate StoreKit wiring and willingness-to-pay.
+- **VT/VF Detection IAP** — runs the SE-ResLSTM model from the user's
+  paper *"Automated Detection of Malignant Ventricular Arrhythmias in
+  Noisy ICU Telemetry using SE-ResLSTM,"* converted PyTorch → Core ML.
+  Continuously improved off-app (not from customer data) and delivered
+  to paid users via remote model updates. **All UI must frame this as
+  research-use-only — no language implying clinical decision support.**
+- **Pricing direction** (open):
+  - Silver Metrics → non-consumable one-time purchase.
+  - VT Detection → annual auto-renewing subscription, because users are
+    paying for the *ongoing* model improvement pipeline, not a frozen
+    artifact. Alternative: lifetime non-consumable at a higher price
+    point for buyers who want it.
+
+### Layering
+
+Three independent layers, each owning one concern:
+
+```
+Feature surfaces (SwiftUI views)
+  ↓ asks "can the user use this?" then "give me an answer"
+Compute Services (SilverMetricsService, VTDetectionService)
+  ↓ consults                       ↓ loads
+PurchaseStore (StoreKit 2)     ModelRegistry (VT only)
+                                   ↓ talks to
+                                Server: signed manifest + .mlpackage CDN
+```
+
+Feature surfaces never call StoreKit, network, or Core ML directly —
+they go through Compute Services, which gates on `PurchaseStore` and
+loads weights from `ModelRegistry`.
+
+### Phase 1 — StoreKit foundation + Silver Metrics IAP
+
+- [ ] `PurchaseStore` — `@MainActor @Observable` actor. Loads
+      `Product.products(for:)` on launch, listens forever to
+      `Transaction.updates`, exposes `owns(_:) -> Bool`, `purchase(_:)`,
+      and `restore()`. Refuses unverified transactions.
+- [ ] Two product IDs registered in App Store Connect:
+      `com.kevinlong.murmur.silvermetrics` (non-consumable) and
+      `com.kevinlong.murmur.vtdetection` (subscription or non-consumable,
+      TBD).
+- [ ] Restore Purchases UI surface (Apple-mandated).
+- [ ] Silver Layer pipeline ported to Swift (`SilverMetricsService`),
+      output schema versioned independently of the implementation.
+- [ ] `SilverMetricsPanel` view, gated; locked variant sells the feature
+      with bullet list + price + Buy / Restore actions.
+- [ ] StoreKit testing — local `.storekit` config file for offline
+      development; App Store sandbox tester accounts for end-to-end
+      verification before submission.
+
+### Phase 2 — VT Detection with bundled model
+
+- [ ] PyTorch → Core ML conversion of SE-ResLSTM via `coremltools`.
+      Verify LSTM ops convert cleanly; document any custom layers.
+- [ ] `VTDetectionService` — sliding-window inference over a `Channel`,
+      output aligned to recording time. Same gate pattern as Silver.
+- [ ] Findings produced by the model surface in the existing
+      `FindingsPanel` with `source = "murmur.vtdetect"` so the analyst
+      disposition workflow (confirm / dismiss / reset) applies
+      uniformly.
+- [ ] Research-use-only disclaimer in:
+      - the IAP product description on App Store Connect
+      - the locked feature card
+      - a first-run modal the very first time a user invokes inference
+      - the findings rows themselves (small "RUO" badge)
+- [ ] Bundled baseline `.mlpackage` for the v2.x app — first launch
+      works offline before any remote update.
+- [ ] Stable I/O schema captured in `docs/vtdetect-schema.md`: input
+      sample rate, window length, channels, normalization; output
+      logits, calibrated confidence, time alignment. Bumped only on
+      breaking changes (treated like database migrations).
+
+### Phase 3 — Remote model updates
+
+- [ ] `ModelRegistry` — `@Observable` actor. On launch and once per day:
+      fetch a signed `manifest.json`; if a newer compatible version
+      exists and the user holds the VT entitlement, download the
+      `.mlpackage` to a temp location, verify sha256 + Ed25519
+      signature, compile via `MLModel.compileModel(at:)`, atomically
+      move into Application Support, hot-swap on next inference call.
+- [ ] Storage layout under
+      `~/Library/Application Support/MurmurStudio/Models/vt/`:
+      keep N=2 previous versions for rollback; `current` symlink points
+      to the active one.
+- [ ] Manifest schema: `{ version, url, sha256, signature,
+      schema_version, min_app_version, released_at, notes }`. Signature
+      verified against a long-lived Ed25519 public key baked into the
+      binary.
+- [ ] Fallback chain on any failure (network, signature, compile):
+      silently fall back to the previous downloaded model, then to the
+      bundled baseline. Never block inference.
+- [ ] Entitlements diff: add `com.apple.security.network.client = YES`
+      to the sandbox (minor expansion). Application Support write
+      access is already available within the sandbox container.
+- [ ] Server side: pick CDN host (Cloudflare R2 leaning), publish
+      signed manifest, document the release process so model bumps
+      don't require app submissions.
+- [ ] App Store guideline alignment: 3.2.2 / 2.5.2 — Core ML weights
+      are data, not executable code; we are updating an existing
+      approved capability, not adding new functionality after review.
+
+### Cross-cutting concerns
+
+- **Subscription mechanics (if VT goes subscription):** grace period
+  handling, introductory pricing, subscription group config in App
+  Store Connect, "Manage Subscription" deep-link in settings, refund
+  webhooks (optional — local verification is sufficient for v1).
+- **Family Sharing toggle** per product in App Store Connect — usually
+  on for non-consumables, off for subscriptions in research tools.
+- **Receipt persistence:** StoreKit 2 handles this transparently; do
+  not roll our own.
+- **Analytics:** stay off-device. Customer-side telemetry is
+  explicitly out of scope — it would void the privacy-policy claim of
+  "no data collection."
+- **Schema migrations:** Silver Metrics output and VT Detection
+  output each get their own `schema_version`. Old findings re-loaded
+  against new app versions must still render.
+
+### Sequencing rationale
+
+Phases are ordered to stagger App Store re-review risk. Phase 1 adds
+a paywall to a known feature class. Phase 2 adds an ML capability —
+Apple's medical-app reviewers will scrutinize wording here; framing
+must be locked in before submission. Phase 3 is invisible to Apple
+once Phase 2 is approved — it just upgrades weights of an existing
+capability without changing app behavior at review time.
