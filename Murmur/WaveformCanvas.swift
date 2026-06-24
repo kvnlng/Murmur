@@ -148,16 +148,25 @@ struct WaveformTimeAxis: View {
     let startTime: Double           // seconds
     let endTime: Double             // seconds
 
+    /// Minimum pixel gap between rendered tick labels. ~6 chars at caption2
+    /// monospaced is ~42 pt; pad to 56 so the gap reads clean at every zoom.
+    private static let minLabelSpacingPx: CGFloat = 56
+
     var body: some View {
         GeometryReader { geo in
-            let spec = ECGGridSpec.forDuration(seconds: endTime - startTime)
+            let duration = max(0.0001, endTime - startTime)
+            let spec = ECGGridSpec.forDuration(seconds: duration)
             let majors = makeGridLines(from: startTime, to: endTime, every: spec.xMajor)
-            ForEach(majors, id: \.self) { t in
-                let xFrac = (t - startTime) / max(0.0001, endTime - startTime)
-                Text(format(seconds: t))
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .position(x: CGFloat(xFrac) * geo.size.width, y: geo.size.height - 8)
+            let pxPerMajor = geo.size.width * CGFloat(spec.xMajor / duration)
+            let stride = max(1, Int(ceil(Self.minLabelSpacingPx / max(0.0001, pxPerMajor))))
+            ForEach(Array(majors.enumerated()), id: \.offset) { index, t in
+                if index.isMultiple(of: stride) {
+                    let xFrac = (t - startTime) / duration
+                    Text(format(seconds: t))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .position(x: CGFloat(xFrac) * geo.size.width, y: geo.size.height - 8)
+                }
             }
         }
         .frame(height: 16)

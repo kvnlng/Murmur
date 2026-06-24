@@ -116,12 +116,13 @@ private struct TrendRow: View {
     let viewportStartSec: Double
     let viewportEndSec: Double
 
-    private static let rowHeight: CGFloat = 38
-    private static let labelWidth: CGFloat = 100
+    private static let rowHeight: CGFloat = 44
+    private static let labelWidth: CGFloat = 140
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 16) {
             label
+            Divider()
             sparkline
         }
         .frame(height: Self.rowHeight)
@@ -181,6 +182,7 @@ private struct TrendRow: View {
                 RoundedRectangle(cornerRadius: 4)
                     .fill(Color.secondary.opacity(0.06))
             )
+            .clipShape(RoundedRectangle(cornerRadius: 4))
         }
     }
 

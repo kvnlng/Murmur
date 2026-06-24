@@ -156,29 +156,30 @@ struct BedsideView: View {
         switch layoutMode {
         case .focus:
             if let channel = focusedChannel {
-                VStack(alignment: .leading, spacing: 12) {
-                    summaryHeader
-                    findingsOverview
-                    ChannelPanel(
-                        channel: channel,
-                        directory: recordingDirectory,
-                        viewport: viewport,
-                        annotations: filteredAnnotations,
-                        sizing: .focus
-                    )
-                    // Tear down + rebuild when the focused lead changes —
-                    // WaveformCanvas's MTKView caches the previous channel's
-                    // sample buffer and the off-scale scanner is per-channel,
-                    // so reusing the same SwiftUI identity would leave the
-                    // viewer showing stale data after the chip-bar tap.
-                    .id(channel.id)
-                    .frame(maxHeight: .infinity)
-                    trendStrip
-                    alarmStrip
-                    stateStrip
-                    qualityStrip
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        summaryHeader
+                        findingsOverview
+                        ChannelPanel(
+                            channel: channel,
+                            directory: recordingDirectory,
+                            viewport: viewport,
+                            annotations: filteredAnnotations,
+                            sizing: .focus
+                        )
+                        // Tear down + rebuild when the focused lead changes —
+                        // WaveformCanvas's MTKView caches the previous channel's
+                        // sample buffer and the off-scale scanner is per-channel,
+                        // so reusing the same SwiftUI identity would leave the
+                        // viewer showing stale data after the chip-bar tap.
+                        .id(channel.id)
+                        trendStrip
+                        alarmStrip
+                        stateStrip
+                        qualityStrip
+                    }
+                    .padding(16)
                 }
-                .padding(16)
             } else {
                 ContentUnavailableView(
                     "No lead selected",
@@ -532,7 +533,7 @@ private struct ChannelPanel: View {
         var canvasMinHeight: CGFloat {
             switch self {
             case .strip: return 130
-            case .focus: return 220
+            case .focus: return 360
             }
         }
 
