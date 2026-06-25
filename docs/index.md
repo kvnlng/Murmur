@@ -17,8 +17,7 @@ Metal-backed ECG paper canvas with the cluster's findings overlaid.
 ## Get the app
 
 Install Murmur Studio from the Mac App Store:
-**[Murmur Studio on the App Store](https://www.apple.com/search/Murmur-Studio?src=globalnav)**
-<!-- TODO: replace with the canonical product URL once known -->
+**[Murmur Studio on the App Store](https://apps.apple.com/us/app/murmur-studio/id6782092325)**
 
 Requires macOS 14 (Sonoma) or later. No Xcode or developer tools needed
 — this is the documentation site for users of the app, not a build guide.

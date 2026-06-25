@@ -12,14 +12,12 @@ search_enabled: true
 heading_anchors: true
 nav_external_links:
   - title: Get on the App Store
-    # TODO: replace with the canonical product URL once known
-    # (e.g. https://apps.apple.com/app/murmur-studio/id1234567890)
-    url: https://www.apple.com/search/Murmur-Studio?src=globalnav
+    url: https://apps.apple.com/us/app/murmur-studio/id6782092325
     hide_icon: false
 
 # Aux links rendered at the top right of every page.
 aux_links:
-  App Store: "https://www.apple.com/search/Murmur-Studio?src=globalnav"
+  App Store: "https://apps.apple.com/us/app/murmur-studio/id6782092325"
 
 # Footer
 footer_content: "© 2026 Kevin Long."

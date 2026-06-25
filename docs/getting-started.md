@@ -16,8 +16,7 @@ nav_order: 2
 ## Install
 
 Murmur Studio is distributed through the Mac App Store. Install it via
-[the App Store listing](https://www.apple.com/search/Murmur-Studio?src=globalnav)
-<!-- TODO: replace with the canonical product URL once known -->
+[the App Store listing](https://apps.apple.com/us/app/murmur-studio/id6782092325)
 and launch it from Applications or Spotlight. The welcome screen offers
 four entry points.
 
