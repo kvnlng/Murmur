@@ -7,9 +7,16 @@ nav_order: 4
 # Annotation JSON schema
 
 This page describes the wire format your analysis cluster emits so
-Murmur can render its findings. The viewer reads
+Murmur Studio can render its findings. The viewer reads
 `<recordName>.annotations.json` next to the WFDB `.hea` and resolves
 every finding to a sample index at import time.
+
+**Machine-readable schema:**
+[**annotations.schema.json**]({{ site.baseurl }}/annotations.schema.json) —
+a JSON Schema (Draft 2020-12) document. Run your producer's output
+through any standard JSON Schema validator (see
+[Validating your producer output](#validating-your-producer-output)
+below).
 
 ## File location
 
@@ -130,16 +137,59 @@ Hand-tuned categories include: `N`, `L`, `R`, `V`, `PVC`, `VT`, `VF`,
 `VF_onset`, `F`, `E`, `A`, `APC`, `AFib`, `S`, `J`, `/` (paced), `Noise`,
 `NoiseGap`, `Q`, `?`, `~`.
 
-## Validation
+## Validating your producer output
 
-```sh
-xcodebuild test -project Murmur.xcodeproj -scheme Murmur \
-  -only-testing:MurmurTests/AnnotationLoaderTests
+Before shipping a file to a clinician, validate it locally against the
+published [JSON Schema]({{ site.baseurl }}/annotations.schema.json).
+This catches missing-field, wrong-type, and out-of-enum bugs in your
+analysis pipeline before they surface in the viewer.
+
+Pick whichever validator fits your stack:
+
+### Python
+
+```python
+import json, urllib.request
+import jsonschema  # pip install jsonschema
+
+schema = json.loads(urllib.request.urlopen(
+    "https://kvnlng.github.io/Murmur/annotations.schema.json"
+).read())
+
+with open("100.annotations.json") as f:
+    instance = json.load(f)
+
+jsonschema.validate(instance=instance, schema=schema)
+print("valid")
 ```
 
-The `AnnotationLoaderTests` suite covers schema round-trip with both
-timestamp forms, sample-index precedence, missing-timestamp errors, and
-unsupported schema versions.
+### Node / JavaScript
+
+```sh
+npm install -g ajv-cli
+curl -O https://kvnlng.github.io/Murmur/annotations.schema.json
+ajv validate -s annotations.schema.json -d 100.annotations.json --spec=draft2020
+```
+
+### Swift (if your producer is on Apple platforms)
+
+Inside Murmur Studio the canonical decoder is
+`AnnotationLoader.parse(data:recordingStartUnixMS:sampleRate:)` —
+behaviorally equivalent to schema validation plus timestamp
+resolution. The producer side can use any standard JSON Schema
+package (e.g. [Vapor's JSONSchema](https://github.com/vapor/vapor-extras),
+or just write a `Codable` mirror of the file shape and let
+`JSONDecoder` reject malformed input).
+
+### Common validation failures
+
+| Error | Fix |
+|---|---|
+| `'startSample' is a required property` (or `startUnixMS`) | Every finding needs at least one of `startSample` or `startUnixMS`. The schema enforces this via `anyOf`. |
+| `severity is not one of […]` | Use only `info`, `notice`, `warning`, or `critical` — case-sensitive. |
+| `confidence: should be ≤ 1` | Send a fraction, not a percentage. |
+| `schemaVersion: should be equal to 1` | Pin to `1`. The viewer rejects unknown versions. |
+| Extra fields present | The schema sets `additionalProperties: false` to catch typos. If you have legitimate analysis metadata you want to ship, put it in `note` (free-form string) for now. |
 
 ## Analyst dispositions
 
