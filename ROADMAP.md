@@ -240,16 +240,21 @@ Three layers as agreed; all three now built:
       and the producer's note.
 
 ### Canvas polish (deferred from the Metal upgrade pass)
-- [ ] MSAA 4× on the waveform canvas. Initial attempt (set
-      `MTKView.sampleCount = 4` + `rasterSampleCount = 4` on every
-      pipeline state) crashed at first open because the renderer's
-      `draw(in:)` is set up assuming single-sample
-      `currentRenderPassDescriptor`. Proper fix:
-      `view.framebufferOnly = false`, validate that MTKView's
-      multisample resolve target attaches to the drawable correctly,
-      and audit `draw(in:)` for any single-sample assumptions.
-      Reverted in commit (see below); shipping the other four canvas
-      improvements without it.
+- [x] MSAA 4× on the waveform canvas. First attempt crashed at first
+      open with the Metal validation error
+      `resolveTexture must have storeAction of .multisampleResolve`.
+      Root cause: when `MTKView.sampleCount > 1`,
+      `currentRenderPassDescriptor` comes back with a `resolveTexture`
+      pointing at the drawable and a store action of
+      `.multisampleResolve`, but the renderer's `draw(in:)` was
+      overriding `storeAction = .store` unconditionally. Fix: pick the
+      store action based on whether the descriptor has a
+      `resolveTexture` (`.multisampleResolve` if yes, `.store` if no).
+      That preserves the non-MSAA path and unlocks MSAA in one branch.
+      `framebufferOnly` stays `true` (only the drawable is affected,
+      and the resolve target only needs the renderTarget usage flag).
+      Pipeline state's `rasterSampleCount = 4` must match the view's
+      `sampleCount` or Metal validation rejects the pipeline.
 - [ ] LOD crossfade — currently the trace swaps from raw samples to a
       pyramid envelope (or between envelope levels) the instant the
       coordinator's `selectLOD` flips. A true crossfade needs an

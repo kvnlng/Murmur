@@ -37,6 +37,16 @@ struct WaveformCanvas: NSViewRepresentable {
         view.enableSetNeedsDisplay = true
         view.isPaused = true
         view.preferredFramesPerSecond = 120
+        // 4x MSAA — MTKView auto-creates an intermediate multisample
+        // color texture, renders into it, and resolves to the drawable
+        // via storeAction = .multisampleResolve. `framebufferOnly` only
+        // affects the drawable (the resolve target), so it stays true.
+        // Must match `rasterSampleCount = 4` on every pipeline state in
+        // WaveformRenderer.
+        if let device = MTLCreateSystemDefaultDevice(),
+           device.supportsTextureSampleCount(4) {
+            view.sampleCount = 4
+        }
 
         if let renderer = WaveformRenderer() {
             view.device = renderer.device

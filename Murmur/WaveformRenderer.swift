@@ -153,6 +153,9 @@ final class WaveformRenderer: NSObject, MTKViewDelegate {
         let desc = MTLRenderPipelineDescriptor()
         desc.vertexFunction   = library.makeFunction(name: vertexName)
         desc.fragmentFunction = library.makeFunction(name: fragmentName)
+        // Must match MTKView.sampleCount in WaveformCanvas. 4x MSAA is
+        // supported on every Apple Silicon Mac per Apple's MSAA docs.
+        desc.rasterSampleCount = 4
         desc.colorAttachments[0].pixelFormat = .bgra8Unorm
         desc.colorAttachments[0].isBlendingEnabled = true
         desc.colorAttachments[0].rgbBlendOperation = .add
@@ -323,7 +326,14 @@ final class WaveformRenderer: NSObject, MTKViewDelegate {
             alpha: 1.0
         )
         descriptor.colorAttachments[0].loadAction = .clear
-        descriptor.colorAttachments[0].storeAction = .store
+        // When the MTKView is configured for MSAA, `currentRenderPassDescriptor`
+        // comes back with a `resolveTexture` pointing at the drawable and a
+        // store action of `.multisampleResolve`. Setting `.store` in that
+        // case fails Metal validation (the resolve target would have no
+        // way to receive the final pixels). When MSAA is off, no resolve
+        // texture is present and `.store` is the right action.
+        descriptor.colorAttachments[0].storeAction =
+            descriptor.colorAttachments[0].resolveTexture != nil ? .multisampleResolve : .store
 
         guard let cmdBuffer = commandQueue.makeCommandBuffer(),
               let encoder = cmdBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
