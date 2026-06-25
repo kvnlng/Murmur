@@ -112,11 +112,3 @@ When the smoke test is clean:
 - [ ] Watch for crash reports in App Store Connect → TestFlight →
       Crashes for the next few days.
 
-## Open hygiene items
-
-These don't block any release but should be addressed when convenient:
-
-- **Set up a TestFlight internal-tester group** in App Store
-  Connect → TestFlight → Internal Testing → add your Apple ID. Once
-  added, every uploaded build automatically becomes installable on
-  any Mac signed into that Apple ID via the TestFlight app.
