@@ -722,12 +722,13 @@ private struct ChannelPanel: View {
         )
         .onPreferenceChange(CanvasSizeKey.self) { canvasSize = $0 }
         .contentShape(Rectangle())
-        // Gestures attach FIRST so the AppKit gesture recognizer wins
-        // dispatch over the tracking area that .onContinuousHover installs.
-        // On macOS, putting .onContinuousHover before .gesture(...) starves
-        // the drag of mouse-down events.
-        .gesture(panGesture())
-        .gesture(zoomGesture())
+        // `simultaneousGesture` (not `gesture`) so the recognizers
+        // coexist with the tracking area `.onContinuousHover` installs.
+        // With plain `.gesture(...)`, the gesture recognizer claims
+        // exclusivity against the hover tracking area and on macOS the
+        // drag's onChanged stops firing entirely.
+        .simultaneousGesture(panGesture())
+        .simultaneousGesture(zoomGesture())
         .onContinuousHover { phase in handleHover(phase) }
     }
 
