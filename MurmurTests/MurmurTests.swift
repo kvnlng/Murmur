@@ -2649,3 +2649,313 @@ struct SyntheticRecordingTests {
     }
 }
 
+// MARK: - Pyramid level file
+//
+// The on-disk file format for one pyramid level: a 64-byte
+// BinaryRecordingHeader (with `sampleCount` repurposed as bin count)
+// followed by Float64 (min, max) pairs.
+
+@Suite("Pyramid level file")
+struct PyramidLevelFileTests {
+
+    private static func makeTempURL(name: String = "pyramid.bin") throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pyr-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent(name)
+    }
+
+    private static func header(binCount: Int64, binRateHz: Double = 25.0) -> BinaryRecordingHeader {
+        BinaryRecordingHeader(
+            version: BinaryRecordingHeader.currentVersion,
+            startTimeUnixMS: 0,
+            sampleRateHz: binRateHz,
+            sampleCount: binCount
+        )
+    }
+
+    @Test("Writes and round-trips a small set of bins")
+    func roundTripsBins() throws {
+        let url = try Self.makeTempURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        let bins: [PyramidBin] = [
+            .init(min: -1.0, max: 1.0),
+            .init(min: 0.5, max: 2.5),
+            .init(min: -3.0, max: -1.0)
+        ]
+        try PyramidLevelFile.write(bins: bins, header: Self.header(binCount: Int64(bins.count)), to: url)
+
+        let access = try PyramidLevelFile.mappedAccess(url: url)
+        #expect(access.binCount == Int64(bins.count))
+        let read = access.bins(range: 0..<Int64(bins.count))
+        #expect(read == bins)
+    }
+
+    @Test("bins(range:) returns a partial slice correctly")
+    func returnsPartialSlice() throws {
+        let url = try Self.makeTempURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        let bins: [PyramidBin] = (0..<10).map { i in
+            PyramidBin(min: Double(i), max: Double(i) + 0.5)
+        }
+        try PyramidLevelFile.write(bins: bins, header: Self.header(binCount: Int64(bins.count)), to: url)
+
+        let access = try PyramidLevelFile.mappedAccess(url: url)
+        let middle = access.bins(range: 3..<7)
+        #expect(middle.count == 4)
+        #expect(middle == Array(bins[3..<7]))
+    }
+
+    @Test("Reads past the end of the file return NaN-padded bins")
+    func padsOutOfRangeWithNaN() throws {
+        let url = try Self.makeTempURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        let bins: [PyramidBin] = [.init(min: 1.0, max: 2.0), .init(min: 3.0, max: 4.0)]
+        try PyramidLevelFile.write(bins: bins, header: Self.header(binCount: Int64(bins.count)), to: url)
+
+        // Ask for 5 bins starting at index 0; only 2 exist on disk.
+        let access = try PyramidLevelFile.mappedAccess(url: url)
+        let read = access.bins(range: 0..<5)
+        #expect(read.count == 5)
+        #expect(read[0] == bins[0])
+        #expect(read[1] == bins[1])
+        for i in 2..<5 {
+            #expect(read[i].isNaN, "bin \(i) should be NaN, got (\(read[i].min), \(read[i].max))")
+        }
+    }
+
+    @Test("NaN bins survive a write/read round-trip intact")
+    func nanBinsRoundTrip() throws {
+        let url = try Self.makeTempURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        let bins: [PyramidBin] = [
+            .nan,
+            .init(min: 0.0, max: 1.0),
+            .nan
+        ]
+        try PyramidLevelFile.write(bins: bins, header: Self.header(binCount: Int64(bins.count)), to: url)
+
+        let access = try PyramidLevelFile.mappedAccess(url: url)
+        let read = access.bins(range: 0..<3)
+        #expect(read[0].isNaN)
+        #expect(read[1] == bins[1])
+        #expect(read[2].isNaN)
+    }
+
+    @Test("Empty bin file has binCount == 0 and an empty read")
+    func emptyFileReadsAsEmpty() throws {
+        let url = try Self.makeTempURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        try PyramidLevelFile.write(bins: [], header: Self.header(binCount: 0), to: url)
+        let access = try PyramidLevelFile.mappedAccess(url: url)
+        #expect(access.binCount == 0)
+        let read = access.bins(range: 0..<0)
+        #expect(read.isEmpty)
+    }
+}
+
+// MARK: - Streaming channel file
+//
+// Append-only writer that flushes batched samples into a packed-Float32
+// .bin file, patching the header's sampleCount at finalize() time.
+// Used by the importer to stream a channel without materializing the
+// whole sample buffer.
+
+@Suite("Streaming channel file")
+struct StreamingChannelFileTests {
+
+    private static func makeTempURL(name: String = "channel.bin") throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("stream-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent(name)
+    }
+
+    @Test("Appends a small sample buffer and the finalized file round-trips")
+    func smallBufferRoundTrips() throws {
+        let url = try Self.makeTempURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        let writer = try StreamingChannelFile(url: url, sampleRateHz: 250.0, startTimeUnixMS: 1_700_000_000_000)
+        let samples: [Float] = [-1.0, 0.0, 0.5, 1.0, 2.0]
+        for s in samples { try writer.append(s) }
+        try writer.finalize()
+
+        let read = try BinaryRecordingFile.readSamples(url: url, range: 0..<Int64(samples.count))
+        #expect(read == samples)
+    }
+
+    @Test("Finalize patches the header sampleCount to match the appended count")
+    func finalizePatchesSampleCount() throws {
+        let url = try Self.makeTempURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        let writer = try StreamingChannelFile(url: url, sampleRateHz: 100.0, startTimeUnixMS: 0)
+        for i in 0..<7 { try writer.append(Float(i)) }
+        try writer.finalize()
+
+        let data = try Data(contentsOf: url)
+        let header = try BinaryRecordingFile.decodeHeader(data)
+        #expect(header.sampleCount == 7)
+        #expect(header.sampleRateHz == 100.0)
+    }
+
+    @Test("Appending more than bufferCapacity flushes correctly across batches")
+    func crossesBufferBoundary() throws {
+        let url = try Self.makeTempURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        let writer = try StreamingChannelFile(url: url, sampleRateHz: 250.0, startTimeUnixMS: 0)
+        // bufferCapacity is 8192; write 8200 samples so we cross the flush
+        // boundary and an explicit finalize() handles the trailing remainder.
+        let total = StreamingChannelFile.bufferCapacity + 8
+        for i in 0..<total {
+            try writer.append(Float(i % 100))
+        }
+        try writer.finalize()
+
+        let access = try BinaryRecordingFile.mappedAccess(url: url)
+        #expect(access.header.sampleCount == Int64(total))
+        let read = try BinaryRecordingFile.readSamples(url: url, range: 0..<Int64(total))
+        #expect(read.count == total)
+        #expect(read.first == 0)
+        #expect(read.last == Float((total - 1) % 100))
+        // Pick a sample on the far side of the flush boundary to make sure
+        // the batch handoff didn't drop or duplicate anything.
+        #expect(read[StreamingChannelFile.bufferCapacity] == Float(StreamingChannelFile.bufferCapacity % 100))
+    }
+
+    @Test("appendNaN(count:) writes the requested number of NaN samples")
+    func appendsNaNRun() throws {
+        let url = try Self.makeTempURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        let writer = try StreamingChannelFile(url: url, sampleRateHz: 100.0, startTimeUnixMS: 0)
+        try writer.append(1.0)
+        try writer.appendNaN(count: 3)
+        try writer.append(2.0)
+        try writer.finalize()
+
+        let read = try BinaryRecordingFile.readSamples(url: url, range: 0..<5)
+        #expect(read[0] == 1.0)
+        #expect(read[1].isNaN)
+        #expect(read[2].isNaN)
+        #expect(read[3].isNaN)
+        #expect(read[4] == 2.0)
+    }
+
+    @Test("Empty stream (no appends) finalizes to a header-only file with sampleCount 0")
+    func emptyStreamFinalizes() throws {
+        let url = try Self.makeTempURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        let writer = try StreamingChannelFile(url: url, sampleRateHz: 200.0, startTimeUnixMS: 0)
+        try writer.finalize()
+
+        let data = try Data(contentsOf: url)
+        #expect(data.count == BinaryRecordingHeader.headerByteSize)
+        let header = try BinaryRecordingFile.decodeHeader(data)
+        #expect(header.sampleCount == 0)
+    }
+}
+
+// MARK: - RecordingStore
+//
+// Owns the on-disk layout under Application Support / Murmur /
+// recordings / <uuid> /. The store is @MainActor; these tests inject
+// a temp directory so they don't touch the user's real data.
+
+@Suite("Recording store")
+struct RecordingStoreTests {
+
+    private static func makeTempDir() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("store-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    @Test("Initializing the store with a custom root creates the directory")
+    @MainActor
+    func initCreatesRootDirectory() throws {
+        // Point at a fresh directory that does NOT yet exist; init should make it.
+        let parent = try Self.makeTempDir()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let root = parent.appendingPathComponent("freshly-made", isDirectory: true)
+        #expect(!FileManager.default.fileExists(atPath: root.path))
+
+        let store = RecordingStore(rootURL: root)
+        _ = store  // silence unused warning
+        #expect(FileManager.default.fileExists(atPath: root.path))
+    }
+
+    @Test("listRecordingDirectories starts empty and reports created bundles")
+    @MainActor
+    func listsRecordingDirectories() throws {
+        let root = try Self.makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = RecordingStore(rootURL: root)
+        #expect(try store.listRecordingDirectories().isEmpty)
+
+        // Create two dummy bundles by hand and confirm they show up.
+        let a = root.appendingPathComponent("aaa", isDirectory: true)
+        let b = root.appendingPathComponent("bbb", isDirectory: true)
+        try FileManager.default.createDirectory(at: a, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: b, withIntermediateDirectories: true)
+        let listed = try store.listRecordingDirectories()
+        #expect(Set(listed.map(\.lastPathComponent)) == ["aaa", "bbb"])
+    }
+
+    @Test("loadManifest round-trips a Recording written by importWFDB")
+    @MainActor
+    func loadsManifestAfterImport() async throws {
+        let root = try Self.makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = RecordingStore(rootURL: root)
+
+        // Stage a fresh WFDB record in a sibling folder so the importer
+        // has something to chew on. importWFDB takes the *folder* and the
+        // .hea filename — the same shape ContentView uses.
+        let srcDir = try Self.makeTempDir()
+        defer { try? FileManager.default.removeItem(at: srcDir) }
+        _ = try SyntheticRecording.makeWFDBRecord(into: srcDir)
+
+        let summary = try await store.importWFDB(folderURL: srcDir, heaFilename: "synth.hea")
+        let loaded = try store.loadManifest(at: summary.directory)
+        #expect(loaded.id == summary.recording.id)
+        #expect(loaded.channels.count == 8)
+    }
+
+    @Test("loadManifest throws when the manifest file is missing")
+    @MainActor
+    func loadManifestThrowsOnMissingFile() throws {
+        let root = try Self.makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = RecordingStore(rootURL: root)
+        let emptyBundle = root.appendingPathComponent("empty", isDirectory: true)
+        try FileManager.default.createDirectory(at: emptyBundle, withIntermediateDirectories: true)
+        #expect(throws: Error.self) {
+            _ = try store.loadManifest(at: emptyBundle)
+        }
+    }
+
+    @Test("remove(at:) deletes the bundle directory")
+    @MainActor
+    func removeDeletesBundle() throws {
+        let root = try Self.makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = RecordingStore(rootURL: root)
+        let bundle = root.appendingPathComponent("doomed", isDirectory: true)
+        try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
+        #expect(FileManager.default.fileExists(atPath: bundle.path))
+
+        try store.remove(at: bundle)
+        #expect(!FileManager.default.fileExists(atPath: bundle.path))
+    }
+}
+
