@@ -635,7 +635,6 @@ private struct ChannelPanel: View {
     let annotations: [Annotation]
     var sizing: Sizing = .strip
 
-    @State private var canvasSize: CGSize = .zero
     @State private var clippedRanges: [ClippedRange] = []
 
     // Per-gesture starting state so each gesture is computed against the
@@ -680,64 +679,69 @@ private struct ChannelPanel: View {
     }
 
     private var canvasArea: some View {
-        ZStack(alignment: .topLeading) {
-            WaveformCanvas(
-                channel: channel,
-                directory: directory,
-                startSample: viewport.startSample,
-                endSample: viewport.endSample,
-                annotations: visibleAnnotations
-            )
-            .frame(minHeight: sizing.canvasMinHeight, maxHeight: sizing.expands ? .infinity : nil)
+        // Read the canvas size directly via GeometryReader instead of the
+        // preference-key + onPreferenceChange dance. In Swift 6 strict
+        // concurrency, `onPreferenceChange`'s `@Sendable` perform closure
+        // silently swallows `@State` mutations on the host view, leaving
+        // canvasSize permanently at .zero — which then trips the
+        // `canvasSize.width > 0` guards in panGesture and the crosshair.
+        // Capturing `geo.size` synchronously below avoids the indirection
+        // entirely.
+        GeometryReader { geo in
+            let liveSize = geo.size
+            ZStack(alignment: .topLeading) {
+                WaveformCanvas(
+                    channel: channel,
+                    directory: directory,
+                    startSample: viewport.startSample,
+                    endSample: viewport.endSample,
+                    annotations: visibleAnnotations
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            WaveformClippingOverlay(
-                clippedRanges: clippedRanges,
-                startSample: viewport.startSample,
-                endSample: viewport.endSample
-            )
+                WaveformClippingOverlay(
+                    clippedRanges: clippedRanges,
+                    startSample: viewport.startSample,
+                    endSample: viewport.endSample
+                )
 
-            WaveformAnnotationOverlay(
-                annotations: visibleAnnotations,
-                startSample: viewport.startSample,
-                endSample: viewport.endSample
-            )
+                WaveformAnnotationOverlay(
+                    annotations: visibleAnnotations,
+                    startSample: viewport.startSample,
+                    endSample: viewport.endSample
+                )
 
-            // Transparent AppKit-backed hover tracker. Passes clicks
-            // straight through to the gestures attached to the parent
-            // ZStack, so it never starves drag/zoom of events.
-            HoverTrackingView { location in
-                if let location {
-                    hoverLocation = location
-                    hoverIsActive = true
-                    hoveredAnnotation = hitTest(at: location)
-                } else {
-                    hoverIsActive = false
-                    hoveredAnnotation = nil
+                HoverTrackingView { location in
+                    Task { @MainActor in
+                        if let location {
+                            hoverLocation = location
+                            hoverIsActive = true
+                            hoveredAnnotation = hitTest(at: location, in: liveSize)
+                        } else {
+                            hoverIsActive = false
+                            hoveredAnnotation = nil
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                if hoverIsActive, liveSize.width > 0 {
+                    hoverCrosshair(in: liveSize)
+                }
+
+                if let hovered = hoveredAnnotation {
+                    AnnotationTooltip(annotation: hovered, sampleRate: channel.sampleRate)
+                        .frame(maxWidth: 260, alignment: .leading)
+                        .offset(tooltipOffset(in: liveSize))
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
                 }
             }
-
-            if hoverIsActive, canvasSize.width > 0 {
-                hoverCrosshair
-            }
-
-            if let hovered = hoveredAnnotation {
-                AnnotationTooltip(annotation: hovered, sampleRate: channel.sampleRate)
-                    .frame(maxWidth: 260, alignment: .leading)
-                    .offset(tooltipOffset(in: canvasSize))
-                    .allowsHitTesting(false)
-                    .transition(.opacity)
-            }
+            .contentShape(Rectangle())
+            .gesture(panGesture(in: liveSize))
+            .gesture(zoomGesture(in: liveSize))
         }
-        .background(
-            GeometryReader { geo in
-                Color.clear
-                    .preference(key: CanvasSizeKey.self, value: geo.size)
-            }
-        )
-        .onPreferenceChange(CanvasSizeKey.self) { canvasSize = $0 }
-        .contentShape(Rectangle())
-        .gesture(panGesture())
-        .gesture(zoomGesture())
+        .frame(minHeight: sizing.canvasMinHeight, maxHeight: sizing.expands ? .infinity : nil)
     }
 
     // MARK: Hover hit-testing
@@ -749,11 +753,11 @@ private struct ChannelPanel: View {
     // `hitTest(at:)` to find the nearest finding.
 
     /// 1-px vertical line at the cursor with a floating time label at the
-    /// top edge. The Rectangle needs an explicit height — without one, the
-    /// inner ZStack collapses to the Text's intrinsic height (~12 pt) and
-    /// the crosshair vanishes into the top band of the canvas.
+    /// top edge. Receives the canvas size from the enclosing GeometryReader
+    /// so the Rectangle can be sized explicitly to the canvas height
+    /// (without an explicit height it collapses to ~12 pt and vanishes).
     @ViewBuilder
-    private var hoverCrosshair: some View {
+    private func hoverCrosshair(in canvasSize: CGSize) -> some View {
         let cursorX = max(0, min(canvasSize.width, hoverLocation.x))
         let span = max(1, viewport.endSample - viewport.startSample)
         let cursorSample = viewport.startSample + Int64(Double(span) * Double(cursorX / canvasSize.width))
@@ -783,7 +787,7 @@ private struct ChannelPanel: View {
     /// contain the hover sample. Otherwise picks the nearest point finding
     /// within a small pixel tolerance so the analyst doesn't have to land
     /// exactly on a one-pixel-wide tick.
-    private func hitTest(at point: CGPoint) -> Annotation? {
+    private func hitTest(at point: CGPoint, in canvasSize: CGSize) -> Annotation? {
         guard canvasSize.width > 0 else { return nil }
         let span = max(1, viewport.endSample - viewport.startSample)
         let fraction = max(0, min(1, Double(point.x / canvasSize.width)))
@@ -898,7 +902,7 @@ private struct ChannelPanel: View {
 
     // MARK: Gestures
 
-    private func panGesture() -> some Gesture {
+    private func panGesture(in canvasSize: CGSize) -> some Gesture {
         DragGesture(minimumDistance: 2)
             .onChanged { value in
                 if dragStartRange == nil { dragStartRange = viewport.rangeSamples }
@@ -926,7 +930,7 @@ private struct ChannelPanel: View {
             }
     }
 
-    private func zoomGesture() -> some Gesture {
+    private func zoomGesture(in canvasSize: CGSize) -> some Gesture {
         MagnifyGesture()
             .onChanged { value in
                 if zoomStartWidth == nil {
