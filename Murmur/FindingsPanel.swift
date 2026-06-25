@@ -290,6 +290,7 @@ private struct FindingRow: View {
             }
             .buttonStyle(.plain)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("finding-row-\(annotation.category)")
 
             if isEditing {
                 dispositionTrio

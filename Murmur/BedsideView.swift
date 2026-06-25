@@ -781,6 +781,7 @@ private struct ChannelPanel: View {
         }
         .frame(width: canvasSize.width, height: canvasSize.height, alignment: .topLeading)
         .allowsHitTesting(false)
+        .accessibilityIdentifier("hover-crosshair")
     }
 
     /// Returns the finding under `point`, preferring ranges that strictly
@@ -870,6 +871,7 @@ private struct ChannelPanel: View {
             Text(timeWindowLabel)
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
+                .accessibilityIdentifier("time-window-label")
             Text("\(Int(channel.sampleRate)) Hz")
                 .font(.caption)
                 .foregroundStyle(.secondary)
