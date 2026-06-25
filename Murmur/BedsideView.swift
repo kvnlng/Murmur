@@ -702,6 +702,20 @@ private struct ChannelPanel: View {
                 endSample: viewport.endSample
             )
 
+            // Transparent AppKit-backed hover tracker. Passes clicks
+            // straight through to the gestures attached to the parent
+            // ZStack, so it never starves drag/zoom of events.
+            HoverTrackingView { location in
+                if let location {
+                    hoverLocation = location
+                    hoverIsActive = true
+                    hoveredAnnotation = hitTest(at: location)
+                } else {
+                    hoverIsActive = false
+                    hoveredAnnotation = nil
+                }
+            }
+
             if hoverIsActive, canvasSize.width > 0 {
                 hoverCrosshair
             }
@@ -722,29 +736,17 @@ private struct ChannelPanel: View {
         )
         .onPreferenceChange(CanvasSizeKey.self) { canvasSize = $0 }
         .contentShape(Rectangle())
-        // `simultaneousGesture` (not `gesture`) so the recognizers
-        // coexist with the tracking area `.onContinuousHover` installs.
-        // With plain `.gesture(...)`, the gesture recognizer claims
-        // exclusivity against the hover tracking area and on macOS the
-        // drag's onChanged stops firing entirely.
-        .simultaneousGesture(panGesture())
-        .simultaneousGesture(zoomGesture())
-        .onContinuousHover { phase in handleHover(phase) }
+        .gesture(panGesture())
+        .gesture(zoomGesture())
     }
 
     // MARK: Hover hit-testing
-
-    private func handleHover(_ phase: HoverPhase) {
-        switch phase {
-        case .active(let location):
-            hoverLocation = location
-            hoverIsActive = true
-            hoveredAnnotation = hitTest(at: location)
-        case .ended:
-            hoverIsActive = false
-            hoveredAnnotation = nil
-        }
-    }
+    //
+    // Mouse tracking is delivered by `HoverTrackingView` (an
+    // `NSTrackingArea`-backed transparent overlay above the canvas in the
+    // ZStack). It calls back with the cursor location on enter/move and
+    // `nil` on exit; the closure inside `canvasArea` consumes it and runs
+    // `hitTest(at:)` to find the nearest finding.
 
     /// 1-px vertical line at the cursor with a floating time label at the
     /// top edge. The Rectangle needs an explicit height — without one, the
