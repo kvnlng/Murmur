@@ -573,7 +573,8 @@ private struct ChannelPanel: View {
             OverviewRibbon(
                 channel: channel,
                 directory: directory,
-                viewport: viewport
+                viewport: viewport,
+                annotations: annotations
             )
         }
         .padding(12)
@@ -726,6 +727,10 @@ private struct OverviewRibbon: View {
     let channel: Channel
     let directory: URL
     let viewport: RecordingViewport
+    /// Findings to show as colored ticks across the full-recording overview.
+    /// Filtered by the same `FindingFilter` as the canvas, so toggling a
+    /// category chip dims its ticks here in lock-step.
+    var annotations: [Annotation] = []
 
     @State private var bins: [PyramidBin] = []
     @State private var loadError: String?
@@ -736,12 +741,17 @@ private struct OverviewRibbon: View {
     /// perceive where they are. Anything wider than this stays proportional.
     private static let minIndicatorPx: CGFloat = 18
     private static let ribbonHeight: CGFloat = 56
+    /// Minimum on-screen width for a finding tick. Point findings have zero
+    /// width by definition; floor them at 2pt so they actually render. Range
+    /// findings stay proportional once they exceed this width.
+    private static let minTickPx: CGFloat = 2
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             GeometryReader { geo in
                 ZStack(alignment: .topLeading) {
                     envelopeChart
+                    annotationTicks(width: geo.size.width, height: geo.size.height)
                     viewportIndicator(width: geo.size.width)
                 }
                 .contentShape(Rectangle())
@@ -753,6 +763,39 @@ private struct OverviewRibbon: View {
         .padding(.top, 4)
         .accessibilityIdentifier("overview-ribbon-\(channel.name)")
         .task { await loadOverview() }
+    }
+
+    /// Thin colored ticks for each annotation at its fractional sample
+    /// position. Drawn between the envelope (background) and the viewport
+    /// indicator (foreground) so the indicator never obscures a tick, and
+    /// the envelope's gray fill stays the dominant visual under everything.
+    /// Points are minTickPx wide; ranges stay proportional once they exceed
+    /// that width.
+    private func annotationTicks(width: CGFloat, height: CGFloat) -> some View {
+        let totalSamples = Double(viewport.totalSamples)
+        // Render nothing if we don't yet know the recording's total length
+        // (loadOverview hasn't completed) or if there are no findings.
+        guard totalSamples > 0, !annotations.isEmpty else {
+            return AnyView(EmptyView())
+        }
+        return AnyView(
+            ZStack(alignment: .topLeading) {
+                ForEach(annotations) { ann in
+                    let startFrac = Double(ann.sampleIndex) / totalSamples
+                    let endSample = ann.endSampleIndex ?? ann.sampleIndex
+                    let endFrac   = Double(endSample) / totalSamples
+                    let leftPx    = CGFloat(max(0, min(1, startFrac))) * width
+                    let propWidth = CGFloat(max(0, endFrac - startFrac)) * width
+                    let tickWidth = max(Self.minTickPx, propWidth)
+                    let color     = CategoryPalette.swiftUIColor(for: ann.category)
+                    Rectangle()
+                        .fill(color.opacity(ann.kind == .point ? 0.85 : 0.45))
+                        .frame(width: tickWidth, height: height)
+                        .offset(x: leftPx)
+                        .allowsHitTesting(false)
+                }
+            }
+        )
     }
 
     /// "0s ──── 5.2 min — 5.5 min ──── 30.0 min" style scale strip. Shows the

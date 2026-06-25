@@ -213,8 +213,12 @@ Three layers as agreed; all three now built:
 - [ ] Persist annotations separately from `recording.json` as
       `annotations.json` so re-running the analysis cluster doesn't require
       re-importing the .dat samples
-- [ ] Schema versioning — write a deliverable `schema.md` in the repo so
-      cluster producers have a stable contract
+- [x] Schema versioning — delivered as `docs/annotations.schema.json`
+      (a JSON Schema Draft 2020-12 document) plus an updated
+      `docs/annotation-schema.md` with validator recipes for Python,
+      Node, and Swift. Published at
+      `https://kvnlng.github.io/Murmur/annotations.schema.json` so
+      producers can validate output against the canonical contract.
 - [ ] Mini-timeline ticks under each channel overview ribbon — colored
       dots at every annotation's fractional position so beat density and
       finding clusters are visible at full-recording scale
