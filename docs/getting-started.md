@@ -9,20 +9,17 @@ nav_order: 2
 ## Requirements
 
 - macOS 14 (Sonoma) or later
-- Xcode 15 or later
 - A folder containing a WFDB record (`.hea` + `.dat`) you want to view —
   PhysioNet's [MIT-BIH Arrhythmia Database](https://physionet.org/content/mitdb/)
   is the canonical test set.
 
-## Build and run
+## Install
 
-```sh
-git clone https://github.com/kvnlng/Murmur.git
-cd Murmur
-open Murmur.xcodeproj
-```
-
-Press ⌘R. The welcome screen offers four entry points.
+Murmur Studio is distributed through the Mac App Store. Install it via
+[the App Store listing](https://www.apple.com/search/Murmur-Studio?src=globalnav)
+<!-- TODO: replace with the canonical product URL once known -->
+and launch it from Applications or Spotlight. The welcome screen offers
+four entry points.
 
 ## Loading a record
 

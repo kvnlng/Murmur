@@ -4,15 +4,24 @@ layout: default
 nav_order: 1
 ---
 
-# Murmur
+# Murmur Studio
 
-A macOS SwiftUI app for analyst review of clinical ECG findings over
-PhysioNet WFDB recordings.
+A macOS app for analyst review of clinical ECG findings over PhysioNet
+WFDB recordings. **Available on the Mac App Store.**
 
 Findings come from an upstream cluster of analysis machines (VF/VT onset,
 AFib, PVCs, disease vectors). The WFDB trace is the *context* an analyst
-needs to interpret each finding — Murmur renders it as a Metal-backed
-ECG paper canvas with the cluster's findings overlaid.
+needs to interpret each finding — Murmur Studio renders it as a
+Metal-backed ECG paper canvas with the cluster's findings overlaid.
+
+## Get the app
+
+Install Murmur Studio from the Mac App Store:
+**[Murmur Studio on the App Store](https://www.apple.com/search/Murmur-Studio?src=globalnav)**
+<!-- TODO: replace with the canonical product URL once known -->
+
+Requires macOS 14 (Sonoma) or later. No Xcode or developer tools needed
+— this is the documentation site for users of the app, not a build guide.
 
 ## What's here
 
@@ -26,8 +35,6 @@ ECG paper canvas with the cluster's findings overlaid.
 - **[Performance notes]({{ site.baseurl }}/performance)** — how the
   pyramid + LOD selector + zero-copy GPU buffers keep pan/zoom smooth on
   multi-hour records.
-- **[Roadmap](https://github.com/kvnlng/Murmur/blob/main/ROADMAP.md)**
-  — current state and what's next.
 
 ## At a glance
 
@@ -38,7 +45,3 @@ middle (lead chip bar + record-context header + Metal-backed ECG paper +
 overview ribbon), and the findings inspector on the right. Drag the
 chart to pan; pinch to zoom; click the ribbon to scrub. All channels in
 a record share the viewport so leads stay time-locked.
-
-## Source
-
-Hosted at **[github.com/kvnlng/Murmur](https://github.com/kvnlng/Murmur)**.

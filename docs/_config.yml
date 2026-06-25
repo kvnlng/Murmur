@@ -1,5 +1,5 @@
-title: Murmur
-description: A macOS SwiftUI app for analyst review of clinical ECG findings over PhysioNet WFDB recordings.
+title: Murmur Studio
+description: A macOS app for analyst review of clinical ECG findings over PhysioNet WFDB recordings. Available on the Mac App Store.
 remote_theme: just-the-docs/just-the-docs
 
 # Site URL — let GitHub Pages set baseurl automatically for project pages.
@@ -11,17 +11,18 @@ color_scheme: light
 search_enabled: true
 heading_anchors: true
 nav_external_links:
-  - title: View on GitHub
-    url: https://github.com/kvnlng/Murmur
+  - title: Get on the App Store
+    # TODO: replace with the canonical product URL once known
+    # (e.g. https://apps.apple.com/app/murmur-studio/id1234567890)
+    url: https://www.apple.com/search/Murmur-Studio?src=globalnav
     hide_icon: false
 
 # Aux links rendered at the top right of every page.
 aux_links:
-  Repository: "https://github.com/kvnlng/Murmur"
-  Roadmap:    "https://github.com/kvnlng/Murmur/blob/main/ROADMAP.md"
+  App Store: "https://www.apple.com/search/Murmur-Studio?src=globalnav"
 
 # Footer
-footer_content: "© 2026 Kevin Long. Murmur is MIT-licensed."
+footer_content: "© 2026 Kevin Long."
 
 # Markdown
 markdown: kramdown
