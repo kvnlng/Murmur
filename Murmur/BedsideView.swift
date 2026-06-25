@@ -12,6 +12,7 @@
 
 import Charts
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct BedsideView: View {
     let recording: Recording
@@ -28,6 +29,16 @@ struct BedsideView: View {
     /// Analyst review state for this recording's findings — confirm /
     /// dismiss / reset. Persisted to `<bundle>/dispositions.json`.
     @State private var dispositionStore: DispositionStore
+    /// Findings the analyst attached after import (via the "Attach
+    /// findings…" toolbar action). Merged with `recording.annotations`
+    /// for display. In-memory only for now; a future pass persists them
+    /// to the bundle's `annotations.json` so they survive across launches.
+    @State private var attachedAnnotations: [Annotation] = []
+    /// Drives the file-importer sheet for "Attach findings…".
+    @State private var showAttachFindings: Bool = false
+    /// Error message shown when an attach attempt fails (unreadable file,
+    /// unsupported schema, malformed JSON, etc).
+    @State private var attachError: String?
 
     static let initialDurationSeconds: Double = 10
 
@@ -79,10 +90,18 @@ struct BedsideView: View {
         (lowRatePartition.spontaneous, lowRatePartition.assistControl)
     }
 
+    /// Union of the producer's findings and anything the analyst has
+    /// attached via the "Attach findings…" toolbar action. Every downstream
+    /// surface — canvas overlays, findings panel, density timeline, summary
+    /// chips — reads from this so attached findings are first-class.
+    private var allAnnotations: [Annotation] {
+        recording.annotations + attachedAnnotations
+    }
+
     /// Annotations that survive the current filter. Drives the canvas, the
     /// findings panel, and the density timeline so all three stay in sync.
     private var filteredAnnotations: [Annotation] {
-        recording.annotations.filter(filter.matches)
+        allAnnotations.filter(filter.matches)
     }
 
     /// Unfiltered rollup for the summary chip row — chips show total counts
@@ -90,7 +109,7 @@ struct BedsideView: View {
     /// always sees "47 PVCs" instead of "8 of 47 shown."
     private var unfilteredSummary: AnnotationSummary {
         AnnotationSummary.build(
-            from: recording.annotations,
+            from: allAnnotations,
             recordingDurationSamples: recording.channels.first?.sampleCount,
             sampleRate: recording.channels.first?.sampleRate ?? 250
         )
@@ -114,7 +133,7 @@ struct BedsideView: View {
         .accessibilityIdentifier("bedside-view")
         .inspector(isPresented: $showFindings) {
             FindingsPanel(
-                annotations: recording.annotations,
+                annotations: allAnnotations,
                 viewport: viewport,
                 sampleRate: recording.channels.first?.sampleRate ?? 250,
                 filter: $filter,
@@ -141,12 +160,70 @@ struct BedsideView: View {
             }
             ToolbarItem {
                 Button {
+                    showAttachFindings = true
+                } label: {
+                    Label("Attach findings…", systemImage: "doc.badge.plus")
+                }
+                .help("Merge a producer's annotations JSON into this recording")
+                .accessibilityIdentifier("attach-findings")
+            }
+            ToolbarItem {
+                Button {
                     showFindings.toggle()
                 } label: {
                     Label("Findings", systemImage: "stethoscope.circle")
                 }
                 .help("Show or hide the findings panel")
                 .accessibilityIdentifier("findings-toggle")
+            }
+        }
+        .fileImporter(
+            isPresented: $showAttachFindings,
+            allowedContentTypes: [.json]
+        ) { result in
+            handleAttachFindings(result)
+        }
+        .alert(
+            "Couldn't attach findings",
+            isPresented: Binding(
+                get: { attachError != nil },
+                set: { if !$0 { attachError = nil } }
+            )
+        ) {
+            Button("OK") { attachError = nil }
+        } message: {
+            Text(attachError ?? "")
+        }
+    }
+
+    /// Reads the analyst-picked JSON, parses it through `AnnotationLoader`
+    /// (which validates schema version and resolves both sample-index and
+    /// unix-millis timestamps), and merges the findings into
+    /// `attachedAnnotations`. Failures surface in an alert; nothing in the
+    /// existing finding set is mutated on error.
+    private func handleAttachFindings(_ result: Result<URL, Error>) {
+        switch result {
+        case .failure(let error):
+            attachError = error.localizedDescription
+        case .success(let url):
+            let needsScope = url.startAccessingSecurityScopedResource()
+            defer { if needsScope { url.stopAccessingSecurityScopedResource() } }
+            do {
+                let data = try Data(contentsOf: url)
+                let firstChannel = recording.channels.first
+                let startMS = Int64(
+                    (firstChannel?.startDate.timeIntervalSince1970 ?? 0) * 1000
+                )
+                let sampleRate = firstChannel?.sampleRate ?? 250
+                let parsed = try AnnotationLoader.parse(
+                    data: data,
+                    recordingStartUnixMS: startMS,
+                    sampleRate: sampleRate,
+                    fallbackSource: "attached.\(url.deletingPathExtension().lastPathComponent)"
+                )
+                attachedAnnotations.append(contentsOf: parsed)
+            } catch {
+                attachError = error.localizedDescription
             }
         }
     }
