@@ -50,10 +50,21 @@ struct BedsideView: View {
         // shouldn't drive viewport math.
         let firstECG = recording.channels.first(where: { !$0.isTrendChannel })
             ?? recording.channels.first
+        // UI tests can override the initial viewport width via
+        // `--ui-test-initial-duration=<seconds>` so drag-pan tests have
+        // somewhere to move to (the 10 s default encompasses the whole
+        // synthetic fixture).
+        let initialDuration: Double = {
+            #if DEBUG
+            return UITestSupport.initialDurationSeconds ?? Self.initialDurationSeconds
+            #else
+            return Self.initialDurationSeconds
+            #endif
+        }()
         _viewport = State(initialValue: RecordingViewport(
             totalSamples: firstECG?.sampleCount ?? 0,
             sampleRate: firstECG?.sampleRate ?? 250,
-            initialDurationSeconds: Self.initialDurationSeconds
+            initialDurationSeconds: initialDuration
         ))
         // Default: focus the first lead. Single-lead is the typical analyst
         // workflow; strips mode is opt-in for cross-lead comparison.
@@ -131,6 +142,18 @@ struct BedsideView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("bedside-view")
+        // Invisible accessibility-only element exposing the current
+        // viewport range as a label. Lets XCUI tests assert "did a
+        // drag/click change the viewport?" without trying to read
+        // nested SwiftUI Text elements (which the accessibility tree
+        // hides behind their container's identifier).
+        .overlay(alignment: .topLeading) {
+            Color.clear
+                .frame(width: 1, height: 1)
+                .accessibilityIdentifier("ui-test-viewport-state")
+                .accessibilityLabel("\(viewport.startSample)-\(viewport.endSample)")
+                .allowsHitTesting(false)
+        }
         .inspector(isPresented: $showFindings) {
             FindingsPanel(
                 annotations: allAnnotations,
@@ -713,17 +736,22 @@ private struct ChannelPanel: View {
 
                 HoverTrackingView { location in
                     Task { @MainActor in
-                        if let location {
-                            hoverLocation = location
-                            hoverIsActive = true
-                            hoveredAnnotation = hitTest(at: location, in: liveSize)
-                        } else {
-                            hoverIsActive = false
-                            hoveredAnnotation = nil
-                        }
+                        applyHover(location, in: liveSize)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .task(id: liveSize) {
+                    #if DEBUG
+                    // If `--ui-test-hover-at=X,Y` was passed, fire the same
+                    // hover-update path that HoverTrackingView would.
+                    // `id: liveSize` re-runs the task once GeometryReader
+                    // measures, so the injection happens against a real
+                    // canvas size (not .zero on first body evaluation).
+                    if liveSize.width > 0, let pt = UITestSupport.hoverPoint {
+                        applyHover(pt, in: liveSize)
+                    }
+                    #endif
+                }
 
                 if hoverIsActive, liveSize.width > 0 {
                     hoverCrosshair(in: liveSize)
@@ -745,12 +773,21 @@ private struct ChannelPanel: View {
     }
 
     // MARK: Hover hit-testing
-    //
     // Mouse tracking is delivered by `HoverTrackingView` (an
-    // `NSTrackingArea`-backed transparent overlay above the canvas in the
-    // ZStack). It calls back with the cursor location on enter/move and
-    // `nil` on exit; the closure inside `canvasArea` consumes it and runs
-    // `hitTest(at:)` to find the nearest finding.
+    // NSTrackingArea-backed overlay). It calls back with the cursor
+    // location on enter/move and `nil` on exit; canvasArea routes
+    // through applyHover so the UI-test injection takes the same path.
+
+    private func applyHover(_ location: CGPoint?, in canvasSize: CGSize) {
+        if let location {
+            hoverLocation = location
+            hoverIsActive = true
+            hoveredAnnotation = hitTest(at: location, in: canvasSize)
+        } else {
+            hoverIsActive = false
+            hoveredAnnotation = nil
+        }
+    }
 
     /// 1-px vertical line at the cursor with a floating time label at the
     /// top edge. Receives the canvas size from the enclosing GeometryReader
@@ -781,6 +818,9 @@ private struct ChannelPanel: View {
         }
         .frame(width: canvasSize.width, height: canvasSize.height, alignment: .topLeading)
         .allowsHitTesting(false)
+        // Forced leaf — SwiftUI drops non-hit-testable views from the
+        // macOS XCUI accessibility tree without this.
+        .accessibilityElement(children: .ignore)
         .accessibilityIdentifier("hover-crosshair")
     }
 
