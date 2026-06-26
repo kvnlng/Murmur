@@ -306,27 +306,40 @@ would have caught the regressions in CI.
       setup using `XCODE_CLOUD.md`. ~15 min of UI work; nothing more
       from the repo side is required.
 
-**Phase 3 — snapshot tests for SwiftUI overlays (UNBLOCKED, baselines TODO)**
+**Phase 3 — snapshot tests for SwiftUI overlays (BLOCKED on sandbox)**
 
-Status: dep conflict resolved. SwiftLint moved off the SPM plugin to
-Homebrew + a Run Script Build Phase, which freed `swift-syntax` and
-let `swift-snapshot-testing` resolve. Test file compiles. Baseline
-images still to be recorded.
+Status: SwiftLint moved off SPM, `swift-snapshot-testing` 1.18.x
+attached to MurmurTests, test file compiles. Tests are currently
+opt-in behind `RUN_SNAPSHOT_TESTS=1` because the sandboxed host app
+(Murmur.app, `ENABLE_APP_SANDBOX=YES`) blocks the test process from
+reading or writing `MurmurTests/__Snapshots__/`.
 
 - [x] `MurmurTests/SnapshotTests.swift` covers the pure-data overlays:
       `AnnotationTooltip` (point + range), `WaveformTimeAxis` (default
       10s + zoomed 60s), `WaveformVoltageAxis`,
       `FindingDensityTimeline` (mixed categories),
       `FindingsSummaryHeader` (mixed + empty)
-- [x] `swift-snapshot-testing` 1.18.x attached to MurmurTests target.
-- [ ] User-action: record baselines. In Xcode → MurmurTests scheme →
-      run `SnapshotTests` once with `record: .all` on one
-      `assertSnapshot` call (or env var `SNAPSHOT_TESTING_RECORD=all`
-      on the scheme). Commit `MurmurTests/__Snapshots__/`. Revert the
-      `record` arg and verify a second run passes clean.
-- [ ] Pin snapshot tests to "Latest Release" only in the Xcode Cloud
-      matrix — SwiftUI metrics drift across macOS versions, so
-      multi-version snapshots will be flaky.
+- [x] `swift-snapshot-testing` 1.18.x attached to MurmurTests target
+- [x] Tests guarded by `XCTSkipUnless` reading `RUN_SNAPSHOT_TESTS=1`
+      so they don't fail the suite while the sandbox question is open
+- [ ] **Decision needed:** how to give the test process write access
+      to `MurmurTests/__Snapshots__/`. Options under consideration:
+      - **Debug-only sandbox disable.** Set `ENABLE_APP_SANDBOX=NO` on
+        the Murmur target's Debug config only. Trade-off: removes a
+        coverage layer in local Debug runs; TestFlight smoke pass
+        still catches sandbox bugs in the Release build. Small risk
+        for Murmur specifically (narrow entitlements, read-only file
+        access, no networking).
+      - **Host-app refactor.** Split Murmur into a slim app launcher
+        + a MurmurCore framework. Both Murmur app and MurmurTests
+        link against MurmurCore. Tests escape the sandbox by losing
+        the test host entirely. Bigger investment; cleanest long
+        term.
+- [ ] Once unblocked: record baselines (set `RUN_SNAPSHOT_TESTS=1` +
+      `record: .all`, run once, commit `__Snapshots__/`, revert
+      record mode, re-run to verify clean assert).
+- [ ] Pin snapshot tests to "Latest Release" only in Xcode Cloud
+      matrix — SwiftUI metrics drift across macOS versions.
 - [ ] Deferred (separate task): snapshot coverage for `FindingsPanel`,
       `AlarmStrip`, `QualityStrip`, `StateBackdropStrip`. The three
       strips read channel files from a `recordingDirectory: URL`, so
