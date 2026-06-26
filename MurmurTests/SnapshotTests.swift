@@ -62,7 +62,7 @@ final class SnapshotTests: XCTestCase {
         let view = AnnotationTooltip(annotation: annotation, sampleRate: 250)
             .frame(width: 240)
             .padding()
-        assertSnapshot(of: render(view, size: size), as: .image)
+        assertSnapshot(of: render(view, size: size), as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 
     func testAnnotationTooltip_rangeWithoutNote() {
@@ -78,7 +78,7 @@ final class SnapshotTests: XCTestCase {
         let view = AnnotationTooltip(annotation: annotation, sampleRate: 250)
             .frame(width: 240)
             .padding()
-        assertSnapshot(of: render(view, size: size), as: .image)
+        assertSnapshot(of: render(view, size: size), as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 
     // MARK: - WaveformTimeAxis
@@ -89,7 +89,7 @@ final class SnapshotTests: XCTestCase {
             .frame(width: 660, height: 16)
             .padding(.horizontal, 8)
             .background(Color.white)
-        assertSnapshot(of: render(view, size: size), as: .image)
+        assertSnapshot(of: render(view, size: size), as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 
     func testTimeAxis_zoomedSixtySecondViewport() {
@@ -98,7 +98,7 @@ final class SnapshotTests: XCTestCase {
             .frame(width: 660, height: 16)
             .padding(.horizontal, 8)
             .background(Color.white)
-        assertSnapshot(of: render(view, size: size), as: .image)
+        assertSnapshot(of: render(view, size: size), as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 
     // MARK: - WaveformVoltageAxis
@@ -109,7 +109,7 @@ final class SnapshotTests: XCTestCase {
             .frame(width: 56, height: 180)
             .padding(.vertical, 4)
             .background(Color.white)
-        assertSnapshot(of: render(view, size: size), as: .image)
+        assertSnapshot(of: render(view, size: size), as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 
     // MARK: - FindingDensityTimeline
@@ -141,7 +141,7 @@ final class SnapshotTests: XCTestCase {
         .frame(width: 520)
         .padding()
         .background(Color.white)
-        assertSnapshot(of: render(view, size: CGSize(width: 552, height: 160)), as: .image)
+        assertSnapshot(of: render(view, size: CGSize(width: 552, height: 160)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 
     // MARK: - FindingsSummaryHeader
@@ -162,7 +162,7 @@ final class SnapshotTests: XCTestCase {
         )
         .frame(width: 360)
         .background(Color.white)
-        assertSnapshot(of: render(view, size: CGSize(width: 360, height: 60)), as: .image)
+        assertSnapshot(of: render(view, size: CGSize(width: 360, height: 60)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 }
 

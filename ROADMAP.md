@@ -302,9 +302,11 @@ would have caught the regressions in CI.
 - [x] `RELEASE.md` updated to use `git tag` as the primary release
       entry-point once Xcode Cloud is wired (manual archive/upload
       retained as fallback)
-- [ ] User-action: walk through the App Store Connect → Xcode Cloud
-      setup using `XCODE_CLOUD.md`. ~15 min of UI work; nothing more
-      from the repo side is required.
+- [x] User-action: Xcode Cloud workflow set up via App Store Connect.
+      Both `Test on main` and `Archive on tag` workflows are running.
+      Setup gotchas (Package.resolved tracking, plugin trust dance
+      before SwiftLint was moved off SPM, re-tag triggers) captured in
+      `project_xcode_cloud_setup_quirks` memory.
 
 **Phase 3 — snapshot tests for SwiftUI overlays (✅ DONE)**
 
@@ -382,9 +384,10 @@ Tasks:
       conformance. Worth a focused session — this is the contract
       that ML inference plugs into, deserves deliberate thought rather
       than a stub at the end of a long refactor session.
-- [ ] Cleanup: delete Xcode-generated stubs `MurmurCore.swift` and
-      `MurmurCoreTests/MurmurCoreTests.swift` if they remain
-      (placeholder template content, harmless but cluttered).
+- [x] Cleanup: `MurmurCore/MurmurCore.swift` stub deleted;
+      `MurmurCoreTests/MurmurCoreTests.swift` slimmed to imports +
+      header comment (target reserved for future MurmurInference-style
+      isolated unit tests).
 
 ### Medium-term
 - [ ] Lead-specific findings — render annotations only on the channels
