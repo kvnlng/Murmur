@@ -306,13 +306,14 @@ would have caught the regressions in CI.
       setup using `XCODE_CLOUD.md`. ~15 min of UI work; nothing more
       from the repo side is required.
 
-**Phase 3 — snapshot tests for SwiftUI overlays (BLOCKED on sandbox)**
+**Phase 3 — snapshot tests for SwiftUI overlays (✅ DONE)**
 
-Status: SwiftLint moved off SPM, `swift-snapshot-testing` 1.18.x
-attached to MurmurTests, test file compiles. Tests are currently
-opt-in behind `RUN_SNAPSHOT_TESTS=1` because the sandboxed host app
-(Murmur.app, `ENABLE_APP_SANDBOX=YES`) blocks the test process from
-reading or writing `MurmurTests/__Snapshots__/`.
+Decision recorded: instead of disabling Debug sandbox, we're splitting
+Murmur into a slim app target + a MurmurCore framework. Tests link
+MurmurCore directly, escape the sandbox permanently, and we get a
+modular architecture that's also ready for the upcoming ML/inference
+work (separate MurmurInference framework, FindingProducer protocol).
+See Phase 4 below.
 
 - [x] `MurmurTests/SnapshotTests.swift` covers the pure-data overlays:
       `AnnotationTooltip` (point + range), `WaveformTimeAxis` (default
@@ -320,24 +321,12 @@ reading or writing `MurmurTests/__Snapshots__/`.
       `FindingDensityTimeline` (mixed categories),
       `FindingsSummaryHeader` (mixed + empty)
 - [x] `swift-snapshot-testing` 1.18.x attached to MurmurTests target
-- [x] Tests guarded by `XCTSkipUnless` reading `RUN_SNAPSHOT_TESTS=1`
-      so they don't fail the suite while the sandbox question is open
-- [ ] **Decision needed:** how to give the test process write access
-      to `MurmurTests/__Snapshots__/`. Options under consideration:
-      - **Debug-only sandbox disable.** Set `ENABLE_APP_SANDBOX=NO` on
-        the Murmur target's Debug config only. Trade-off: removes a
-        coverage layer in local Debug runs; TestFlight smoke pass
-        still catches sandbox bugs in the Release build. Small risk
-        for Murmur specifically (narrow entitlements, read-only file
-        access, no networking).
-      - **Host-app refactor.** Split Murmur into a slim app launcher
-        + a MurmurCore framework. Both Murmur app and MurmurTests
-        link against MurmurCore. Tests escape the sandbox by losing
-        the test host entirely. Bigger investment; cleanest long
-        term.
-- [ ] Once unblocked: record baselines (set `RUN_SNAPSHOT_TESTS=1` +
-      `record: .all`, run once, commit `__Snapshots__/`, revert
-      record mode, re-run to verify clean assert).
+- [x] MurmurCore framework split: tests escape host-app sandbox,
+      snapshot reads + writes work end-to-end
+- [x] Baselines recorded under `__Snapshots__/SnapshotTests/`. Rendering
+      goes via `ImageRenderer` (SwiftUI-native) — NSHostingView leaves
+      `GeometryReader`-rooted views blank.
+- [x] 7/7 snapshot tests pass clean; full suite 202/202
 - [ ] Pin snapshot tests to "Latest Release" only in Xcode Cloud
       matrix — SwiftUI metrics drift across macOS versions.
 - [ ] Deferred (separate task): snapshot coverage for `FindingsPanel`,
@@ -346,9 +335,56 @@ reading or writing `MurmurTests/__Snapshots__/`.
       they need a disk-backed test fixture before they can be
       snapshotted. `FindingsPanel` also needs a `DispositionStore`
       stand-in.
+- [ ] Deferred: `FindingsSummaryHeader` mixed-findings (chip row)
+      snapshot. The chip row lives inside a horizontal `ScrollView`
+      and `ImageRenderer` measures ScrollView intrinsic size as zero
+      → blank output. Would need a non-Scroll test variant or a
+      different render strategy. Density-timeline snapshot exercises
+      chip color/severity rendering as a proxy.
 - [x] Skip the Metal canvas itself — pixel diffs across GPUs/MSAA are
       unreliable; rely on the surrounding SwiftUI for visual
       regression coverage
+
+**Phase 4 — MurmurCore framework split + FindingProducer protocol**
+
+Memory file `project_murmurcore_architecture.md` has the full rationale.
+
+Target layout after this phase:
+- **Murmur (app)** — slim launcher: `MurmurApp.swift`, Help menu,
+  Info.plist, Assets.xcassets (AppIcon). Sandboxed.
+- **MurmurCore (framework)** — everything else: views, models, file
+  I/O, viewport, render, `FindingProducer` protocol. Pure-Swift, no
+  heavy deps. Linked by both the Murmur app and MurmurTests.
+- **MurmurInference (framework, future, NOT in this phase)** —
+  concrete `FindingProducer` impls wrapping LibTorch / CoreML. Added
+  when ML work begins.
+
+Tasks:
+- [x] MurmurCore framework target created
+- [x] All Swift files except `MurmurApp.swift` moved to MurmurCore
+      target membership. `Assets.xcassets` and `Info.plist` stay in
+      the Murmur app target.
+- [x] MurmurCore embedded in the Murmur app target
+- [x] `ContentView` made `public` (struct + `init()` + `body`) so
+      MurmurApp can construct it across the framework boundary
+- [x] MurmurTests links `MurmurCore.framework` directly; `TEST_HOST`
+      and `BUNDLE_LOADER` cleared. Test process runs as standalone
+      xctest binary — no sandbox.
+- [x] Test imports updated to `@testable import MurmurCore`
+- [x] Build clean + all 202 tests pass (including the 7 snapshot
+      tests that were previously skipped behind `RUN_SNAPSHOT_TESTS=1`)
+- [x] `RecentFoldersStoreTests/resolvesBookmark()` fix:
+      `resolvingSymlinksInPath()` on both sides — needed because the
+      bookmark API now returns the canonical `/private/var/folders/`
+      form once the test process escapes the sandboxed host.
+- [ ] **Deferred to next session: `FindingProducer` protocol design**
+      + refactoring `SyntheticRecording` into the first concrete
+      conformance. Worth a focused session — this is the contract
+      that ML inference plugs into, deserves deliberate thought rather
+      than a stub at the end of a long refactor session.
+- [ ] Cleanup: delete Xcode-generated stubs `MurmurCore.swift` and
+      `MurmurCoreTests/MurmurCoreTests.swift` if they remain
+      (placeholder template content, harmless but cluttered).
 
 ### Medium-term
 - [ ] Lead-specific findings — render annotations only on the channels

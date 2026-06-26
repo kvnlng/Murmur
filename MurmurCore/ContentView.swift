@@ -5,7 +5,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-struct ContentView: View {
+public struct ContentView: View {
     @State private var state: AppState = .empty
     @State private var importStates: [String: RecordImportState] = [:]
     @State private var selection: String?
@@ -13,6 +13,8 @@ struct ContentView: View {
     @State private var errorMessage: String?
     @State private var currentImportTask: Task<Void, Never>?
     @State private var recentsStore = RecentFoldersStore()
+
+    public init() {}
 
     enum AppState {
         case empty
@@ -26,7 +28,7 @@ struct ContentView: View {
         case failed(message: String)
     }
 
-    var body: some View {
+    public var body: some View {
         Group {
             switch state {
             case .empty:

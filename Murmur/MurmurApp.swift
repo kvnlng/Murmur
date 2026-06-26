@@ -6,6 +6,7 @@
 //
 
 import AppKit
+import MurmurCore
 import SwiftUI
 
 @main

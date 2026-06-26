@@ -9,7 +9,7 @@
 
 import Foundation
 import Testing
-@testable import Murmur
+@testable import MurmurCore
 
 // MARK: - WFDB header parser
 
@@ -1653,7 +1653,10 @@ struct RecentFoldersStoreTests {
         let entry = try #require(store.entries.first)
 
         let resolved = try #require(store.resolve(entry))
-        #expect(resolved.path == folder.path)
+        // Normalize via resolvingSymlinksInPath because the bookmark API returns
+        // the canonical /private-prefixed form of /var/folders/... on macOS,
+        // while the original folder URL retains the alias path.
+        #expect(resolved.resolvingSymlinksInPath().path == folder.resolvingSymlinksInPath().path)
     }
 }
 
