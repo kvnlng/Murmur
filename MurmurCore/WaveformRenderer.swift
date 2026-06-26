@@ -136,7 +136,11 @@ final class WaveformRenderer: NSObject, MTKViewDelegate {
         self.device = device
         self.commandQueue = queue
 
-        guard let library = device.makeDefaultLibrary() else { return nil }
+        // `device.makeDefaultLibrary()` looks in the main app bundle, but
+        // `WaveformShaders.metal` is compiled into MurmurCore.framework's
+        // bundle. Asking the framework's bundle by type-reflection — survives
+        // any future renames or moves of this class.
+        guard let library = try? device.makeDefaultLibrary(bundle: Bundle(for: WaveformRenderer.self)) else { return nil }
         do {
             self.tracePipeline = try Self.makePipeline(
                 device: device, library: library,

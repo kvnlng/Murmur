@@ -2295,6 +2295,42 @@ struct DispositionStoreTests {
 
 // MARK: - Waveform time-axis decimation
 //
+// MARK: - WaveformRenderer initialization
+//
+// Regression guard for the bug where the Metal shader library can't be found
+// because `makeDefaultLibrary()` looks in the main app bundle by default —
+// but with MurmurCore as its own framework, `WaveformShaders.metal` compiles
+// into the framework's bundle, not the app's. Init returns nil, the canvas
+// silently renders nothing (no waveform, no paper background), and the bug
+// is invisible to the suite of unit tests that exercise data-layer logic.
+// Fix is `device.makeDefaultLibrary(bundle: Bundle(for: WaveformRenderer.self))`.
+
+import Metal
+
+@Suite("Waveform renderer initialization")
+@MainActor
+struct WaveformRendererInitTests {
+
+    @Test("Init must succeed on a Metal-capable device — catches missing shader library")
+    func initSucceedsOnRealDevice() throws {
+        let device = try #require(
+            MTLCreateSystemDefaultDevice(),
+            "Test requires a Metal-capable device — every modern Mac qualifies"
+        )
+        let renderer = WaveformRenderer(device: device)
+        #expect(renderer != nil, """
+            WaveformRenderer.init returned nil. The most likely cause is that
+            `device.makeDefaultLibrary()` couldn't find the .metal shader library.
+            With MurmurCore as a framework, the shader library lives in
+            `MurmurCore.framework/Resources/`, not the main app bundle.
+            Look at `WaveformRenderer.init` and use
+            `device.makeDefaultLibrary(bundle: Bundle(for: WaveformRenderer.self))`.
+            """)
+    }
+}
+
+// MARK: - Waveform time-axis label decimation
+//
 // Regression guards for the App Store Guideline 4 fix: tick labels on the
 // waveform x-axis must never overlap each other. The decimation math lives
 // on `WaveformTimeAxis.decimationStride(...)` so it's testable without
