@@ -268,6 +268,47 @@ Three layers as agreed; all three now built:
       kicks off a transition any time `useEnvelope` flips or
       `loadedPyramidIndex` changes.
 
+### Quality infrastructure
+Driven by yesterday's canvas-polish back-and-forth: events were firing
+correctly the whole time but the visual symptom only manifested at
+runtime, so we burned cycles on round-trip diagnostics. Better tests
+would have caught the regressions in CI.
+
+**Phase 1 — make existing patterns testable (1 session)**
+- [ ] Launch arg `--ui-test-zoomed-sample` that opens the synthetic
+      fixture with a 1-second viewport, so drag pans actually have
+      somewhere to move to and a "drag changes viewport" test is
+      meaningful
+- [ ] Launch arg `--ui-test-hover-at=x,y` that calls the same
+      `hoverLocation` / `hoverIsActive` update closure the
+      `HoverTrackingView` does — bypasses the `XCUICoordinate.hover()`
+      flakiness on macOS so the crosshair render path is testable
+- [ ] Refactor key SwiftUI containers to expose nested elements
+      through `.accessibilityElement(children: .contain)` so XCUI can
+      find Text elements like the time-window-label (the test we had
+      to drop yesterday)
+- [ ] Write 6-8 XCUI tests against the new hooks: drag pans the
+      viewport, hover renders the crosshair, click finding row jumps
+      viewport, attach-findings flow end-to-end, window resize honors
+      the new minimum, lock toolbar gates editing
+
+**Phase 2 — Xcode Cloud workflow (1 session)**
+- [ ] App Store Connect → Xcode Cloud → workflow on the `main` branch
+- [ ] On push: run MurmurTests + MurmurUITests on macOS-latest
+- [ ] Matrix on multiple macOS versions (Sonoma 14, Sequoia 15,
+      Tahoe 26 if it exists) to catch API regressions across the
+      versions our App Store users actually run
+- [ ] Optional: on tag, archive + upload to TestFlight automatically
+- [ ] Failure notifications via email (Slack later if desired)
+
+**Phase 3 — snapshot tests for SwiftUI overlays (lower priority)**
+- [ ] Add `swift-snapshot-testing` package
+- [ ] Reference snapshots for axes overlays, findings panel, summary
+      header, density timeline, alarm/quality/state strips
+- [ ] Skip the Metal canvas itself — pixel diffs across GPUs/MSAA are
+      unreliable; rely on the surrounding SwiftUI for visual
+      regression coverage
+
 ### Medium-term
 - [ ] Lead-specific findings — render annotations only on the channels
       that match their `lead` field
