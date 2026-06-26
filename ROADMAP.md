@@ -380,10 +380,71 @@ Tasks:
       bookmark API now returns the canonical `/private/var/folders/`
       form once the test process escapes the sandboxed host.
 - [ ] **Deferred to next session: `FindingProducer` protocol design**
-      + refactoring `SyntheticRecording` into the first concrete
-      conformance. Worth a focused session — this is the contract
-      that ML inference plugs into, deserves deliberate thought rather
-      than a stub at the end of a long refactor session.
+      + refactor `SyntheticRecording` into the first concrete
+      `SyntheticFindingProducer` conformance.
+
+  Sketch (starting point — to be revised in the design session):
+
+  ```swift
+  public protocol FindingProducer: Sendable {
+      var id: String { get }              // → annotations[].source
+      var displayName: String { get }     // UI surface (Findings panel filter, IAP labels)
+      func analyze(_ recording: Recording) async throws -> [Annotation]
+  }
+  ```
+
+  Open design questions to weigh before writing any code:
+
+  - **Sync vs async.** Sketch is async. Synthetic is instant —
+    overkill — but ML inference is heavy, and we don't want a
+    sync→async migration later. Lean async.
+  - **Whole-recording vs streaming.** PyTorch arrhythmia models
+    typically slide a window over channels (e.g. 10s @ 250 Hz =
+    2,500 samples). API choice: take whole `Recording` and let the
+    producer window internally vs. expose
+    `AsyncSequence<Window>` so the host streams windows in. Whole-
+    recording is simpler; streaming gives partial-results +
+    progress for free.
+  - **Progress reporting.** Closure-based callback, `AsyncStream`
+    of progress structs, or `@Observable` state on the producer
+    instance? Density-timeline UI will want to show "scanning…
+    32%". Lean toward `AsyncStream<ProgressUpdate>` since the
+    producer already returns an async result.
+  - **Cancellation.** Mandatory `try Task.checkCancellation()` on
+    window boundaries — needs to be in the contract or it gets
+    forgotten. Document as a requirement; enforce at call site.
+  - **Error semantics.** Partial results on per-window failure
+    (`Result<[Annotation], Error>` per window) vs abort whole run.
+    Partial is more analyst-friendly; aborting is simpler. Lean
+    partial.
+  - **Confidence calibration.** Raw model probabilities vs
+    platt-scaled calibrated. Producer's responsibility (it knows
+    its own model), not the host's. Document expectation that
+    `confidence` field is calibrated, not raw.
+  - **Producer registry.** Where do registered producers live?
+    `ProducerRegistry` actor in MurmurCore that the app registers
+    against at startup, with IAP-aware filtering? Or a static
+    `FindingProducer.all` returning a list? Lean toward actor
+    registry — IAP gating becomes "filter the registry by
+    entitlement at the call site".
+  - **Test-only producers.** `SyntheticFindingProducer` doubles
+    as both a demo producer for end users AND a deterministic
+    fixture for tests. Worth splitting? Or keep one type with a
+    `seed` parameter for reproducibility?
+
+  When tackling this, design against an imagined `TorchScriptFindingProducer`
+  in your head so the contract is sharp before any ML code lands.
+
+  Implementation tasks once design settles:
+  - [ ] Define protocol + ProgressUpdate + error types in MurmurCore
+  - [ ] Refactor `SyntheticRecording` → `SyntheticFindingProducer`
+  - [ ] Wire `BedsideView`/`FindingsPanel` to consume producer-emitted
+        annotations alongside sidecar annotations (same UI path —
+        just different `source` field on each annotation)
+  - [ ] Test coverage: producer registry roundtrip, cancellation,
+        progress emission, deterministic synthetic output
+  - [ ] Update memory `project_murmurcore_architecture.md` to reference
+        the final shape of the protocol
 - [x] Cleanup: `MurmurCore/MurmurCore.swift` stub deleted;
       `MurmurCoreTests/MurmurCoreTests.swift` slimmed to imports +
       header comment (target reserved for future MurmurInference-style
