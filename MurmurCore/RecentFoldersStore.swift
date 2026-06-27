@@ -100,6 +100,17 @@ final class RecentFoldersStore {
                 bookmarkDataIsStale: &isStale
             )
         } catch {
+            #if DEBUG
+            // Tests seed non-scoped bookmarks via `recordForTesting`. Fall
+            // back to a plain resolution so the rest of the open flow runs
+            // unchanged from production.
+            if let plain = try? URL(
+                resolvingBookmarkData: entry.bookmarkData,
+                bookmarkDataIsStale: &isStale
+            ) {
+                return plain
+            }
+            #endif
             return nil
         }
         // Stale bookmarks usually still resolve — refresh in the background
@@ -129,6 +140,27 @@ final class RecentFoldersStore {
         guard let data = defaults.data(forKey: defaultsKey) else { return [] }
         return (try? JSONDecoder().decode([RecentFolder].self, from: data)) ?? []
     }
+
+    #if DEBUG
+    /// Seeds a synthetic recents entry for UI tests. Skips the
+    /// security-scoped bookmark requirement (the test process bypasses
+    /// the sandbox), so a non-scoped bookmark is enough to round-trip
+    /// the URL through the existing `resolve(_:)` path.
+    func recordForTesting(folder: URL) {
+        let bookmark = (try? folder.bookmarkData()) ?? Data()
+        let entry = RecentFolder(
+            id: UUID(),
+            displayName: folder.lastPathComponent,
+            resolvedPath: folder.path,
+            bookmarkData: bookmark,
+            addedAt: .now
+        )
+        var next = entries.filter { $0.resolvedPath != entry.resolvedPath }
+        next.insert(entry, at: 0)
+        entries = next
+        persist()
+    }
+    #endif
 
     private func makeBookmark(for url: URL) -> Data? {
         let needsScope = url.startAccessingSecurityScopedResource()

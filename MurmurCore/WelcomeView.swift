@@ -211,6 +211,7 @@ struct WelcomeView: View {
             }
             .background(cardBackground)
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("welcome-recents")
     }
 

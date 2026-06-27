@@ -297,8 +297,36 @@ public struct ContentView: View {
 
     #if DEBUG
     private func loadUITestSampleIfRequested() {
-        guard ProcessInfo.processInfo.arguments.contains("--ui-test-sample") else { return }
-        loadSampleFixture()
+        let args = ProcessInfo.processInfo.arguments
+        if args.contains("--ui-test-sample") {
+            loadSampleFixture()
+            return
+        }
+        if args.contains("--ui-test-seed-recent") {
+            seedRecentForTesting()
+        }
+    }
+
+    /// Materialises the synthetic fixture's source WFDB folder on disk and
+    /// seeds it as a recents-store entry, without auto-loading. Lets a UI
+    /// test land on the welcome screen with one clickable recents row that
+    /// will go through the full `scanFolder` → import → bedside flow when
+    /// clicked.
+    private func seedRecentForTesting() {
+        let workDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("murmur-ui-test-recents", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        guard (try? FileManager.default.createDirectory(
+            at: workDir,
+            withIntermediateDirectories: true
+        )) != nil,
+              (try? SyntheticRecording.makeMultiFrequencyRecord(into: workDir)) != nil else {
+            return
+        }
+        // Wipe any persisted entries first so each test run starts from a
+        // known-empty list — UserDefaults survives across runs otherwise.
+        recentsStore.clear()
+        recentsStore.recordForTesting(folder: workDir)
     }
     #endif
 

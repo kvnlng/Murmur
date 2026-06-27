@@ -32,6 +32,14 @@
 //        pretend the cursor's there, and the existing hover-update
 //        closure runs as if HoverTrackingView had fired.
 //
+//    --ui-test-seed-recent
+//        Materialises a synthetic WFDB folder into a unique temp
+//        directory and seeds it as a recents-store entry, without
+//        auto-loading. Lets a UI test land on the welcome screen
+//        with one clickable recents row so the row-click → bookmark
+//        resolve → import → bedside path runs end-to-end. Wipes the
+//        existing recents list first so each run starts deterministic.
+//
 
 #if DEBUG
 import Foundation

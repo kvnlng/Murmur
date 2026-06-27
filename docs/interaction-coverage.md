@@ -19,8 +19,8 @@ covering the highest-risk flows before each public submission.
 - 🟡 Manual gate via the `RELEASE.md` smoke pass
 - ⬜ Uncovered — no automated test, not in smoke pass
 
-**Current score:** 18 ✅ automated · 10 🟡 manual-only · 1 ⬜ uncovered out of 29 total.
-That's **62% automated**, **97% covered by some gate** (automated + smoke).
+**Current score:** 19 ✅ automated · 9 🟡 manual-only · 1 ⬜ uncovered out of 29 total.
+That's **66% automated**, **97% covered by some gate** (automated + smoke).
 
 The North Star: convert 🟡 → ✅ over time, especially for flows where the
 bug class would silently degrade the analyst experience without crashing.
@@ -37,7 +37,7 @@ automated, or one moves between buckets.
 | Toolbar **Open** button exists on cold launch | ✅ `MurmurUITests/testToolbarOpenButtonExists` | |
 | Click "Try a sample recording" → synthetic fixture loads, bedside renders | ✅ `MurmurUITests/testSyntheticFixtureRendersBedsideView` | Asserts `bedside-view`, `lead-chip-bar`, `channel-panel-I` present and `empty-state-prompt` gone |
 | Click "Open Record Folder" → fileImporter opens, folder selection loads | 🟡 RELEASE.md smoke | `fileImporter` flows are XCUI-hostile on macOS — modal sheet escapes the test runner |
-| Click a recent-folder row → folder re-opens | 🟡 RELEASE.md smoke | `welcome-recent-*` identifier exists; would need a launch-arg primer to seed UserDefaults with a recents entry |
+| Click a recent-folder row → folder re-opens | ✅ `MurmurUITests/testClickingRecentFolderReopensRecording` | `--ui-test-seed-recent` materialises a synthetic WFDB folder and seeds it as a recents entry; the row click runs the full scanFolder → import → bedside flow |
 | Drag-and-drop a folder onto the welcome view → opens | 🟡 RELEASE.md smoke | `DropDelegate` invocation can't be synthesised by XCUI |
 | Click PhysioNet link → opens browser | ⬜ Uncovered | URL launch leaves the test runner; low-value to automate |
 
@@ -107,8 +107,6 @@ automated, or one moves between buckets.
    comments or a notes file, and the fixture has neither. Add either
    to the synthetic record, then type into `context-notes-editor`,
    assert the text persists across editor close/reopen.
-2. **Recent-folder row click.** Seed a recents entry via launch-arg,
-   click the row, assert the recording loads.
 
 ## Counted intentionally NOT in this list
 

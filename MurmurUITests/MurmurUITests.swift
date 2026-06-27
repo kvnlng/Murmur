@@ -391,6 +391,34 @@ final class MurmurUITests: XCTestCase {
                       "VT row should remain visible after the VT-only filter")
     }
 
+    // MARK: - Tier 5b: recents
+
+    @MainActor
+    func testClickingRecentFolderReopensRecording() throws {
+        // Guards: recents-row click → bookmark resolve → scanFolder →
+        // import → bedside-view. The launch arg seeds one entry in the
+        // recents store pointing at a synthetic WFDB source folder, then
+        // we click the row and assert the bedside view materialises.
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-seed-recent"]
+        app.launch()
+
+        // The seed runs inside ContentView's .task, so give it a beat to
+        // land an entry in the store before we look for the row.
+        let recentRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'welcome-recent-'")).firstMatch
+        XCTAssertTrue(recentRow.waitForExistence(timeout: 5),
+                      "Seeded recents entry should render in the welcome view")
+        recentRow.click()
+
+        // Single-record folders auto-select and auto-import on open, so
+        // the bedside view should render once the importer finishes.
+        let bedside = app.descendants(matching: .any)
+            .matching(identifier: "bedside-view").firstMatch
+        XCTAssertTrue(bedside.waitForExistence(timeout: 15),
+                      "Clicking a recents row should open the folder, import the record, and show bedside-view")
+    }
+
     // MARK: - Tier 6: disposition round-trip (lock-gated)
 
     @MainActor
