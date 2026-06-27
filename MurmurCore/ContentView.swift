@@ -329,6 +329,14 @@ public struct ContentView: View {
         }
         if args.contains("--ui-test-open-folder") {
             openSyntheticFolderForTesting()
+            return
+        }
+        if args.contains("--ui-test-prep-large-fixture") {
+            prepLargeFixtureForTesting()
+            return
+        }
+        if args.contains("--ui-test-load-prepped-bundle") {
+            loadPreppedLargeBundleForTesting()
         }
     }
 
@@ -360,6 +368,90 @@ public struct ContentView: View {
         guard ProcessInfo.processInfo.arguments.contains("--ui-test-attach-findings"),
               let url = UITestSupport.makeAttachFindingsFixture() else { return }
         UITestSupport.attachFindingsURL = url
+    }
+
+    /// Fixed location for the large pre-imported bundle used by
+    /// MurmurUILargeDatasetTests. The prep step generates a 1-hour
+    /// synthetic WFDB record here, runs the importer, and leaves the
+    /// resulting bundle ready to load. Subsequent tests in the same class
+    /// run skip prep and load directly from this path.
+    private static var largeFixtureBundleParent: URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("murmur-perf-large-bundle", isDirectory: true)
+    }
+
+    /// Generates a 1-hour synthetic record into a fixed location and runs
+    /// the importer. The resulting bundle stays on disk for the next test
+    /// iteration to load via `--ui-test-load-prepped-bundle`. Sets state
+    /// to `.directView` so the test runner can detect "prep finished" by
+    /// waiting for `bedside-view`.
+    private func prepLargeFixtureForTesting() {
+        let workDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("murmur-perf-large-work", isDirectory: true)
+        let bundleParent = Self.largeFixtureBundleParent
+        // Reuse a previously-prepped bundle if present — the prep is
+        // idempotent and slow, so a re-launch with the same flag should
+        // be cheap.
+        if let existing = preppedLargeBundlePath() {
+            do {
+                let recording = try RecordingStore.shared.loadManifest(at: existing)
+                state = .directView(directory: existing, recording: recording)
+                return
+            } catch {
+                // Fall through and regenerate.
+            }
+        }
+        try? FileManager.default.removeItem(at: workDir)
+        try? FileManager.default.removeItem(at: bundleParent)
+        guard (try? FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)) != nil,
+              (try? FileManager.default.createDirectory(at: bundleParent, withIntermediateDirectories: true)) != nil else {
+            return
+        }
+        do {
+            let heaURL = try SyntheticRecording.makeMultiFrequencyRecord(
+                into: workDir,
+                durationSeconds: 3600
+            )
+            let summary = try WFDBImporter.importRecord(heaURL: heaURL, outputDirectory: bundleParent)
+            let recording = try RecordingStore.shared.loadManifest(at: summary.directory)
+            state = .directView(directory: summary.directory, recording: recording)
+        } catch {
+            errorMessage = "Large-fixture prep failed: \(error.localizedDescription)"
+        }
+    }
+
+    /// Loads the pre-prepped bundle without re-running the importer.
+    /// Used by every iteration of every large-dataset test *after* the
+    /// one-time prep.
+    private func loadPreppedLargeBundleForTesting() {
+        guard let bundle = preppedLargeBundlePath() else {
+            errorMessage = "No prepped large bundle found — did the prep test run first?"
+            return
+        }
+        do {
+            let recording = try RecordingStore.shared.loadManifest(at: bundle)
+            state = .directView(directory: bundle, recording: recording)
+        } catch {
+            errorMessage = "Failed to load prepped large bundle: \(error.localizedDescription)"
+        }
+    }
+
+    /// Walks `largeFixtureBundleParent` for a single child directory
+    /// containing a `recording.json` — that's the imported bundle. Returns
+    /// nil if prep hasn't run.
+    private func preppedLargeBundlePath() -> URL? {
+        let parent = Self.largeFixtureBundleParent
+        guard let children = try? FileManager.default.contentsOfDirectory(
+            at: parent,
+            includingPropertiesForKeys: nil
+        ) else {
+            return nil
+        }
+        return children.first { url in
+            FileManager.default.fileExists(
+                atPath: url.appendingPathComponent("recording.json").path
+            )
+        }
     }
 
     /// Materialises the synthetic fixture's source WFDB folder on disk and

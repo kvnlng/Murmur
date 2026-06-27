@@ -93,14 +93,16 @@ enum SyntheticRecording {
     ///
     /// Base frame rate is 1 Hz so the slow trend signals can have `spf = 1`
     /// while ECG signals get `spf = 250` for their 250-Hz effective rate.
-    static func makeMultiFrequencyRecord(into directory: URL) throws -> URL {
+    static func makeMultiFrequencyRecord(
+        into directory: URL,
+        durationSeconds: Double = 10.0
+    ) throws -> URL {
         let recordName = "synth"
         let ecgLabels: [String] = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2"]
         let ecgRate = 250.0
         let baseFrameRate = 1.0
-        let durationSeconds = 10.0
-        let frameCount = Int(durationSeconds * baseFrameRate)              // 10
-        let ecgSamplesPerSignal = Int(durationSeconds * ecgRate)           // 2500
+        let frameCount = Int(durationSeconds * baseFrameRate)
+        let ecgSamplesPerSignal = Int(durationSeconds * ecgRate)
         let ecgGain: Double = 200.0
         let baseline = 0
 
@@ -193,9 +195,67 @@ enum SyntheticRecording {
         let heaURL = directory.appendingPathComponent("\(recordName).hea")
         try heaText.write(to: heaURL, atomically: true, encoding: .utf8)
 
-        try writeAnnotationsSidecar(recordName: recordName, into: directory)
+        if durationSeconds <= 30 {
+            try writeAnnotationsSidecar(recordName: recordName, into: directory)
+        } else {
+            try writeScaledAnnotationsSidecar(
+                recordName: recordName,
+                into: directory,
+                totalSamples: ecgSamplesPerSignal,
+                sampleRate: ecgRate
+            )
+        }
 
         return heaURL
+    }
+
+    /// Writes a longer annotations sidecar for long recordings — one finding
+    /// per ~60 s, alternating VT/VF, spread evenly across the recording so
+    /// large-dataset perf tests have realistic finding density to scroll
+    /// through. Caller guarantees totalSamples > 0.
+    private static func writeScaledAnnotationsSidecar(
+        recordName: String,
+        into directory: URL,
+        totalSamples: Int,
+        sampleRate: Double
+    ) throws {
+        let durationSec = Double(totalSamples) / sampleRate
+        let count = max(3, Int(durationSec / 60))
+        var parts: [String] = []
+        for i in 0..<count {
+            // Spread evenly across the duration so the last finding is at
+            // ~95% of the recording — gives jump-to-end tests a real target.
+            let frac = Double(i + 1) / Double(count + 1)
+            let startSample = Int(Double(totalSamples) * frac)
+            let isVT = i % 2 == 0
+            let category = isVT ? "VT" : "VF"
+            let kind = isVT ? "range" : "point"
+            let endField = isVT
+                ? ",\n      \"endSample\": \(startSample + Int(sampleRate * 2))"
+                : ""
+            let severity = isVT ? "warning" : "critical"
+            let confidence = isVT ? 0.85 : 0.78
+            parts.append("""
+                {
+                  "kind": "\(kind)",
+                  "startSample": \(startSample)\(endField),
+                  "category": "\(category)",
+                  "label": "\(category)",
+                  "confidence": \(confidence),
+                  "severity": "\(severity)",
+                  "note": "Synthetic \(category) finding #\(i + 1) of \(count)"
+                }
+                """)
+        }
+        let json = """
+        {
+          "schemaVersion": 1,
+          "source": "synth.scaled.v1",
+          "findings": [\(parts.joined(separator: ","))]
+        }
+        """
+        let url = directory.appendingPathComponent("\(recordName).annotations.json")
+        try json.write(to: url, atomically: true, encoding: .utf8)
     }
 
     /// Writes a small synthetic `<recordName>.annotations.json` next to the
