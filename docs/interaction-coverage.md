@@ -19,8 +19,8 @@ covering the highest-risk flows before each public submission.
 - 🟡 Manual gate via the `RELEASE.md` smoke pass
 - ⬜ Uncovered — no automated test, not in smoke pass
 
-**Current score:** 6 ✅ automated · 22 🟡 manual-only · 1 ⬜ uncovered out of 29 total.
-That's **21% automated**, **97% covered by some gate** (automated + smoke).
+**Current score:** 11 ✅ automated · 17 🟡 manual-only · 1 ⬜ uncovered out of 29 total.
+That's **38% automated**, **97% covered by some gate** (automated + smoke).
 
 The North Star: convert 🟡 → ✅ over time, especially for flows where the
 bug class would silently degrade the analyst experience without crashing.
@@ -49,8 +49,8 @@ automated, or one moves between buckets.
 | Pinch zoom canvas → viewport width scales | 🟡 RELEASE.md smoke | `MagnifyGesture` not synthesisable from XCUI on macOS. Zoom math covered by `RecordingViewportTests/setWidth*` |
 | Hover canvas → crosshair appears at cursor | 🟡 RELEASE.md smoke | Hover state doesn't appear in XCUI accessibility tree even with `--ui-test-hover-at=X,Y` injection. Hit-test math covered by unit tests |
 | Click finding row → viewport animates to finding | ✅ `MurmurUITests/testClickingFindingRowChangesViewport` | Uses `ui-test-viewport-state` accessibility element to read pre/post state |
-| Click overview ribbon → viewport scrubs to clicked position | 🟡 RELEASE.md smoke | Identifier `overview-ribbon-*` exists; would compose like the finding-row test but distinct gesture |
-| Click on density-timeline lane → viewport jumps to fraction | 🟡 RELEASE.md smoke | Identifier `density-lane-*` exists |
+| Click overview ribbon → viewport scrubs to clicked position | ✅ `MurmurUITests/testClickingOverviewRibbonScrubsViewport` | DragGesture(minimumDistance: 0) fires `onChanged` on a single click |
+| Click on density-timeline lane → viewport jumps to fraction | ✅ `MurmurUITests/testClickingDensityLaneJumpsViewport` | |
 | Renderer produces non-blank output | ✅ `WaveformRendererDrawSceneTests/clearsToPaperPink` + `drawsTraceWhenSamplesLoaded` | Offscreen MTLTexture readback — catches the bundle-lookup / shader-compile / pipeline-state class of bug |
 
 ## Layout controls
@@ -83,9 +83,9 @@ automated, or one moves between buckets.
 
 | Interaction | Test | Notes |
 | --- | --- | --- |
-| Click alarm-strip lane → viewport jumps to occurrence | 🟡 RELEASE.md smoke | Identifier `alarm-lane-*` exists |
-| Click quality-strip lane → viewport jumps to occurrence | 🟡 RELEASE.md smoke | Identifier `quality-lane-*` exists |
-| Click state-backdrop-strip lane → viewport jumps | 🟡 RELEASE.md smoke | Identifier `state-backdrop-strip` exists |
+| Click alarm-strip lane → viewport jumps to occurrence | ✅ `MurmurUITests/testClickingAlarmLaneJumpsViewport` | |
+| Click quality-strip lane → viewport jumps to occurrence | ✅ `MurmurUITests/testClickingQualityLaneJumpsViewport` | |
+| Click state-backdrop-strip lane → viewport jumps | ✅ `MurmurUITests/testClickingStateBackdropStripJumpsViewport` | |
 
 ## Window / menu
 
@@ -102,16 +102,15 @@ automated, or one moves between buckets.
 
 ## Gaps to close (priority order)
 
-1. **Click overview ribbon → viewport scrubs.** Same shape as the
-   finding-row test we already have — high-value, low-cost to write.
-2. **Click summary chip → filter applies.** Identifier already exists.
+1. **Click summary chip → filter applies.** Identifier already exists.
    Compose against the findings list to verify filter took effect.
-3. **Lock-gated confirm/dismiss/reset round-trip.** Toggle edit-mode
+2. **Lock-gated confirm/dismiss/reset round-trip.** Toggle edit-mode
    latch, hit confirm, assert disposition state shows in the row.
    Replaces three smoke steps with one XCUI test.
-
-Each of these reads as one focused XCUI test. Together they'd raise
-automated coverage from 21% → ~38%.
+3. **Lead chip click → focus mode shifts.** Click `lead-chip-V1`,
+   assert `channel-panel-V1` becomes the focused panel.
+4. **Layout mode toggle.** Flip Focus ↔ Strips, assert visible
+   channel-panel count changes.
 
 ## Counted intentionally NOT in this list
 

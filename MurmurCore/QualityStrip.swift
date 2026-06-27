@@ -48,6 +48,7 @@ struct QualityStrip: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("quality-strip")
             .task(id: channels.map(\.id)) {
                 await loadAll()
@@ -75,6 +76,7 @@ struct QualityStrip: View {
                 .frame(width: Self.labelWidth, alignment: .leading)
             heatBody(for: channel)
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("quality-lane-\(channel.name)")
     }
 

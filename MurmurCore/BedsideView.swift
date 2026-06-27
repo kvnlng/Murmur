@@ -697,6 +697,7 @@ private struct ChannelPanel: View {
         }
         .padding(12)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("channel-panel-\(channel.name)")
         .task { await scanForOffScale() }
     }

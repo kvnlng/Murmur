@@ -48,6 +48,7 @@ struct FindingDensityTimeline: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("finding-density-timeline")
         }
     }
@@ -88,6 +89,7 @@ struct FindingDensityTimeline: View {
 
             plotArea(lane)
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("density-lane-\(lane.category)")
     }
 

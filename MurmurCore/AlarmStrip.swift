@@ -42,6 +42,7 @@ struct AlarmStrip: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("alarm-strip")
             .task(id: channels.map(\.id)) {
                 await loadAll()
@@ -73,6 +74,7 @@ struct AlarmStrip: View {
                 .frame(width: Self.labelWidth, alignment: .leading)
             laneBody(for: channel)
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("alarm-lane-\(channel.name)")
     }
 

@@ -54,6 +54,7 @@ struct OverviewRibbon: View {
             scaleStrip
         }
         .padding(.top, 4)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("overview-ribbon-\(channel.name)")
         .task { await loadOverview() }
     }

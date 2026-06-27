@@ -163,6 +163,152 @@ final class MurmurUITests: XCTestCase {
     }
 
     @MainActor
+    func testClickingOverviewRibbonScrubsViewport() throws {
+        // Guards: overview ribbon's click-to-scrub path. Same shape as the
+        // finding-row test — click the ribbon, assert the viewport-state
+        // label changes. The ribbon uses a DragGesture(minimumDistance: 0),
+        // so a click registers as a touch-down that fires the gesture's
+        // initial `onChanged`.
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "--ui-test-sample",
+            "--ui-test-initial-duration=2"
+        ]
+        app.launch()
+
+        let viewportState = app.descendants(matching: .any)
+            .matching(identifier: "ui-test-viewport-state").firstMatch
+        XCTAssertTrue(viewportState.waitForExistence(timeout: 5))
+        let initial = viewportState.label
+
+        // Lead I is focused by default in the synthetic fixture, so its
+        // overview ribbon is the one on-screen.
+        let ribbon = app.descendants(matching: .any)
+            .matching(identifier: "overview-ribbon-I").firstMatch
+        XCTAssertTrue(ribbon.waitForExistence(timeout: 3))
+        ribbon.click()
+
+        let predicate = NSPredicate(format: "label != %@", initial)
+        let exp = XCTNSPredicateExpectation(predicate: predicate, object: viewportState)
+        XCTAssertEqual(XCTWaiter.wait(for: [exp], timeout: 3), .completed,
+                       "Viewport state should change after an overview-ribbon click (was '\(initial)')")
+    }
+
+    @MainActor
+    func testClickingDensityLaneJumpsViewport() throws {
+        // Guards: FindingDensityTimeline's tap-to-jump path. The synthetic
+        // fixture has VT and VF findings, so two lanes render.
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "--ui-test-sample",
+            "--ui-test-initial-duration=2"
+        ]
+        app.launch()
+
+        let viewportState = app.descendants(matching: .any)
+            .matching(identifier: "ui-test-viewport-state").firstMatch
+        XCTAssertTrue(viewportState.waitForExistence(timeout: 5))
+        let initial = viewportState.label
+
+        let vtLane = app.descendants(matching: .any)
+            .matching(identifier: "density-lane-VT").firstMatch
+        XCTAssertTrue(vtLane.waitForExistence(timeout: 3))
+        vtLane.click()
+
+        let predicate = NSPredicate(format: "label != %@", initial)
+        let exp = XCTNSPredicateExpectation(predicate: predicate, object: viewportState)
+        XCTAssertEqual(XCTWaiter.wait(for: [exp], timeout: 3), .completed,
+                       "Viewport state should change after a density-lane click (was '\(initial)')")
+    }
+
+    @MainActor
+    func testClickingAlarmLaneJumpsViewport() throws {
+        // Guards: AlarmStrip's tap-to-jump path. The synthetic fixture's
+        // had_high_priority_alarm channel fires at frames 3 and 7, so the
+        // strip is visible (the lane hides itself if every channel is silent).
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "--ui-test-sample",
+            "--ui-test-initial-duration=2"
+        ]
+        app.launch()
+
+        let viewportState = app.descendants(matching: .any)
+            .matching(identifier: "ui-test-viewport-state").firstMatch
+        XCTAssertTrue(viewportState.waitForExistence(timeout: 5))
+        let initial = viewportState.label
+
+        let alarmLane = app.descendants(matching: .any)
+            .matching(identifier: "alarm-lane-had_high_priority_alarm").firstMatch
+        XCTAssertTrue(alarmLane.waitForExistence(timeout: 3))
+        alarmLane.click()
+
+        let predicate = NSPredicate(format: "label != %@", initial)
+        let exp = XCTNSPredicateExpectation(predicate: predicate, object: viewportState)
+        XCTAssertEqual(XCTWaiter.wait(for: [exp], timeout: 3), .completed,
+                       "Viewport state should change after an alarm-lane click (was '\(initial)')")
+    }
+
+    @MainActor
+    func testClickingQualityLaneJumpsViewport() throws {
+        // Guards: QualityStrip's tap-to-jump path. The synthetic fixture's
+        // ecg_artifact_ratio channel has visibly-noisy frames at 5 and 8.
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "--ui-test-sample",
+            "--ui-test-initial-duration=2"
+        ]
+        app.launch()
+
+        let viewportState = app.descendants(matching: .any)
+            .matching(identifier: "ui-test-viewport-state").firstMatch
+        XCTAssertTrue(viewportState.waitForExistence(timeout: 5))
+        let initial = viewportState.label
+
+        let qualityLane = app.descendants(matching: .any)
+            .matching(identifier: "quality-lane-ecg_artifact_ratio").firstMatch
+        XCTAssertTrue(qualityLane.waitForExistence(timeout: 3))
+        qualityLane.click()
+
+        let predicate = NSPredicate(format: "label != %@", initial)
+        let exp = XCTNSPredicateExpectation(predicate: predicate, object: viewportState)
+        XCTAssertEqual(XCTWaiter.wait(for: [exp], timeout: 3), .completed,
+                       "Viewport state should change after a quality-lane click (was '\(initial)')")
+    }
+
+    @MainActor
+    func testClickingStateBackdropStripJumpsViewport() throws {
+        // Guards: StateBackdropStrip's tap-to-jump path. The strip's tap
+        // target is the inner cell body — the identifier sits on the whole
+        // strip (header + row), so we click toward the bottom-right of the
+        // element to land on the cells instead of the header text.
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "--ui-test-sample",
+            "--ui-test-initial-duration=2"
+        ]
+        app.launch()
+
+        let viewportState = app.descendants(matching: .any)
+            .matching(identifier: "ui-test-viewport-state").firstMatch
+        XCTAssertTrue(viewportState.waitForExistence(timeout: 5))
+        let initial = viewportState.label
+
+        let strip = app.descendants(matching: .any)
+            .matching(identifier: "state-backdrop-strip").firstMatch
+        XCTAssertTrue(strip.waitForExistence(timeout: 3))
+        // Aim for the bottom-right quadrant — the cell body sits below the
+        // header and to the right of the "ventilation" label.
+        let target = strip.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.8))
+        target.click()
+
+        let predicate = NSPredicate(format: "label != %@", initial)
+        let exp = XCTNSPredicateExpectation(predicate: predicate, object: viewportState)
+        XCTAssertEqual(XCTWaiter.wait(for: [exp], timeout: 3), .completed,
+                       "Viewport state should change after a state-backdrop click (was '\(initial)')")
+    }
+
+    @MainActor
     func testFindingsPanelTogglesViaToolbar() throws {
         // Guards: toolbar button wiring, inspector show/hide, panel
         // render path. A regression here would silently strand findings
