@@ -473,88 +473,178 @@ Tasks:
 ### Deferred
 - [ ] Multi-file WFDB records (per-signal `.dat`)
 - [ ] Additional WFDB sample formats (8, 16+, 24, 32, 310, 311, 80)
-- [ ] Annotation authoring inside the app (manual marker placement)
 - [ ] Export imported recordings to a portable bundle
 - [ ] HDR/wide-color-gamut Metal canvas
 - [ ] Two-finger trackpad swipe → pan via an NSScrollView bridge
 
-## Paid features roadmap (In-App Purchases)
+*(Annotation authoring moved out of Deferred 2026-06-28 — now a paid
+IAP under the open-core split below.)*
 
-Two planned IAPs that turn Murmur Studio from a free analyst review tool
-into a research-oriented platform. The base review experience stays free
-and unchanged — these layer additional compute on top, gated by
-entitlements. Both will be added in *future* versions; nothing here
-applies to the v1.0 build currently in App Store review.
+## Paid features roadmap (open-core + IAPs)
 
-### Strategic framing
+Strategic pivot recorded 2026-06-28: the app becomes an **open-core
+product**. The viewer is a free, MIT-licensed, open-source native
+macOS WFDB tool; three paid IAPs ride on top as research/commercial
+extensions. The base v1.0 review experience stays free and unchanged
+after the IAPs land — paywalls are *additive*, never gate anything
+users already had. None of this applies to the v1.0 build currently
+in App Store review.
 
-- **Silver Layer Metrics IAP** — calculates the Cardiopulmonary Telemetry
+### Open-core distribution model
+
+- **Murmur Studio (free, open source, MIT)** — read-only viewer:
+  WFDB import, finding display, filter chips, viewport, disposition
+  workflow (confirm/dismiss/reset of upstream findings is
+  *consumption*, stays free), all rendering and UI chrome.
+- **Annotation Authoring IAP (paid)** — manual annotation create /
+  edit / delete. *Consuming* upstream findings is free; *creating*
+  new findings is where research labor concentrates and where
+  labs/PIs will pay.
+- **Silver Layer Metrics IAP (paid)** — Cardiopulmonary Telemetry
   Silver-Layer metrics from the user's paper *"Modular Feature
   Architecture for Mechanical Ventilation and Cardiopulmonary
   Telemetry."* Pure Swift port (Accelerate / vDSP where it helps).
   Deterministic, reviewable, no regulatory exposure — surfaces
-  engineered features, not diagnoses. Lower technical risk; ship first
-  to validate StoreKit wiring and willingness-to-pay.
-- **VT/VF Detection IAP** — runs the SE-ResLSTM model from the user's
-  paper *"Automated Detection of Malignant Ventricular Arrhythmias in
-  Noisy ICU Telemetry using SE-ResLSTM,"* converted PyTorch → Core ML.
-  Continuously improved off-app (not from customer data) and delivered
-  to paid users via remote model updates. **All UI must frame this as
-  research-use-only — no language implying clinical decision support.**
-- **Pricing direction** (open):
-  - Silver Metrics → non-consumable one-time purchase.
-  - VT Detection → annual auto-renewing subscription, because users are
-    paying for the *ongoing* model improvement pipeline, not a frozen
-    artifact. Alternative: lifetime non-consumable at a higher price
-    point for buyers who want it.
+  engineered features, not diagnoses. Ships first per stagger-risk.
+- **VT/VF Detection IAP (paid)** — SE-ResLSTM model from the user's
+  paper *"Automated Detection of Malignant Ventricular Arrhythmias
+  in Noisy ICU Telemetry using SE-ResLSTM,"* converted PyTorch →
+  Core ML. Continuously improved off-app (not from customer data)
+  and delivered to paid users via remote model updates. **All UI
+  must frame this as research-use-only — no language implying
+  clinical decision support.**
+
+**Repo layout:**
+
+- Public: `kvnlng/Murmur` — the viewer source. Re-public the
+  existing repo before Phase 0 work; the paid framework code isn't
+  there yet anyway.
+- Private: `kvnlng/Murmur-Extensions` (working name) — the three
+  paid frameworks: `MurmurAnnotation`, `MurmurSilver`,
+  `MurmurInference`.
+- The App Store ships **one binary** that links both. IAPs unlock
+  the paid frameworks at runtime via entitlement checks. The split
+  is *source distribution*, not *binary distribution*.
+
+**Pricing direction** (open, to refine before Phase 1 submission):
+
+- Annotation Authoring → non-consumable one-time purchase.
+- Silver Metrics → non-consumable one-time purchase.
+- VT Detection → annual auto-renewing subscription, because users
+  are paying for the *ongoing* model improvement pipeline, not a
+  frozen artifact. Alternative: lifetime non-consumable at a higher
+  price point for buyers who want it.
+- Possible bundle SKU later once usage data informs the decision.
 
 ### Layering
 
 Three independent layers, each owning one concern:
 
 ```
-Feature surfaces (SwiftUI views)
+Feature surfaces (SwiftUI views in MurmurCore or paid frameworks)
   ↓ asks "can the user use this?" then "give me an answer"
-Compute Services (SilverMetricsService, VTDetectionService)
+Compute Services (AnnotationAuthoringService, SilverMetricsService, VTDetectionService)
   ↓ consults                       ↓ loads
 PurchaseStore (StoreKit 2)     ModelRegistry (VT only)
                                    ↓ talks to
                                 Server: signed manifest + .mlpackage CDN
 ```
 
-Feature surfaces never call StoreKit, network, or Core ML directly —
-they go through Compute Services, which gates on `PurchaseStore` and
-loads weights from `ModelRegistry`.
+Every paid framework implements the `FindingProducer` protocol
+(promoted out of Deferred — it's now the runtime contract between
+the open viewer and the paid extensions). Feature surfaces never call
+StoreKit, network, or Core ML directly — they go through Compute
+Services, which gates on `PurchaseStore` and loads weights from
+`ModelRegistry`.
+
+### Phase 0 — Open-core split prep (no Apple submission)
+
+Local engineering + repo work; no App Store interaction. Should
+complete *before* Phase 1 begins so StoreKit foundation lands in
+the right architectural shape.
+
+- [ ] Re-public the GitHub repo. Confirm Xcode Cloud auth still
+      resolves once the repo is public again.
+- [ ] Subdivide MurmurCore further: extract `MurmurAnnotation`,
+      `MurmurSilver`, `MurmurInference` framework targets. Empty
+      placeholders are fine until Phases 1–3 fill them in.
+- [ ] Set up the private `Murmur-Extensions` repo and confirm SPM
+      resolution from the app target into it via Xcode Cloud.
+- [ ] Promote the `FindingProducer` protocol design out of "Phase 4
+      Deferred" in the Quality infrastructure section above —
+      define it in MurmurCore as the contract every paid framework
+      will implement.
+- [ ] Rewrite `README.md` to reflect the open-core posture: lead
+      with "free, open-source native macOS WFDB viewer" + "optional
+      paid research extensions." Acknowledge the App Store listing
+      "Murmur Studio."
+- [ ] Update `docs/architecture.md` to show MurmurCore + 3 paid
+      framework targets and the FindingProducer seam.
+- [ ] Stand up Phase A of Citation infrastructure (below) — the
+      public repo is now eligible for Zenodo's auto-DOI integration.
 
 ### Phase 1 — StoreKit foundation + Silver Metrics IAP
+
+First paid submission. Silver is the lowest-scrutiny option (no ML,
+peer-reviewed methods, deterministic output) so it validates the
+StoreKit wiring before higher-risk IAPs follow.
 
 - [ ] `PurchaseStore` — `@MainActor @Observable` actor. Loads
       `Product.products(for:)` on launch, listens forever to
       `Transaction.updates`, exposes `owns(_:) -> Bool`, `purchase(_:)`,
       and `restore()`. Refuses unverified transactions.
-- [ ] Two product IDs registered in App Store Connect:
-      `com.kevinlong.murmur.silvermetrics` (non-consumable) and
-      `com.kevinlong.murmur.vtdetection` (subscription or non-consumable,
-      TBD).
+- [ ] Product IDs registered in App Store Connect:
+      `com.kevinlong.murmur.silvermetrics` (non-consumable),
+      `com.kevinlong.murmur.annotationauthoring` (non-consumable),
+      `com.kevinlong.murmur.vtdetection` (subscription or
+      non-consumable, TBD).
 - [ ] Restore Purchases UI surface (Apple-mandated).
-- [ ] Silver Layer pipeline ported to Swift (`SilverMetricsService`),
-      output schema versioned independently of the implementation.
-- [ ] `SilverMetricsPanel` view, gated; locked variant sells the feature
-      with bullet list + price + Buy / Restore actions.
+- [ ] Silver Layer pipeline ported to Swift inside `MurmurSilver`
+      framework as `SilverMetricsService` conforming to
+      `FindingProducer`; output schema versioned independently of
+      the implementation.
+- [ ] `SilverMetricsPanel` view, gated; locked variant sells the
+      feature with bullet list + price + Buy / Restore actions.
 - [ ] StoreKit testing — local `.storekit` config file for offline
       development; App Store sandbox tester accounts for end-to-end
       verification before submission.
 
-### Phase 2 — VT Detection with bundled model
+### Phase 2 — Annotation Authoring IAP
+
+Second paid submission. Lower scrutiny than VT (no ML, no medical
+claims) but introduces user-generated content workflows.
+
+- [ ] Authoring UI inside `MurmurAnnotation` framework: marker
+      placement (click to drop a point, drag to draw a range), edit
+      panel (category / severity / label / note), delete affordance.
+- [ ] Wires into the existing `Editing` toolbar latch — author mode
+      requires the latch unlocked, matching the notes-edit gating
+      pattern.
+- [ ] Authored annotations persisted to a separate sidecar from
+      upstream-produced ones (or same sidecar with `source =
+      "murmur.author"`) so re-running the producer cluster never
+      collides with user authoring.
+- [ ] Locked-variant gate on every authoring entry point (toolbar
+      button, context menu, keyboard shortcut). Reading and
+      disposition stay free.
+- [ ] StoreKit purchase + restore flow for the authoring entitlement.
+- [ ] Update `docs/annotation-schema.md` to document the
+      `murmur.author` source value.
+
+### Phase 3 — VT Detection with bundled model
+
+Third paid submission. Highest scrutiny (medical-app + ML). Lock
+RUO framing before submitting.
 
 - [ ] PyTorch → Core ML conversion of SE-ResLSTM via `coremltools`.
       Verify LSTM ops convert cleanly; document any custom layers.
-- [ ] `VTDetectionService` — sliding-window inference over a `Channel`,
-      output aligned to recording time. Same gate pattern as Silver.
+- [ ] `VTDetectionService` inside `MurmurInference` framework —
+      sliding-window inference over a `Channel`, output aligned to
+      recording time. Conforms to `FindingProducer`. Same gate
+      pattern as Silver and Annotation.
 - [ ] Findings produced by the model surface in the existing
-      `FindingsPanel` with `source = "murmur.vtdetect"` so the analyst
-      disposition workflow (confirm / dismiss / reset) applies
-      uniformly.
+      `FindingsPanel` with `source = "murmur.vtdetect"` so the
+      disposition workflow applies uniformly.
 - [ ] Research-use-only disclaimer in:
       - the IAP product description on App Store Connect
       - the locked feature card
@@ -567,25 +657,39 @@ loads weights from `ModelRegistry`.
       logits, calibrated confidence, time alignment. Bumped only on
       breaking changes (treated like database migrations).
 
-### Phase 3 — Remote model updates
+### Phase 4 — Remote model updates (and the reproducibility moat)
 
-- [ ] `ModelRegistry` — `@Observable` actor. On launch and once per day:
-      fetch a signed `manifest.json`; if a newer compatible version
-      exists and the user holds the VT entitlement, download the
-      `.mlpackage` to a temp location, verify sha256 + Ed25519
+Invisible to Apple once Phase 3 is approved — just upgrades weights
+of an existing capability. Tightly coupled to Citation Phase C below
+(per-version DOIs); design the manifest scheme to carry the DOI from
+day one.
+
+- [ ] `ModelRegistry` — `@Observable` actor. On launch and once per
+      day: fetch a signed `manifest.json`; if a newer compatible
+      version exists and the user holds the VT entitlement, download
+      the `.mlpackage` to a temp location, verify sha256 + Ed25519
       signature, compile via `MLModel.compileModel(at:)`, atomically
       move into Application Support, hot-swap on next inference call.
 - [ ] Storage layout under
-      `~/Library/Application Support/MurmurStudio/Models/vt/`:
-      keep N=2 previous versions for rollback; `current` symlink points
+      `~/Library/Application Support/MurmurStudio/Models/vt/`: keep
+      N=2 previous versions for rollback; `current` symlink points
       to the active one.
-- [ ] Manifest schema: `{ version, url, sha256, signature,
-      schema_version, min_app_version, released_at, notes }`. Signature
-      verified against a long-lived Ed25519 public key baked into the
-      binary.
+- [ ] Manifest schema: `{ version, url, sha256, signature, doi,
+      schema_version, min_app_version, released_at, notes }`.
+      Signature verified against a long-lived Ed25519 public key
+      baked into the binary. The `doi` field is load-bearing for
+      Citation Phase C — every published version stays
+      DOI-addressable forever.
+- [ ] "Freeze model version" toggle in settings (per Citation
+      Phase C) — when set, the app pins inference to the chosen
+      version and refuses silent upgrades. Surfaces prominently
+      after Copy Citation has been invoked recently (heuristic for
+      paper-in-progress).
+- [ ] Per-finding badge showing the model version that generated
+      it, so paper screenshots self-document model provenance.
 - [ ] Fallback chain on any failure (network, signature, compile):
-      silently fall back to the previous downloaded model, then to the
-      bundled baseline. Never block inference.
+      silently fall back to the previous downloaded model, then to
+      the bundled baseline. Never block inference.
 - [ ] Entitlements diff: add `com.apple.security.network.client = YES`
       to the sandbox (minor expansion). Application Support write
       access is already available within the sandbox container.
@@ -609,18 +713,25 @@ loads weights from `ModelRegistry`.
 - **Analytics:** stay off-device. Customer-side telemetry is
   explicitly out of scope — it would void the privacy-policy claim of
   "no data collection."
-- **Schema migrations:** Silver Metrics output and VT Detection
-  output each get their own `schema_version`. Old findings re-loaded
-  against new app versions must still render.
+- **Schema migrations:** Silver Metrics output, Annotation Authoring
+  output, and VT Detection output each get their own `schema_version`.
+  Old findings re-loaded against new app versions must still render.
+- **Community contributions:** the public viewer repo will start
+  receiving issues and PRs once it's listed in the PhysioNet directory
+  and on Zenodo. Triage policy + contributor guidelines need to land
+  alongside Phase 0.
 
 ### Sequencing rationale
 
-Phases are ordered to stagger App Store re-review risk. Phase 1 adds
-a paywall to a known feature class. Phase 2 adds an ML capability —
-Apple's medical-app reviewers will scrutinize wording here; framing
-must be locked in before submission. Phase 3 is invisible to Apple
-once Phase 2 is approved — it just upgrades weights of an existing
-capability without changing app behavior at review time.
+Phases are ordered to stagger App Store re-review risk. Phase 0 is
+local/repo only — no Apple interaction. Phase 1 adds a paywall to a
+deterministic feature (low scrutiny). Phase 2 adds user-authoring
+flows (low-medium scrutiny — no medical or ML claims). Phase 3 adds
+an ML capability — Apple's medical-app reviewers will scrutinize
+wording here; RUO framing must be locked in before submission. Phase 4
+is invisible to Apple once Phase 3 is approved — it just upgrades
+weights of an existing capability without changing app behavior at
+review time.
 
 ## Citation infrastructure
 
@@ -630,6 +741,11 @@ which makes Murmur the natural home for that intersection — but only
 if it's *citable, reproducible*, and discoverable through the same
 channels MATLAB toolboxes use. This section is a separate workstream
 from the IAPs but is sequenced around them.
+
+The open-core distribution split above structurally unblocks both
+Zenodo and JOSS — the public viewer is exactly the kind of artifact
+both venues are designed for. Phase A below assumes Phase 0 of the
+IAP roadmap (repo re-publication) is complete.
 
 ### Strategic framing
 
@@ -664,7 +780,8 @@ automatically fixes attribution at the source.
 
 | Surface | Citation type | What gets cited |
 |---|---|---|
-| **MurmurCore** (free) | Tool only | Murmur Studio + Zenodo release DOI |
+| **MurmurCore** (free, open source) | Tool only | Murmur Studio + Zenodo release DOI |
+| **Annotation Authoring IAP** | Tool only | Murmur Studio + release DOI (no method paper — IAP wraps editing UX, not a published algorithm) |
 | **Silver IAP** | Tool + method | Murmur Studio release DOI **plus** the modular-feature paper |
 | **VT IAP** | Method + production implementation | SE-ResLSTM paper **plus** Murmur Studio + the specific VT model version DOI |
 
