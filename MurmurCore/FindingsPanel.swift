@@ -12,6 +12,71 @@
 
 import SwiftUI
 
+// MARK: - Sort model
+
+/// Sort order for the findings list. Analysts often need to scan by
+/// severity first when triaging, by confidence when calibrating a
+/// producer, or by category when looking at one finding type at a time
+/// — so the panel exposes a picker that switches between these.
+/// Time-ascending stays the default since it matches the canvas's
+/// left-to-right reading direction.
+enum FindingSort: String, CaseIterable, Identifiable {
+    case time
+    case severity
+    case confidence
+    case category
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .time:       return "Time"
+        case .severity:   return "Severity"
+        case .confidence: return "Confidence"
+        case .category:   return "Category"
+        }
+    }
+
+    /// Returns `annotations` sorted under this mode. Stable secondary
+    /// ordering by `sampleIndex` so equal-rank rows still read
+    /// left-to-right on the canvas.
+    func apply(to annotations: [Annotation]) -> [Annotation] {
+        switch self {
+        case .time:
+            return annotations.sorted { $0.sampleIndex < $1.sampleIndex }
+        case .severity:
+            // critical → warning → notice → info; ties break by time.
+            return annotations.sorted { lhs, rhs in
+                if lhs.severity != rhs.severity {
+                    return lhs.severity > rhs.severity
+                }
+                return lhs.sampleIndex < rhs.sampleIndex
+            }
+        case .confidence:
+            // Highest confidence first. Findings with no confidence
+            // value sort after all valued ones, then by time so the
+            // bottom of the list still reads left-to-right.
+            return annotations.sorted { lhs, rhs in
+                switch (lhs.confidence, rhs.confidence) {
+                case (let l?, let r?):
+                    if l != r { return l > r }
+                    return lhs.sampleIndex < rhs.sampleIndex
+                case (.some, .none): return true
+                case (.none, .some): return false
+                case (.none, .none): return lhs.sampleIndex < rhs.sampleIndex
+                }
+            }
+        case .category:
+            return annotations.sorted { lhs, rhs in
+                if lhs.category != rhs.category {
+                    return lhs.category < rhs.category
+                }
+                return lhs.sampleIndex < rhs.sampleIndex
+            }
+        }
+    }
+}
+
 // MARK: - Filter model
 
 struct FindingFilter: Equatable {
@@ -51,6 +116,10 @@ struct FindingsPanel: View {
     /// when editing is unlocked.
     let isEditing: Bool
 
+    /// Active sort order. Lives in panel state since the choice is a
+    /// pure-display concern — no other surface needs to react to it.
+    @State private var sort: FindingSort = .time
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
@@ -67,8 +136,12 @@ struct FindingsPanel: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Findings")
-                .font(.headline)
+            HStack(alignment: .firstTextBaseline) {
+                Text("Findings")
+                    .font(.headline)
+                Spacer()
+                sortPicker
+            }
             Text("\(filtered.count) of \(annotations.count)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -92,6 +165,19 @@ struct FindingsPanel: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private var sortPicker: some View {
+        Picker("Sort by", selection: $sort) {
+            ForEach(FindingSort.allCases) { mode in
+                Text(mode.displayName).tag(mode)
+            }
+        }
+        .labelsHidden()
+        .pickerStyle(.menu)
+        .font(.caption)
+        .help("Sort findings by \(sort.displayName.lowercased())")
+        .accessibilityIdentifier("findings-sort-picker")
+    }
+
     private func tallyChip(count: Int, label: String, systemImage: String, color: Color) -> some View {
         HStack(spacing: 3) {
             Image(systemName: systemImage)
@@ -103,7 +189,7 @@ struct FindingsPanel: View {
     }
 
     private var filtered: [Annotation] {
-        annotations.filter(filter.matches)
+        sort.apply(to: annotations.filter(filter.matches))
     }
 
     @ViewBuilder

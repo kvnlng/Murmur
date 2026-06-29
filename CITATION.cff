@@ -1,0 +1,45 @@
+# Citation metadata for the Murmur Studio open-source viewer.
+# GitHub renders a "Cite this repository" button from this file.
+# Schema reference: https://citation-file-format.github.io
+#
+# IMPORTANT: this entry covers the FREE, open-source viewer
+# (MurmurCore + the App Store app's free baseline). Paid extension
+# frameworks (Annotation Authoring, Silver Layer Metrics, VT Detection)
+# are cited separately by routing through the in-app "Copy citation"
+# action — see docs/citation.md.
+#
+# The `doi:` and `version:` fields below are placeholders. They will
+# be populated by Zenodo's GitHub-release integration once the first
+# v1.x.x tag is pushed (see ROADMAP "Citation Phase A"). Do not edit
+# manually — Zenodo writes back to this file on each release.
+
+cff-version: 1.2.0
+message: "If you use Murmur Studio in your research, please cite it as below."
+title: "Murmur Studio"
+abstract: >-
+  A free, open-source native macOS viewer for PhysioNet WFDB recordings.
+  Renders ECG and multi-rate telemetry on a Metal-backed paper canvas
+  alongside upstream-produced findings, with analyst disposition
+  workflows (confirm / dismiss / reset). Optional paid extensions on
+  the App Store add annotation authoring, Silver-layer cardiopulmonary
+  feature extraction, and VT/VF detection (research use only).
+type: software
+license: MIT
+repository-code: "https://github.com/kvnlng/Murmur"
+url: "https://kvnlng.github.io/Murmur/"
+keywords:
+  - ECG
+  - WFDB
+  - PhysioNet
+  - cardiopulmonary
+  - waveform-visualization
+  - macOS
+  - research-software
+authors:
+  - family-names: Long
+    given-names: Kevin
+    # orcid: "https://orcid.org/0000-0000-0000-0000"
+# DOI populated by Zenodo on first release.
+# doi: 10.5281/zenodo.XXXXXXX
+# version: 1.0.0
+# date-released: 2026-XX-XX

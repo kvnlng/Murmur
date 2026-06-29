@@ -40,6 +40,10 @@ struct BedsideView: View {
     /// Error message shown when an attach attempt fails (unreadable file,
     /// unsupported schema, malformed JSON, etc).
     @State private var attachError: String?
+    /// Drives the producer-run sheet. Visible in DEBUG via the toolbar;
+    /// once IAP frameworks land in RELEASE, the toolbar item gates on
+    /// "any producer registered" instead of the DEBUG flag.
+    @State private var showProducersPanel: Bool = false
 
     static let initialDurationSeconds: Double = 10
 
@@ -116,6 +120,14 @@ struct BedsideView: View {
         allAnnotations.filter(filter.matches)
     }
 
+    /// Annotations that should render on `channel`'s waveform panel.
+    /// Lead-tagged findings only show on the channel whose name matches;
+    /// lead-less findings (the common case — whole-recording
+    /// observations like AFib) show on every channel.
+    private func annotationsForChannel(_ channel: Channel) -> [Annotation] {
+        filteredAnnotations.filter { $0.matchesChannel(channel.name) }
+    }
+
     /// Unfiltered rollup for the summary chip row — chips show total counts
     /// across the recording regardless of the active filter, so the user
     /// always sees "47 PVCs" instead of "8 of 47 shown."
@@ -140,6 +152,60 @@ struct BedsideView: View {
             )
             Divider()
             bedsideContent
+        }
+        .focusable()
+        .focusEffectDisabled()
+        // Keyboard navigation. Arrow keys pan by one viewport width,
+        // +/- zoom around the viewport centre, J/K jump to the next /
+        // previous filtered finding. Text fields (notes editor, attach
+        // sheet, etc.) become first-responder when active, so these
+        // handlers don't fire while typing.
+        .onKeyPress(.leftArrow, phases: [.down, .repeat]) { _ in
+            panByOneViewport(direction: .left)
+            return .handled
+        }
+        .onKeyPress(.rightArrow, phases: [.down, .repeat]) { _ in
+            panByOneViewport(direction: .right)
+            return .handled
+        }
+        // Two bindings for zoom-in so the analyst doesn't have to hold
+        // shift on US layouts: "+" only types via shift+=, but "=" is
+        // the unshifted key in the same position.
+        .onKeyPress("=", phases: [.down, .repeat]) { _ in
+            zoom(factor: 0.8)
+            return .handled
+        }
+        .onKeyPress("+", phases: [.down, .repeat]) { _ in
+            zoom(factor: 0.8)
+            return .handled
+        }
+        .onKeyPress("-", phases: [.down, .repeat]) { _ in
+            zoom(factor: 1.25)
+            return .handled
+        }
+        .onKeyPress("j", phases: [.down, .repeat]) { _ in
+            jumpToNextFinding()
+            return .handled
+        }
+        .onKeyPress("k", phases: [.down, .repeat]) { _ in
+            jumpToPreviousFinding()
+            return .handled
+        }
+        // Disposition shortcuts. Gated on the same Editing latch the
+        // toolbar uses for notes / annotation create-edit-delete —
+        // analysts have to unlock the recording before keystrokes
+        // mutate state. All three shortcuts target the annotation
+        // closest to the viewport centre (the one J/K most recently
+        // jumped to). No `.repeat` phase since each disposition is a
+        // single-shot action.
+        .onKeyPress("c") {
+            return dispositionFocused(.confirm) ? .handled : .ignored
+        }
+        .onKeyPress("d") {
+            return dispositionFocused(.dismiss) ? .handled : .ignored
+        }
+        .onKeyPress("x") {
+            return dispositionFocused(.reset) ? .handled : .ignored
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("bedside-view")
@@ -196,6 +262,31 @@ struct BedsideView: View {
                 .accessibilityIdentifier("attach-findings")
             }
             ToolbarItem {
+                Button { exportMarkdownReport() } label: {
+                    Label("Export report…", systemImage: "square.and.arrow.up")
+                }
+                .help("Save a markdown report of this recording's findings and dispositions")
+                .accessibilityIdentifier("export-report")
+            }
+            ToolbarItem {
+                Button { exportSnapshotPNG() } label: {
+                    Label("Export snapshot…", systemImage: "camera")
+                }
+                .help("Save a PNG snapshot of the current bedside view")
+                .accessibilityIdentifier("export-snapshot")
+            }
+            #if DEBUG
+            ToolbarItem {
+                Button {
+                    showProducersPanel = true
+                } label: {
+                    Label("Producers", systemImage: "wand.and.stars")
+                }
+                .help("Run a registered FindingProducer over this recording")
+                .accessibilityIdentifier("producers-toggle")
+            }
+            #endif
+            ToolbarItem {
                 Button {
                     showFindings.toggle()
                 } label: {
@@ -210,6 +301,12 @@ struct BedsideView: View {
             allowedContentTypes: [.json]
         ) { result in
             handleAttachFindings(result)
+        }
+        .sheet(isPresented: $showProducersPanel) {
+            ProducersPanel { findings in
+                handleProducerOutput(findings)
+            }
+            .environment(\.activeRecording, recording)
         }
         .alert(
             "Couldn't attach findings",
@@ -307,6 +404,173 @@ struct BedsideView: View {
         }
     }
 
+    /// Called by the producer-run sheet when a producer finishes
+    /// successfully. Appends the producer's findings to the in-memory
+    /// `attachedAnnotations` and re-persists the union to the bundle
+    /// sidecar so re-opening the recording later still sees them.
+    /// Mirrors the persistence semantics of `handleAttachFindings` — a
+    /// write failure surfaces in the same alert path but doesn't roll
+    /// back the in-memory state.
+    private func handleProducerOutput(_ findings: [Annotation]) {
+        guard !findings.isEmpty else { return }
+        attachedAnnotations.append(contentsOf: findings)
+        do {
+            try BundleAnnotationsFile.write(allAnnotations, to: recordingDirectory)
+        } catch {
+            attachError = "Producer findings were added for this session but could not be saved to the bundle: \(error.localizedDescription)"
+        }
+    }
+
+    // MARK: - Markdown report export
+
+    /// Opens an NSSavePanel suggesting a filename derived from the
+    /// recording, renders the markdown report via `MarkdownReport`,
+    /// and writes UTF-8 to the chosen path. Failures route to the
+    /// existing `attachError` alert path so we don't have to bring
+    /// up new error UI.
+    private func exportMarkdownReport() {
+        let panel = NSSavePanel()
+        panel.title = "Export findings report"
+        panel.allowedContentTypes = [.init(filenameExtension: "md") ?? .plainText]
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = Self.suggestedReportFilename(
+            for: recording,
+            at: Date()
+        )
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        let body = MarkdownReport.generate(
+            recording: recording,
+            annotations: allAnnotations,
+            dispositions: dispositionStore.records,
+            tally: dispositionStore.tally(for: allAnnotations),
+            now: Date()
+        )
+        do {
+            try body.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            attachError = "Could not write the report: \(error.localizedDescription)"
+        }
+    }
+
+    /// Builds the suggested save-panel filename from the recording's
+    /// source name and a `yyyy-MM-dd-HHmm` timestamp. Pure helper so
+    /// tests can pin it deterministically; the in-app path passes
+    /// `Date()` at click time.
+    static func suggestedReportFilename(for recording: Recording, at date: Date) -> String {
+        let base = (recording.sourceFileName as NSString).deletingPathExtension
+        let stem = base.isEmpty ? "recording" : base
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "yyyy-MM-dd-HHmm"
+        return "\(stem)-report-\(formatter.string(from: date)).md"
+    }
+
+    // MARK: - PNG snapshot export
+
+    /// Opens an NSSavePanel, captures the key window's content view
+    /// via `SnapshotExporter.renderKeyWindowPNG()`, and writes the PNG
+    /// to the chosen path. Failures route through `attachError` for
+    /// consistent alert handling.
+    private func exportSnapshotPNG() {
+        let panel = NSSavePanel()
+        panel.title = "Export bedside snapshot"
+        panel.allowedContentTypes = [.png]
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = SnapshotExporter.suggestedFilename(
+            for: recording,
+            at: Date()
+        )
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        guard let data = SnapshotExporter.renderKeyWindowPNG() else {
+            attachError = "Couldn't capture the current window — try resizing slightly and retrying."
+            return
+        }
+        do {
+            try data.write(to: url)
+        } catch {
+            attachError = "Couldn't write the snapshot: \(error.localizedDescription)"
+        }
+    }
+
+    // MARK: - Keyboard navigation actions
+
+    private enum PanDirection {
+        case left, right
+    }
+
+    /// Shifts the viewport by exactly one viewport width — the keyboard
+    /// equivalent of a full-page scroll. Direct mutation (not animated)
+    /// so rapid arrow-key presses don't queue up overlapping animations.
+    /// `RecordingViewport.setStart` clamps to recording bounds.
+    private func panByOneViewport(direction: PanDirection) {
+        let width = viewport.endSample - viewport.startSample
+        let delta = direction == .left ? -width : width
+        viewport.setStart(viewport.startSample + delta)
+    }
+
+    /// Scales the viewport width by `factor` around its centre. `< 1`
+    /// zooms in; `> 1` zooms out. Centering on `anchorFraction: 0.5`
+    /// keeps whatever the analyst was looking at in the same on-screen
+    /// position.
+    private func zoom(factor: Double) {
+        let currentWidth = viewport.endSample - viewport.startSample
+        let newWidth = Int64(Double(currentWidth) * factor)
+        viewport.setWidth(newWidth, anchorFraction: 0.5)
+    }
+
+    /// Animated jump to the first filtered finding strictly after the
+    /// viewport centre. No-op when there are no findings ahead.
+    private func jumpToNextFinding() {
+        let centre = (viewport.startSample + viewport.endSample) / 2
+        guard let next = Annotation.nextFinding(after: centre, in: filteredAnnotations) else { return }
+        let total = max(1, viewport.totalSamples)
+        viewport.animateJump(toFraction: Double(next.sampleIndex) / Double(total), duration: 0.18)
+    }
+
+    /// Animated jump to the last filtered finding strictly before the
+    /// viewport centre.
+    private func jumpToPreviousFinding() {
+        let centre = (viewport.startSample + viewport.endSample) / 2
+        guard let prev = Annotation.previousFinding(before: centre, in: filteredAnnotations) else { return }
+        let total = max(1, viewport.totalSamples)
+        viewport.animateJump(toFraction: Double(prev.sampleIndex) / Double(total), duration: 0.18)
+    }
+
+    /// Action menu for the C / D / X disposition keyboard shortcuts.
+    private enum DispositionAction { case confirm, dismiss, reset }
+
+    /// Applies a disposition action to the annotation closest to the
+    /// viewport centre. Returns `true` when the action ran (and the
+    /// gesture handler should consume the key event), `false` when the
+    /// editing latch is locked or there's nothing to target.
+    ///
+    /// `.confirm` records the finding as confirmed with
+    /// `confirmedKind = .unclassified` — the analyst's keyboard
+    /// shortcut commits the binary "yes this is real" call without
+    /// pre-committing a VT/VF sub-classification. Specific sub-kinds
+    /// stay reachable via the panel's row buttons.
+    private func dispositionFocused(_ action: DispositionAction) -> Bool {
+        guard isEditing else { return false }
+        let centre = (viewport.startSample + viewport.endSample) / 2
+        guard let target = Annotation.closest(to: centre, in: filteredAnnotations) else {
+            return false
+        }
+        switch action {
+        case .confirm:
+            dispositionStore.confirm(target.id, kind: .unclassified)
+        case .dismiss:
+            dispositionStore.dismiss(target.id)
+        case .reset:
+            dispositionStore.reset(target.id)
+        }
+        return true
+    }
+
     @ViewBuilder
     private var bedsideContent: some View {
         switch layoutMode {
@@ -320,7 +584,7 @@ struct BedsideView: View {
                             channel: channel,
                             directory: recordingDirectory,
                             viewport: viewport,
-                            annotations: filteredAnnotations,
+                            annotations: annotationsForChannel(channel),
                             sizing: .focus
                         )
                         // Tear down + rebuild when the focused lead changes —
@@ -353,7 +617,7 @@ struct BedsideView: View {
                             channel: channel,
                             directory: recordingDirectory,
                             viewport: viewport,
-                            annotations: filteredAnnotations,
+                            annotations: annotationsForChannel(channel),
                             sizing: .strip
                         )
                     }
@@ -505,7 +769,7 @@ struct BedsideView: View {
     }
 
     private var navigationHint: String {
-        "Drag to pan  •  Pinch to zoom  •  Click the ribbon to jump"
+        "Drag or ←/→ to pan  •  Pinch or +/− to zoom  •  J/K to jump between findings  •  Unlock + C/D/X to confirm / dismiss / reset"
     }
 
     private var totalDurationSeconds: Double {
@@ -706,6 +970,16 @@ private struct ChannelPanel: View {
     var sizing: Sizing = .strip
 
     @State private var clippedRanges: [ClippedRange] = []
+    /// Recording-wide min/max for this channel, populated by the same
+    /// background scan that builds `clippedRanges`. nil until the scan
+    /// finishes (or empty for zero-sample channels). Drives both the
+    /// header range badge and the per-channel Y-axis autoscale.
+    @State private var sampleRange: MinMaxScanner.Range?
+    /// When true, the canvas's display range fits the scanned signal
+    /// (plus padding) instead of the fixed ±5 mV clinical reference.
+    /// Per-channel state because different leads in a record can have
+    /// very different amplitudes (e.g., precordial vs. limb leads).
+    @State private var autoscaleY: Bool = false
 
     // Per-gesture starting state so each gesture is computed against the
     // viewport as it was when the gesture began, not the most recent update.
@@ -752,7 +1026,7 @@ private struct ChannelPanel: View {
         VStack(alignment: .leading, spacing: 4) {
             header
             HStack(alignment: .top, spacing: 0) {
-                WaveformVoltageAxis(yMin: Self.yMin, yMax: Self.yMax, durationSeconds: durationSeconds)
+                WaveformVoltageAxis(yMin: displayRange.lowerBound, yMax: displayRange.upperBound, durationSeconds: durationSeconds)
                     .frame(minHeight: sizing.canvasMinHeight)
                 canvasArea
             }
@@ -771,6 +1045,18 @@ private struct ChannelPanel: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("channel-panel-\(channel.name)")
         .task { await scanForOffScale() }
+    }
+
+    /// Effective display range for the canvas + voltage axis. When
+    /// autoscale is off (the default), uses the fixed ±5 mV clinical
+    /// reference. When on, derives from the scanned `sampleRange` with
+    /// 10% headroom on each side; falls back to the fixed range until
+    /// the scan completes.
+    private var displayRange: ClosedRange<Double> {
+        guard autoscaleY, let range = sampleRange, !range.isEmpty else {
+            return Self.yMin...Self.yMax
+        }
+        return range.displayRange()
     }
 
     private var canvasArea: some View {
@@ -797,7 +1083,9 @@ private struct ChannelPanel: View {
                         directory: directory,
                         startSample: viewport.startSample,
                         endSample: viewport.endSample,
-                        annotations: visibleAnnotations
+                        annotations: visibleAnnotations,
+                        displayMin: displayRange.lowerBound,
+                        displayMax: displayRange.upperBound
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -998,6 +1286,23 @@ private struct ChannelPanel: View {
                     .foregroundStyle(.orange)
                     .help("\(clippedRanges.count) segment\(clippedRanges.count == 1 ? "" : "s") exceed ±5 mV and aren't drawn")
             }
+            if let range = sampleRange, !range.isEmpty {
+                Text(String(format: "%.2f – %.2f", range.min, range.max))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+                    .help("Recording-wide voltage range observed on this channel")
+                    .accessibilityIdentifier("channel-range-\(channel.name)")
+                Toggle(isOn: $autoscaleY) {
+                    Label("Auto Y", systemImage: "arrow.up.and.down")
+                        .labelStyle(.titleAndIcon)
+                }
+                .toggleStyle(.button)
+                .controlSize(.mini)
+                .help(autoscaleY
+                      ? "Display range fits this channel's observed amplitude (with 10% headroom). Click to fix at ±5 mV."
+                      : "Display range fixed at ±5 mV. Click to fit this channel's observed amplitude.")
+                .accessibilityIdentifier("autoscale-y-\(channel.name)")
+            }
             Spacer()
             Text(timeWindowLabel)
                 .font(.caption.monospacedDigit())
@@ -1013,24 +1318,36 @@ private struct ChannelPanel: View {
         String(format: "%.2f – %.2f s", startTime, endTime)
     }
 
-    /// One-time scan over the full channel at panel mount. The result feeds
-    /// both the chevron overlay and the header off-scale badge.
+    /// One-time scan over the full channel at panel mount. Runs the
+    /// clipping detector AND the min/max scanner in the same detached
+    /// task so each panel reads the channel file off the main thread
+    /// exactly once. Feeds the chevron overlay, the off-scale header
+    /// badge, and the informational range badge.
     private func scanForOffScale() async {
         let url = directory.appendingPathComponent(channel.storageFileName)
         let total = channel.sampleCount
         guard total > 0 else { return }
-        let result: [ClippedRange] = await Task.detached(priority: .utility) {
+        struct ScanResult: Sendable {
+            let clipped: [ClippedRange]
+            let range: MinMaxScanner.Range?
+        }
+        let result: ScanResult = await Task.detached(priority: .utility) {
             guard let access = try? BinaryRecordingFile.mappedAccess(url: url) else {
-                return []
+                return ScanResult(clipped: [], range: nil)
             }
             let samples = access.samples(range: 0..<total)
-            return ClippedRangeScanner.scan(
+            let clipped = ClippedRangeScanner.scan(
                 samples: samples,
                 clipMin: Float(Self.yMin),
                 clipMax: Float(Self.yMax)
             )
+            let range = MinMaxScanner.scan(samples: samples)
+            return ScanResult(clipped: clipped, range: range)
         }.value
-        await MainActor.run { clippedRanges = result }
+        await MainActor.run {
+            clippedRanges = result.clipped
+            sampleRange = result.range
+        }
     }
 
     // MARK: Gestures
@@ -1062,8 +1379,8 @@ private struct ChannelPanel: View {
                 // diminishing return — the classic iOS elastic edge.
                 let overshootSamples = Double(clampedStart - proposedStart)
                 let overshootPx = CGFloat(overshootSamples / samplesPerPixel)
-                overscrollPx = Self.rubberBanded(
-                    overshootPx: overshootPx,
+                overscrollPx = RubberBand.damp(
+                    overshoot: overshootPx,
                     canvasWidth: canvasSize.width
                 )
                 // Keep the crosshair tracking the cursor during the drag.
@@ -1100,24 +1417,6 @@ private struct ChannelPanel: View {
                 let velocitySamplesPerSec = -dragVelocityPx * samplesPerPixel / 0.5
                 viewport.startPanMomentum(velocitySamplesPerSec: velocitySamplesPerSec)
             }
-    }
-
-    /// Apple's documented rubber-band damping curve. Input is the raw
-    /// pixel distance pulled past the boundary (signed); output is the
-    /// visible translation that the chart should apply. Asymptotically
-    /// approaches `canvasWidth`, so the chart never fully leaves the
-    /// visible area no matter how hard the analyst pulls.
-    ///
-    /// Formula: `y = (1 - 1 / (|x| * c / d + 1)) * d`, with the sign of
-    /// the input preserved. `c = 0.55` matches UIKit's scroll-view
-    /// rubber-band feel.
-    private static func rubberBanded(overshootPx: CGFloat, canvasWidth: CGFloat) -> CGFloat {
-        guard canvasWidth > 0 else { return 0 }
-        let c: CGFloat = 0.55
-        let absOvershoot = abs(overshootPx)
-        let sign: CGFloat = overshootPx >= 0 ? 1 : -1
-        let damped = (1 - 1 / (absOvershoot * c / canvasWidth + 1)) * canvasWidth
-        return damped * sign
     }
 
     private func zoomGesture(in canvasSize: CGSize) -> some Gesture {

@@ -22,6 +22,17 @@ struct MurmurApp: App {
         static let support         = URL(string: "mailto:long.kevin@gmail.com?subject=Murmur%20Studio%20Support")!
     }
 
+    init() {
+        // Register the baseline producers that ship with the free viewer.
+        // The MurmurCore bootstrap encapsulates the DEBUG vs RELEASE
+        // policy — in DEBUG it registers the synthetic producer so the
+        // pipeline UI is exercisable; in RELEASE it's a no-op and paid
+        // frameworks register themselves on framework load.
+        Task { @MainActor in
+            await bootstrapBaselineProducers()
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -37,6 +48,17 @@ struct MurmurApp: App {
                     .keyboardShortcut("?", modifiers: .command)
                 Button("Getting Started")     { URLLauncher.shared.open(HelpURL.gettingStarted) }
                 Button("Annotation Schema")   { URLLauncher.shared.open(HelpURL.annotationSchema) }
+                Divider()
+                // Citation routing: until the paid IAPs ship, both menu
+                // items emit the free-viewer entry only. When VT / Silver
+                // land, this picks up tier-aware multi-entry citation per
+                // ROADMAP "Citation routing".
+                Button("Copy Citation (BibTeX)") {
+                    _ = copyViewerCitationToPasteboard(asBibTeX: true)
+                }
+                Button("Copy Citation (RIS)") {
+                    _ = copyViewerCitationToPasteboard(asBibTeX: false)
+                }
                 Divider()
                 Button("Privacy Policy")      { URLLauncher.shared.open(HelpURL.privacy) }
                 Button("Contact Support…")    { URLLauncher.shared.open(HelpURL.support) }

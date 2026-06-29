@@ -6,6 +6,99 @@ nav_order: 3
 
 # Architecture
 
+## Framework layout
+
+Murmur Studio ships as a single App Store binary that links one free
+open-source framework and three paid extension frameworks. The split
+is *source distribution*, not *binary distribution*: IAP entitlement
+checks unlock the paid frameworks at runtime.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Murmur (app target — slim launcher, sandboxed)                 │
+│    MurmurApp.swift, Info.plist, Assets.xcassets (AppIcon)       │
+└─────────────────────────────────────────────────────────────────┘
+                              │ links
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  MurmurCore  (free, MIT, open-source — this repo)               │
+│    Data Engine + Waveform Canvas + Control Overlay              │
+│    FindingProducer protocol  ←─── the seam paid frameworks use  │
+│    SyntheticFindingProducer  (baseline impl, ships free)        │
+└─────────────────────────────────────────────────────────────────┘
+                              │ depended on by (private frameworks)
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  MurmurAnnotation  (paid — Annotation Authoring IAP)            │
+│  MurmurSilver      (paid — Silver Layer Metrics IAP)            │
+│  MurmurInference   (paid — VT/VF Detection IAP)                 │
+│    Each conforms to FindingProducer.                            │
+│    Source lives in the private kvnlng/Murmur-Extensions repo.   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+The three paid framework targets aren't in this repo — they live in
+the private `kvnlng/Murmur-Extensions` repo and pull `MurmurCore` in
+via SPM. Their source isn't public; their behaviour is part of the
+App Store distribution. See [ROADMAP](../ROADMAP.md) "Paid features
+roadmap" for the IAP sequencing.
+
+This document covers **MurmurCore**, which is what you're reading the
+source of.
+
+## Extension contract: `FindingProducer`
+
+Every framework that examines a `Recording` and emits `[Annotation]`
+conforms to the `FindingProducer` protocol in `MurmurCore`. The host
+(`BedsideView` / `FindingsPanel`) discovers conformers via
+`ProducerRegistry` and drives them through a uniform UI surface —
+progress bar, cancel button, error reporting — regardless of whether
+the producer is a deterministic Swift port, a Core ML model, or a
+synthetic fixture.
+
+```swift
+protocol FindingProducer: Sendable {
+    var id: String { get }            // → annotations[].source
+    var displayName: String { get }
+    func analyze(_ recording: Recording) -> AsyncThrowingStream<ProducerEvent, Error>
+}
+
+enum ProducerEvent {
+    case progress(ProgressUpdate)
+    case findings([Annotation])
+    case warning(message: String, underlying: Error?)
+}
+```
+
+Key design points:
+
+- **Async stream, not single-value return.** The output is
+  `AsyncThrowingStream<ProducerEvent>` so progress + partial findings
+  + per-window warnings can interleave. The host accumulates findings
+  across multiple `.findings` events and shows the determinate
+  progress bar from `.progress` events.
+- **Cancellation lives in `Task`.** Consumers cancel by exiting the
+  `for try await` loop or by cancelling the parent task; producers
+  honor it by calling `try Task.checkCancellation()` on window
+  boundaries.
+- **Partial results survive per-window failures.** A failed window
+  emits `.warning(...)`; the run continues. Only a fully-irrecoverable
+  state throws and terminates the stream.
+- **Confidence is the producer's responsibility.** `Annotation.confidence`
+  is documented as already-calibrated (Platt-scaled or equivalent), so
+  hosts treat it as comparable across producers.
+- **IAP gating is at the call site.** The registry doesn't know about
+  entitlements — the host filters `registry.all()` against
+  `PurchaseStore.owns(_:)` before exposing producers to the UI.
+
+The free viewer registers `SyntheticFindingProducer` (a deterministic
+LCG-seeded fixture) at launch so the producer pipeline is exercised
+end-to-end even when no paid framework is installed. Paid frameworks
+register their own conformances from their entry point on framework
+load.
+
+## Inside MurmurCore
+
 Three layers, all independently testable.
 
 ## 1. Data Engine

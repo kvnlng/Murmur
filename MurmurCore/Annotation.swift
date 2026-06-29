@@ -68,6 +68,56 @@ struct Annotation: Codable, Equatable, Sendable, Identifiable {
     /// The end sample for rendering purposes — equals `sampleIndex` for point events.
     var renderEndSample: Int64 { endSampleIndex ?? sampleIndex }
 
+    /// True when this annotation should render on the channel named
+    /// `channelName`. Lead-less annotations (the common case for
+    /// whole-recording observations like AFib) match every channel;
+    /// lead-tagged annotations match only the channel whose name
+    /// normalizes equal to the `lead` field. Normalization trims
+    /// whitespace and lowercases so producer outputs like `" II "`
+    /// or `"ii"` match a channel named `"II"`.
+    func matchesChannel(_ channelName: String) -> Bool {
+        guard let raw = lead else { return true }
+        let normalized = raw.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !normalized.isEmpty else { return true }
+        return normalized == channelName.trimmingCharacters(in: .whitespaces).lowercased()
+    }
+
+    // MARK: - Keyboard navigation helpers
+
+    /// First annotation whose `sampleIndex` lies strictly after `position`.
+    /// Used by the J keyboard shortcut to jump the viewport to the next
+    /// finding. Nil when there are no findings after `position` (analyst
+    /// is at the end of the recording's annotated stretch).
+    static func nextFinding(after position: Int64, in annotations: [Annotation]) -> Annotation? {
+        annotations
+            .sorted { $0.sampleIndex < $1.sampleIndex }
+            .first { $0.sampleIndex > position }
+    }
+
+    /// Last annotation whose `sampleIndex` lies strictly before
+    /// `position`. Pairs with `nextFinding(after:in:)` for the K
+    /// keyboard shortcut.
+    static func previousFinding(before position: Int64, in annotations: [Annotation]) -> Annotation? {
+        annotations
+            .sorted { $0.sampleIndex < $1.sampleIndex }
+            .last { $0.sampleIndex < position }
+    }
+
+    /// Annotation whose `sampleIndex` minimises the absolute distance
+    /// to `position`. Used by the D / X disposition keyboard shortcuts
+    /// to operate on whatever finding the analyst has the viewport
+    /// centered on. Returns nil for empty input. Ties (two annotations
+    /// equidistant from `position`) resolve to the earlier one for
+    /// determinism.
+    static func closest(to position: Int64, in annotations: [Annotation]) -> Annotation? {
+        annotations.min { lhs, rhs in
+            let lhsDist = abs(lhs.sampleIndex - position)
+            let rhsDist = abs(rhs.sampleIndex - position)
+            if lhsDist != rhsDist { return lhsDist < rhsDist }
+            return lhs.sampleIndex < rhs.sampleIndex
+        }
+    }
+
     init(
         id: UUID = UUID(),
         kind: Kind,

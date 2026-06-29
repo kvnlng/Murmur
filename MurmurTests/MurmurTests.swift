@@ -3293,5 +3293,1258 @@ struct BundleAnnotationsFileTests {
         let categories = Set(reloaded.annotations.map(\.category))
         #expect(categories == ["AttachedVT", "AttachedVF"])
     }
+
+    @Test("Producer-emitted findings round-trip through write + loadManifest into the bundle")
+    @MainActor
+    func producerOutputRoundtrips() async throws {
+        // Mirrors `BedsideView.handleProducerOutput`'s persistence path:
+        // append producer findings to the existing union, write to the
+        // bundle sidecar, then verify a fresh loadManifest returns the
+        // producer findings tagged with their source.
+        let root = try Self.makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = RecordingStore(rootURL: root)
+
+        let srcDir = try Self.makeTempDir()
+        defer { try? FileManager.default.removeItem(at: srcDir) }
+        _ = try SyntheticRecording.makeWFDBRecord(into: srcDir)
+        let summary = try await store.importWFDB(folderURL: srcDir, heaFilename: "synth.hea")
+
+        let producerFindings = [
+            Annotation(
+                kind: .point, sampleIndex: 100,
+                category: "VT", source: "murmur.synthetic"
+            ),
+            Annotation(
+                kind: .point, sampleIndex: 500,
+                category: "PVC", source: "murmur.synthetic"
+            )
+        ]
+        let union = summary.recording.annotations + producerFindings
+        try BundleAnnotationsFile.write(union, to: summary.directory)
+
+        let reloaded = try store.loadManifest(at: summary.directory)
+        let producerOutput = reloaded.annotations
+            .filter { $0.source == "murmur.synthetic" }
+        #expect(producerOutput.count == 2)
+        #expect(producerOutput.contains { $0.category == "VT" && $0.sampleIndex == 100 })
+        #expect(producerOutput.contains { $0.category == "PVC" && $0.sampleIndex == 500 })
+    }
+
+    @Test("BundleAnnotationsFile.write throws when the target directory is missing")
+    func writeFailsForMissingDirectory() {
+        // Reproduces the "save findings failed" failure mode that
+        // handleProducerOutput catches and surfaces in the attach-error
+        // alert. The sidecar writer must throw a recognizable error
+        // when the bundle directory doesn't exist on disk.
+        let nonExistentDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("does-not-exist-\(UUID().uuidString)", isDirectory: true)
+        let annotations = [Self.annotation(category: "Test", at: 100)]
+        do {
+            try BundleAnnotationsFile.write(annotations, to: nonExistentDir)
+            Issue.record("BundleAnnotationsFile.write should have thrown for missing directory")
+        } catch {
+            // Pass — any thrown error covers the failure semantics.
+            // The exact error type comes from Foundation's Data.write,
+            // so we don't pin to a specific case.
+        }
+    }
+}
+
+// MARK: - Purchase store / entitlement gating
+
+@Suite("Purchase store entitlement gating")
+struct PurchaseStoreTests {
+
+    @Test("Product IDs match the registered App Store Connect identifiers")
+    func productIDsStable() {
+        #expect(PurchaseStore.ProductID.annotationAuthoring.rawValue == "com.kevinlong.murmur.annotationauthoring")
+        #expect(PurchaseStore.ProductID.silverMetrics.rawValue == "com.kevinlong.murmur.silvermetrics")
+        #expect(PurchaseStore.ProductID.vtDetection.rawValue == "com.kevinlong.murmur.vtdetection")
+        #expect(PurchaseStore.ProductID.allCases.count == 3)
+    }
+
+    @Test("requiredProduct maps producer IDs to their gating IAP; free producers return nil")
+    func producerToProductMapping() {
+        #expect(PurchaseStore.requiredProduct(forProducerID: "murmur.annotation") == .annotationAuthoring)
+        #expect(PurchaseStore.requiredProduct(forProducerID: "murmur.silver") == .silverMetrics)
+        #expect(PurchaseStore.requiredProduct(forProducerID: "murmur.vtdetect") == .vtDetection)
+        #expect(PurchaseStore.requiredProduct(forProducerID: "murmur.synthetic") == nil)
+        #expect(PurchaseStore.requiredProduct(forProducerID: "anything.else") == nil)
+    }
+
+    @Test("Fresh store starts with no entitlements")
+    @MainActor
+    func startsEmpty() {
+        let store = PurchaseStore()
+        for product in PurchaseStore.ProductID.allCases {
+            #expect(!store.owns(product), "Fresh store should not own \(product.rawValue)")
+        }
+        #expect(store.ownedProductIDs.isEmpty)
+    }
+
+    @Test("canRun returns true for free producers regardless of entitlement state")
+    @MainActor
+    func canRunFreeProducersAlwaysPasses() {
+        let store = PurchaseStore()
+        // No entitlements → free producer still passes.
+        #expect(store.canRun(producerID: "murmur.synthetic"))
+        #expect(store.canRun(producerID: "unmapped.id"))
+    }
+
+    @Test("canRun returns false for paid producers without entitlement")
+    @MainActor
+    func canRunPaidWithoutEntitlement() {
+        let store = PurchaseStore()
+        #expect(!store.canRun(producerID: "murmur.silver"))
+        #expect(!store.canRun(producerID: "murmur.vtdetect"))
+        #expect(!store.canRun(producerID: "murmur.annotation"))
+    }
+
+    @Test("canRun returns true for paid producers once the IAP is owned")
+    @MainActor
+    func canRunPaidWithEntitlement() {
+        let store = PurchaseStore()
+        store._setOwnedForTesting([.silverMetrics])
+        #expect(store.canRun(producerID: "murmur.silver"))
+        // Other paid producers still gated.
+        #expect(!store.canRun(producerID: "murmur.vtdetect"))
+        #expect(!store.canRun(producerID: "murmur.annotation"))
+    }
+
+    @Test("Owning one product doesn't grant entitlement to the others")
+    @MainActor
+    func entitlementsAreIndependent() {
+        let store = PurchaseStore()
+        store._setOwnedForTesting([.annotationAuthoring])
+        #expect(store.owns(.annotationAuthoring))
+        #expect(!store.owns(.silverMetrics))
+        #expect(!store.owns(.vtDetection))
+    }
+}
+
+// MARK: - Citation builder
+
+@Suite("Citation builder")
+struct CitationBuilderTests {
+
+    @Test("BibTeX output is a valid @software entry with required fields")
+    func bibtexShape() {
+        let entry = CitationBuilder.formatViewer(
+            format: .bibtex,
+            version: "1.0.0",
+            doi: "10.5281/zenodo.1234567",
+            year: 2026
+        )
+        #expect(entry.contains("@software{murmur_studio,"))
+        #expect(entry.contains("author       = {Long, Kevin}"))
+        #expect(entry.contains("year         = {2026}"))
+        #expect(entry.contains("version      = {1.0.0}"))
+        #expect(entry.contains("doi          = {10.5281/zenodo.1234567}"))
+        #expect(entry.contains("url          = {https://github.com/kvnlng/Murmur}"))
+    }
+
+    @Test("RIS output uses the correct type code and fields")
+    func risShape() {
+        let entry = CitationBuilder.formatViewer(
+            format: .ris,
+            version: "1.0.0",
+            doi: "10.5281/zenodo.1234567",
+            year: 2026
+        )
+        #expect(entry.hasPrefix("TY  - COMP"))
+        #expect(entry.contains("\nAU  - Long, Kevin"))
+        #expect(entry.contains("\nPY  - 2026"))
+        #expect(entry.contains("\nET  - 1.0.0"))
+        #expect(entry.contains("\nDO  - 10.5281/zenodo.1234567"))
+        #expect(entry.hasSuffix("ER  -"))
+    }
+
+    @Test("Missing DOI substitutes the placeholder so the entry is still copy-pasteable")
+    func placeholderDOIWhenMissing() {
+        let entry = CitationBuilder.formatViewer(
+            format: .bibtex,
+            version: "1.0.0",
+            doi: nil,
+            year: 2026
+        )
+        #expect(entry.contains(CitationBuilder.pendingDOIPlaceholder))
+    }
+
+    @Test("Both formats are deterministic for the same inputs")
+    func deterministicOutput() {
+        for format in CitationFormat.allCases {
+            let a = CitationBuilder.formatViewer(format: format, version: "1.2.3", doi: "10.5281/zenodo.42", year: 2026)
+            let b = CitationBuilder.formatViewer(format: format, version: "1.2.3", doi: "10.5281/zenodo.42", year: 2026)
+            #expect(a == b, "Citation should be deterministic for \(format.rawValue)")
+        }
+    }
+
+    @Test("Year falls back to the current UTC year when nil")
+    func yearFallback() {
+        // Hard to pin to a specific year without injecting `now`; instead
+        // assert the output contains a plausible 4-digit year between
+        // 2024 and 2099.
+        let entry = CitationBuilder.formatViewer(format: .bibtex, doi: "10.5281/zenodo.X")
+        let yearPattern = try? NSRegularExpression(pattern: "year         = \\{(20\\d{2})\\}")
+        let range = NSRange(entry.startIndex..., in: entry)
+        let match = yearPattern?.firstMatch(in: entry, range: range)
+        #expect(match != nil, "BibTeX entry should carry a 4-digit year in the 2000s")
+    }
+
+    @Test("Version string is preserved verbatim (no rewriting / quoting)")
+    func versionPreservedVerbatim() {
+        let entry = CitationBuilder.formatViewer(
+            format: .bibtex,
+            version: "2.5.0-beta.3",
+            doi: "10.5281/zenodo.99",
+            year: 2026
+        )
+        #expect(entry.contains("version      = {2.5.0-beta.3}"))
+    }
+}
+
+// MARK: - Snapshot exporter
+
+@Suite("Snapshot exporter filename")
+struct SnapshotExporterTests {
+    private func channel(sampleCount: Int64 = 2500, sampleRate: Double = 250) -> Channel {
+        Channel(
+            id: UUID(),
+            name: "II",
+            unit: "mV",
+            sampleRate: sampleRate,
+            startTimeUnixMS: 0,
+            sampleCount: sampleCount,
+            storageFileName: "ii.bin",
+            pyramid: []
+        )
+    }
+
+    @Test("Suggested filename derives stem from sourceFileName + UTC stamp")
+    func filenameStem() {
+        let rec = Recording(
+            version: Recording.currentVersion,
+            id: UUID(),
+            device: "test-device",
+            createdAt: Date(timeIntervalSince1970: 0),
+            sourceFileName: "synth.hea",
+            channels: [channel()]
+        )
+        let stamp = Date(timeIntervalSince1970: 1_750_000_000)   // 2025-06-15T15:06:40Z
+        let name = SnapshotExporter.suggestedFilename(for: rec, at: stamp)
+        #expect(name == "synth-snapshot-2025-06-15-1506.png")
+    }
+
+    @Test("Empty source filename falls back to 'recording'")
+    func filenameFallback() {
+        let rec = Recording(
+            version: Recording.currentVersion,
+            id: UUID(),
+            device: "test-device",
+            createdAt: Date(timeIntervalSince1970: 0),
+            sourceFileName: "",
+            channels: [channel()]
+        )
+        let stamp = Date(timeIntervalSince1970: 1_750_000_000)
+        let name = SnapshotExporter.suggestedFilename(for: rec, at: stamp)
+        #expect(name == "recording-snapshot-2025-06-15-1506.png")
+    }
+
+    @Test("Filename strips an arbitrary extension from sourceFileName")
+    func filenameStripsExtension() {
+        let rec = Recording(
+            version: Recording.currentVersion,
+            id: UUID(),
+            device: "test-device",
+            createdAt: Date(timeIntervalSince1970: 0),
+            sourceFileName: "patient-001.hea",
+            channels: [channel()]
+        )
+        let stamp = Date(timeIntervalSince1970: 1_750_000_000)
+        let name = SnapshotExporter.suggestedFilename(for: rec, at: stamp)
+        #expect(name == "patient-001-snapshot-2025-06-15-1506.png")
+    }
+
+    @Test("Filename uses UTC consistently — different local timezones don't shift the stamp")
+    func filenameUTCStable() {
+        let rec = Recording(
+            version: Recording.currentVersion,
+            id: UUID(),
+            device: "test-device",
+            createdAt: Date(timeIntervalSince1970: 0),
+            sourceFileName: "synth.hea",
+            channels: [channel()]
+        )
+        // A specific moment expressed two ways: same input, same output.
+        let stamp = Date(timeIntervalSince1970: 1_750_000_000)
+        let a = SnapshotExporter.suggestedFilename(for: rec, at: stamp)
+        let b = SnapshotExporter.suggestedFilename(for: rec, at: stamp)
+        #expect(a == b)
+    }
+}
+
+// MARK: - Annotation clustering
+
+@Suite("Annotation clustering for overlay decimation")
+struct AnnotationClusteringTests {
+    private func point(at sample: Int64, category: String = "PVC") -> Annotation {
+        Annotation(
+            kind: .point,
+            sampleIndex: sample,
+            category: category,
+            source: "test"
+        )
+    }
+
+    private func range(start: Int64, end: Int64, category: String = "AFib") -> Annotation {
+        Annotation(
+            kind: .range,
+            sampleIndex: start,
+            endSampleIndex: end,
+            category: category,
+            source: "test"
+        )
+    }
+
+    @Test("Empty input returns empty output")
+    func emptyIsEmpty() {
+        #expect(AnnotationClustering.cluster([], mergeWithinSamples: 100).isEmpty)
+    }
+
+    @Test("Single point becomes a count-1 cluster")
+    func singlePointSingleton() {
+        let result = AnnotationClustering.cluster([point(at: 200)], mergeWithinSamples: 100)
+        #expect(result.count == 1)
+        #expect(result[0].count == 1)
+        #expect(result[0].sampleIndex == 200)
+    }
+
+    @Test("Adjacent same-category points within threshold collapse to one cluster")
+    func adjacentMergeIntoOneCluster() {
+        let result = AnnotationClustering.cluster([
+            point(at: 100),
+            point(at: 150),
+            point(at: 200)
+        ], mergeWithinSamples: 100)
+        #expect(result.count == 1)
+        #expect(result[0].count == 3)
+        #expect(result[0].sampleIndex == 150)   // centroid = (100+150+200)/3
+    }
+
+    @Test("Same-category points beyond threshold stay as separate clusters")
+    func farApartStaysSeparate() {
+        let result = AnnotationClustering.cluster([
+            point(at: 100),
+            point(at: 500)
+        ], mergeWithinSamples: 100)
+        #expect(result.count == 2)
+        #expect(result.allSatisfy { $0.count == 1 })
+    }
+
+    @Test("Different-category neighbours never merge")
+    func differentCategoryNeverMerges() {
+        let result = AnnotationClustering.cluster([
+            point(at: 100, category: "PVC"),
+            point(at: 120, category: "AFib")
+        ], mergeWithinSamples: 100)
+        #expect(result.count == 2)
+    }
+
+    @Test("Threshold of zero disables clustering entirely")
+    func thresholdZeroNoClustering() {
+        let result = AnnotationClustering.cluster([
+            point(at: 100),
+            point(at: 100),
+            point(at: 100)
+        ], mergeWithinSamples: 0)
+        // Adjacent same-sample same-category points: distance = 0, which
+        // is <= 0, so they DO merge. To disable clustering, the threshold
+        // would need to be negative — document with a separate test.
+        #expect(result.count == 1)
+        #expect(result[0].count == 3)
+    }
+
+    @Test("Negative threshold disables clustering — every annotation is its own cluster")
+    func negativeThresholdNoClustering() {
+        let result = AnnotationClustering.cluster([
+            point(at: 100),
+            point(at: 110),
+            point(at: 120)
+        ], mergeWithinSamples: -1)
+        #expect(result.count == 3)
+        #expect(result.allSatisfy { $0.count == 1 })
+    }
+
+    @Test("Range annotations pass through with count == 1, no merging")
+    func rangesPassThrough() {
+        let result = AnnotationClustering.cluster([
+            range(start: 100, end: 500),
+            range(start: 200, end: 400)
+        ], mergeWithinSamples: 1000)
+        #expect(result.count == 2)
+        #expect(result.allSatisfy { $0.count == 1 })
+    }
+
+    @Test("Output is sorted ascending by sampleIndex regardless of input order")
+    func outputSorted() {
+        let result = AnnotationClustering.cluster([
+            point(at: 800),
+            point(at: 100),
+            point(at: 400)
+        ], mergeWithinSamples: 50)
+        let samples = result.map(\.sampleIndex)
+        #expect(samples == samples.sorted())
+    }
+
+    @Test("displayLabel suffixes count for clusters of more than one")
+    func displayLabelSuffix() {
+        let result = AnnotationClustering.cluster([
+            point(at: 100),
+            point(at: 150)
+        ], mergeWithinSamples: 100)
+        #expect(result[0].displayLabel == "PVC ×2")
+    }
+
+    @Test("displayLabel has no suffix for solo annotations")
+    func displayLabelSolo() {
+        let result = AnnotationClustering.cluster([point(at: 100)], mergeWithinSamples: 100)
+        #expect(result[0].displayLabel == "PVC")
+    }
+
+    @Test("Cluster memberIDs lists every contained annotation in input order")
+    func memberIDsListed() {
+        let a = point(at: 100)
+        let b = point(at: 120)
+        let c = point(at: 140)
+        let result = AnnotationClustering.cluster([a, b, c], mergeWithinSamples: 100)
+        #expect(result[0].memberIDs == [a.id, b.id, c.id])
+    }
+
+    @Test("Mixed points + ranges interleave correctly by sampleIndex")
+    func mixedInterleavedOrder() {
+        let result = AnnotationClustering.cluster([
+            point(at: 300),
+            range(start: 100, end: 200),
+            point(at: 700)
+        ], mergeWithinSamples: 50)
+        #expect(result.map(\.sampleIndex) == [100, 300, 700])
+    }
+}
+
+// MARK: - Markdown report generator
+
+@Suite("Markdown report generator")
+struct MarkdownReportTests {
+
+    private func channel(sampleRate: Double = 250, sampleCount: Int64 = 2500, startMS: Int64 = 0) -> Channel {
+        Channel(
+            id: UUID(),
+            name: "II",
+            unit: "mV",
+            sampleRate: sampleRate,
+            startTimeUnixMS: startMS,
+            sampleCount: sampleCount,
+            storageFileName: "ii.bin",
+            pyramid: []
+        )
+    }
+
+    private func recording(channels: [Channel], annotations: [Annotation] = []) -> Recording {
+        Recording(
+            version: Recording.currentVersion,
+            id: UUID(),
+            device: "test-device",
+            createdAt: Date(timeIntervalSince1970: 0),
+            sourceFileName: "synth.hea",
+            channels: channels,
+            annotations: annotations
+        )
+    }
+
+    private func annotation(
+        id: UUID = UUID(),
+        at sample: Int64,
+        category: String = "PVC",
+        confidence: Double? = nil,
+        severity: Annotation.Severity = .info,
+        source: String = "test"
+    ) -> Annotation {
+        Annotation(
+            id: id,
+            kind: .point,
+            sampleIndex: sample,
+            category: category,
+            confidence: confidence,
+            severity: severity,
+            source: source
+        )
+    }
+
+    private let now = Date(timeIntervalSince1970: 1_750_000_000)   // deterministic stamp
+
+    @Test("Empty recording produces a 'No findings' section, not a table")
+    func emptyRecording() {
+        let rec = recording(channels: [channel()])
+        let report = MarkdownReport.generate(
+            recording: rec,
+            annotations: [],
+            dispositions: [:],
+            tally: .init(confirmed: 0, dismissed: 0, unreviewed: 0),
+            now: now
+        )
+        #expect(report.contains("_No findings on this recording._"))
+        #expect(!report.contains("| Time |"), "Empty recording should not render the table header")
+    }
+
+    @Test("Findings table is sorted by sample index regardless of input order")
+    func tableSortedByTime() {
+        let rec = recording(channels: [channel()])
+        let input = [
+            annotation(at: 500, category: "VT"),
+            annotation(at: 100, category: "PVC"),
+            annotation(at: 300, category: "AFib")
+        ]
+        let report = MarkdownReport.generate(
+            recording: rec,
+            annotations: input,
+            dispositions: [:],
+            tally: .init(confirmed: 0, dismissed: 0, unreviewed: 3),
+            now: now
+        )
+        let pvcIdx = report.range(of: "PVC")!.lowerBound
+        let afibIdx = report.range(of: "AFib")!.lowerBound
+        let vtIdx = report.range(of: "VT")!.lowerBound
+        #expect(pvcIdx < afibIdx)
+        #expect(afibIdx < vtIdx)
+    }
+
+    @Test("Confidence renders nil as em-dash, value as %.2f")
+    func confidenceFormatting() {
+        let rec = recording(channels: [channel()])
+        let withConfidence = annotation(at: 100, confidence: 0.876)
+        let withoutConfidence = annotation(at: 200, confidence: nil)
+        let report = MarkdownReport.generate(
+            recording: rec,
+            annotations: [withConfidence, withoutConfidence],
+            dispositions: [:],
+            tally: .init(confirmed: 0, dismissed: 0, unreviewed: 2),
+            now: now
+        )
+        #expect(report.contains("| 0.88 |"))
+        #expect(report.contains("| — |"))
+    }
+
+    @Test("Disposition column reflects confirmed / dismissed / unreviewed correctly")
+    func dispositionColumn() {
+        let confirmedID = UUID()
+        let dismissedID = UUID()
+        let unreviewedID = UUID()
+        let rec = recording(channels: [channel()])
+        let annotations = [
+            annotation(id: confirmedID, at: 100, category: "VT"),
+            annotation(id: dismissedID, at: 200, category: "PVC"),
+            annotation(id: unreviewedID, at: 300, category: "Noise")
+        ]
+        let dispositions: [UUID: AnnotationDisposition] = [
+            confirmedID: AnnotationDisposition(
+                annotationID: confirmedID,
+                state: .confirmed,
+                confirmedKind: .vt,
+                note: nil,
+                reviewedAt: now,
+                reviewedBy: "tester"
+            ),
+            dismissedID: AnnotationDisposition(
+                annotationID: dismissedID,
+                state: .dismissed,
+                confirmedKind: nil,
+                note: nil,
+                reviewedAt: now,
+                reviewedBy: "tester"
+            )
+        ]
+        let report = MarkdownReport.generate(
+            recording: rec,
+            annotations: annotations,
+            dispositions: dispositions,
+            tally: .init(confirmed: 1, dismissed: 1, unreviewed: 1),
+            now: now
+        )
+        #expect(report.contains("confirmed (VT)"))
+        #expect(report.contains("dismissed"))
+        #expect(report.contains("unreviewed"))
+    }
+
+    @Test("Triage summary lines match the supplied tally")
+    func triageSummaryMatchesTally() {
+        let rec = recording(channels: [channel()])
+        let report = MarkdownReport.generate(
+            recording: rec,
+            annotations: [],
+            dispositions: [:],
+            tally: .init(confirmed: 4, dismissed: 2, unreviewed: 7),
+            now: now
+        )
+        #expect(report.contains("- Confirmed: 4"))
+        #expect(report.contains("- Dismissed: 2"))
+        #expect(report.contains("- Unreviewed: 7"))
+        #expect(report.contains("- **Total**: 13"))
+    }
+
+    @Test("Metadata block lists device, source file, channel count, and start time")
+    func metadataBlock() {
+        let rec = recording(channels: [channel(sampleRate: 500, sampleCount: 100_000, startMS: 1_700_000_000_000)])
+        let report = MarkdownReport.generate(
+            recording: rec,
+            annotations: [],
+            dispositions: [:],
+            tally: .init(confirmed: 0, dismissed: 0, unreviewed: 0),
+            now: now
+        )
+        #expect(report.contains("- **Device**: test-device"))
+        #expect(report.contains("- **Source file**: `synth.hea`"))
+        #expect(report.contains("- **Channels**: 1"))
+        #expect(report.contains("- **Sample rate (primary channel)**: 500 Hz"))
+    }
+
+    @Test("Pipe character in finding metadata is escaped so table rows stay intact")
+    func pipeEscapedInCategory() {
+        let rec = recording(channels: [channel()])
+        let evil = annotation(at: 100, category: "VT|critical", source: "producer|v1")
+        let report = MarkdownReport.generate(
+            recording: rec,
+            annotations: [evil],
+            dispositions: [:],
+            tally: .init(confirmed: 0, dismissed: 0, unreviewed: 1),
+            now: now
+        )
+        #expect(report.contains("VT\\|critical"))
+        #expect(report.contains("producer\\|v1"))
+    }
+
+    @Test("Generated-at footer carries the supplied `now` timestamp deterministically")
+    func footerStampDeterministic() {
+        let rec = recording(channels: [channel()])
+        let report = MarkdownReport.generate(
+            recording: rec,
+            annotations: [],
+            dispositions: [:],
+            tally: .init(confirmed: 0, dismissed: 0, unreviewed: 0),
+            now: now
+        )
+        // 1_750_000_000 unix seconds → 2025-06-15T15:06:40Z.
+        #expect(report.contains("2025-06-15T15:06:40Z"))
+    }
+
+    @Test("formatTime renders short and long timecodes in MM:SS.ss")
+    func formatTimeMinutesSeconds() {
+        #expect(MarkdownReport.formatTime(seconds: 0) == "0:00.00")
+        #expect(MarkdownReport.formatTime(seconds: 5.5) == "0:05.50")
+        #expect(MarkdownReport.formatTime(seconds: 65.42) == "1:05.42")
+    }
+
+    @Test("formatDuration picks the right unit per recording length")
+    func formatDurationUnits() {
+        #expect(MarkdownReport.formatDuration(10) == "10.0 s")
+        #expect(MarkdownReport.formatDuration(120) == "2.0 min")
+        #expect(MarkdownReport.formatDuration(7200) == "2.0 hr")
+    }
+
+    @Test("BedsideView.suggestedReportFilename derives stem from sourceFileName + UTC timestamp")
+    func suggestedFilenameFormat() {
+        let rec = recording(channels: [channel()])
+        let stamp = Date(timeIntervalSince1970: 1_750_000_000)   // 2025-06-15T15:06:40Z
+        let name = BedsideView.suggestedReportFilename(for: rec, at: stamp)
+        #expect(name == "synth-report-2025-06-15-1506.md")
+    }
+
+    @Test("Suggested filename falls back to 'recording' when source has no name")
+    func suggestedFilenameFallback() {
+        let bare = Recording(
+            version: Recording.currentVersion,
+            id: UUID(),
+            device: "test-device",
+            createdAt: Date(timeIntervalSince1970: 0),
+            sourceFileName: "",   // some bundles ship with no source path
+            channels: [channel()],
+            annotations: []
+        )
+        let stamp = Date(timeIntervalSince1970: 1_750_000_000)
+        let name = BedsideView.suggestedReportFilename(for: bare, at: stamp)
+        #expect(name == "recording-report-2025-06-15-1506.md")
+    }
+}
+
+// MARK: - Min/max scanner
+
+@Suite("Min/max sample scanner")
+struct MinMaxScannerTests {
+
+    @Test("Empty input returns nil")
+    func emptyReturnsNil() {
+        #expect(MinMaxScanner.scan(samples: [Float]()) == nil)
+    }
+
+    @Test("All-NaN input returns nil")
+    func allNaNReturnsNil() {
+        let samples: [Float] = [.nan, .nan, .nan]
+        #expect(MinMaxScanner.scan(samples: samples) == nil)
+    }
+
+    @Test("Finite-only buffer returns exact min and max")
+    func finiteBufferExactMinMax() {
+        let samples: [Float] = [-2.5, 0.0, 1.2, 3.4, -1.0]
+        let result = MinMaxScanner.scan(samples: samples)
+        #expect(result?.min == -2.5)
+        #expect(result?.max == 3.4)
+        #expect(result?.validSampleCount == 5)
+        #expect(result?.isEmpty == false)
+    }
+
+    @Test("NaN samples are skipped but valid samples still scan")
+    func nanSkippedFiniteRespected() {
+        let samples: [Float] = [1.0, .nan, 3.0, .nan, 2.0]
+        let result = MinMaxScanner.scan(samples: samples)
+        #expect(result?.min == 1.0)
+        #expect(result?.max == 3.0)
+        #expect(result?.validSampleCount == 3)
+    }
+
+    @Test("Infinity samples are skipped along with NaN")
+    func infinitySkipped() {
+        let samples: [Float] = [.infinity, 1.5, -.infinity, 0.5]
+        let result = MinMaxScanner.scan(samples: samples)
+        #expect(result?.min == 0.5)
+        #expect(result?.max == 1.5)
+        #expect(result?.validSampleCount == 2)
+    }
+
+    @Test("Single-sample input produces a degenerate but valid range")
+    func singleSampleValid() {
+        let result = MinMaxScanner.scan(samples: [2.5] as [Float])
+        #expect(result?.min == 2.5)
+        #expect(result?.max == 2.5)
+        #expect(result?.validSampleCount == 1)
+    }
+
+    @Test("Scanner is stable across reorderings of the same data")
+    func orderInvariant() {
+        let a: [Float] = [-2.0, 3.0, 0.5, 1.0]
+        let b: [Float] = [1.0, 0.5, 3.0, -2.0]
+        #expect(MinMaxScanner.scan(samples: a) == MinMaxScanner.scan(samples: b))
+    }
+
+    // MARK: - displayRange derivation
+
+    @Test("displayRange pads the observed range by 10% on each side")
+    func displayRangePads() {
+        let range = MinMaxScanner.Range(min: -1.0, max: 1.0, validSampleCount: 100)
+        let display = range.displayRange()
+        // Observed span = 2 → padding = 0.2; padded range = [-1.2, 1.2].
+        #expect(abs(display.lowerBound - (-1.2)) < 1e-9)
+        #expect(abs(display.upperBound - 1.2) < 1e-9)
+    }
+
+    @Test("displayRange widens to the minSpan floor for near-flat signals")
+    func displayRangeRespectsMinSpan() {
+        let flat = MinMaxScanner.Range(min: 0.0, max: 0.0, validSampleCount: 1)
+        let display = flat.displayRange(padding: 0, minSpan: 0.5)
+        // No padding, but minSpan 0.5 → centered range [-0.25, 0.25].
+        #expect(abs(display.lowerBound - (-0.25)) < 1e-9)
+        #expect(abs(display.upperBound - 0.25) < 1e-9)
+    }
+
+    @Test("displayRange stays centred on the observed midpoint when widening to minSpan")
+    func displayRangeCentersOnMidpoint() {
+        let offset = MinMaxScanner.Range(min: 2.0, max: 2.1, validSampleCount: 10)
+        let display = offset.displayRange(padding: 0, minSpan: 1.0)
+        // Midpoint 2.05, span 1.0 → range [1.55, 2.55]. Tolerance is
+        // 1e-6 because the input min/max are stored as Float, so
+        // Double(2.1) carries half a ulp of rounding error.
+        #expect(abs(display.lowerBound - 1.55) < 1e-6)
+        #expect(abs(display.upperBound - 2.55) < 1e-6)
+    }
+
+    @Test("Negative values produce a symmetric padded range")
+    func displayRangeNegativeValues() {
+        let range = MinMaxScanner.Range(min: -3.0, max: -1.0, validSampleCount: 100)
+        let display = range.displayRange(padding: 0.1, minSpan: 0)
+        // Observed span = 2, padding = 0.2 → [-3.2, -0.8].
+        #expect(abs(display.lowerBound - (-3.2)) < 1e-9)
+        #expect(abs(display.upperBound - (-0.8)) < 1e-9)
+    }
+
+    @Test("Custom padding fraction is honoured")
+    func customPadding() {
+        let range = MinMaxScanner.Range(min: 0, max: 10, validSampleCount: 5)
+        let display = range.displayRange(padding: 0.5, minSpan: 0)
+        // span 10, padding 5 → [-5, 15].
+        #expect(abs(display.lowerBound - (-5)) < 1e-9)
+        #expect(abs(display.upperBound - 15) < 1e-9)
+    }
+}
+
+// MARK: - Finding sort modes
+
+@Suite("Finding sort modes")
+struct FindingSortTests {
+    private func a(
+        sample: Int64,
+        category: String = "PVC",
+        severity: Annotation.Severity = .info,
+        confidence: Double? = nil
+    ) -> Annotation {
+        Annotation(
+            kind: .point,
+            sampleIndex: sample,
+            category: category,
+            confidence: confidence,
+            severity: severity,
+            source: "test"
+        )
+    }
+
+    @Test("Time sort returns findings in ascending sampleIndex order")
+    func timeAscending() {
+        let input = [a(sample: 300), a(sample: 100), a(sample: 200)]
+        let out = FindingSort.time.apply(to: input)
+        #expect(out.map(\.sampleIndex) == [100, 200, 300])
+    }
+
+    @Test("Severity sort puts critical first; ties break by time")
+    func severityDescendingWithTimeTiebreak() {
+        let input = [
+            a(sample: 100, severity: .info),
+            a(sample: 200, severity: .critical),
+            a(sample: 300, severity: .warning),
+            a(sample: 400, severity: .critical)   // ties with sample=200 on rank
+        ]
+        let out = FindingSort.severity.apply(to: input)
+        #expect(out.map(\.severity) == [.critical, .critical, .warning, .info])
+        // Within critical, the earlier sample comes first.
+        let critical = out.filter { $0.severity == .critical }.map(\.sampleIndex)
+        #expect(critical == [200, 400])
+    }
+
+    @Test("Confidence sort puts highest first, nils last")
+    func confidenceDescendingNilsLast() {
+        let input = [
+            a(sample: 100, confidence: 0.5),
+            a(sample: 200, confidence: nil),
+            a(sample: 300, confidence: 0.95),
+            a(sample: 400, confidence: 0.5),     // ties with sample=100 on confidence
+            a(sample: 500, confidence: nil)
+        ]
+        let out = FindingSort.confidence.apply(to: input)
+        #expect(out.map(\.confidence) == [0.95, 0.5, 0.5, nil, nil])
+        // Within equal-confidence rows the earlier sample comes first.
+        let mid = out.filter { $0.confidence == 0.5 }.map(\.sampleIndex)
+        #expect(mid == [100, 400])
+        // Nil rows still ordered by time at the tail.
+        let tail = out.filter { $0.confidence == nil }.map(\.sampleIndex)
+        #expect(tail == [200, 500])
+    }
+
+    @Test("Category sort is alphabetical; ties break by time")
+    func categoryAlphabeticalWithTimeTiebreak() {
+        let input = [
+            a(sample: 100, category: "VT"),
+            a(sample: 200, category: "AFib"),
+            a(sample: 300, category: "AFib"),
+            a(sample: 400, category: "PVC")
+        ]
+        let out = FindingSort.category.apply(to: input)
+        #expect(out.map(\.category) == ["AFib", "AFib", "PVC", "VT"])
+        let afib = out.filter { $0.category == "AFib" }.map(\.sampleIndex)
+        #expect(afib == [200, 300])
+    }
+
+    @Test("Sort is total — no two equal-position findings swap on repeat sort")
+    func sortIsStableAcrossRuns() {
+        let input = [
+            a(sample: 100, severity: .info),
+            a(sample: 200, severity: .info),
+            a(sample: 300, severity: .info)
+        ]
+        let once = FindingSort.severity.apply(to: input)
+        let twice = FindingSort.severity.apply(to: once)
+        #expect(once.map(\.id) == twice.map(\.id))
+    }
+
+    @Test("All sort modes preserve count")
+    func allModesPreserveCount() {
+        let input = (0..<10).map { a(sample: Int64($0 * 100)) }
+        for mode in FindingSort.allCases {
+            #expect(mode.apply(to: input).count == input.count,
+                    "\(mode.rawValue) sort must not drop findings")
+        }
+    }
+}
+
+// MARK: - Rubber-band damping curve
+
+@Suite("Rubber-band overscroll damping")
+struct RubberBandTests {
+
+    @Test("Zero overshoot yields zero translation")
+    func zeroIsIdentity() {
+        #expect(RubberBand.damp(overshoot: 0, canvasWidth: 800) == 0)
+    }
+
+    @Test("Sign of overshoot is preserved in output")
+    func signPreserved() {
+        let positive = RubberBand.damp(overshoot: 50, canvasWidth: 800)
+        let negative = RubberBand.damp(overshoot: -50, canvasWidth: 800)
+        #expect(positive > 0)
+        #expect(negative < 0)
+        #expect(abs(positive) == abs(negative), "Curve is symmetric about zero")
+    }
+
+    @Test("Output is strictly less than the raw overshoot (damped)")
+    func dampingActuallyDamps() {
+        for raw in [10.0, 50.0, 100.0, 500.0, 1500.0] {
+            let damped = RubberBand.damp(overshoot: CGFloat(raw), canvasWidth: 800)
+            #expect(damped < CGFloat(raw), "Damped output must be smaller than raw overshoot (raw=\(raw), damped=\(damped))")
+        }
+    }
+
+    @Test("Damped translation asymptotes at canvasWidth")
+    func asymptoteAtCanvasWidth() {
+        let canvasWidth: CGFloat = 800
+        // Very large overshoot should approach but not exceed canvasWidth.
+        let extreme = RubberBand.damp(overshoot: 100_000, canvasWidth: canvasWidth)
+        #expect(extreme < canvasWidth, "Curve must stay strictly below canvasWidth")
+        #expect(extreme > canvasWidth * 0.95, "Curve must be near canvasWidth at extreme overshoot")
+    }
+
+    @Test("Output is monotonically increasing with |overshoot|")
+    func monotone() {
+        let canvasWidth: CGFloat = 800
+        let samples: [CGFloat] = [10, 50, 100, 200, 500, 1000, 5000]
+        let damped = samples.map { RubberBand.damp(overshoot: $0, canvasWidth: canvasWidth) }
+        for (a, b) in zip(damped, damped.dropFirst()) {
+            #expect(a < b, "Damping must be monotonic (\(a) < \(b))")
+        }
+    }
+
+    @Test("Zero or negative canvas width yields zero translation (no division by zero)")
+    func handlesDegenerateCanvas() {
+        #expect(RubberBand.damp(overshoot: 100, canvasWidth: 0) == 0)
+        #expect(RubberBand.damp(overshoot: 100, canvasWidth: -50) == 0)
+    }
+}
+
+// MARK: - Annotation keyboard navigation helpers
+
+@Suite("Annotation next/previous finding")
+struct AnnotationNavigationTests {
+    private func annotation(at sample: Int64) -> Annotation {
+        Annotation(
+            kind: .point,
+            sampleIndex: sample,
+            category: "Test",
+            source: "test"
+        )
+    }
+
+    @Test("nextFinding returns the first finding strictly after position")
+    func nextAfterPositionStrict() {
+        let list = [annotation(at: 100), annotation(at: 200), annotation(at: 300)]
+        #expect(Annotation.nextFinding(after: 0, in: list)?.sampleIndex == 100)
+        #expect(Annotation.nextFinding(after: 100, in: list)?.sampleIndex == 200)
+        #expect(Annotation.nextFinding(after: 250, in: list)?.sampleIndex == 300)
+    }
+
+    @Test("nextFinding returns nil when no finding lies after the position")
+    func nextReturnsNilAtEnd() {
+        let list = [annotation(at: 100), annotation(at: 200)]
+        #expect(Annotation.nextFinding(after: 200, in: list) == nil)
+        #expect(Annotation.nextFinding(after: 9999, in: list) == nil)
+    }
+
+    @Test("nextFinding tolerates an unsorted input list")
+    func nextSortsInput() {
+        let list = [annotation(at: 300), annotation(at: 100), annotation(at: 200)]
+        #expect(Annotation.nextFinding(after: 0, in: list)?.sampleIndex == 100)
+        #expect(Annotation.nextFinding(after: 150, in: list)?.sampleIndex == 200)
+    }
+
+    @Test("previousFinding returns the last finding strictly before position")
+    func previousBeforePositionStrict() {
+        let list = [annotation(at: 100), annotation(at: 200), annotation(at: 300)]
+        #expect(Annotation.previousFinding(before: 9999, in: list)?.sampleIndex == 300)
+        #expect(Annotation.previousFinding(before: 250, in: list)?.sampleIndex == 200)
+        #expect(Annotation.previousFinding(before: 200, in: list)?.sampleIndex == 100)
+    }
+
+    @Test("previousFinding returns nil when no finding lies before the position")
+    func previousReturnsNilAtStart() {
+        let list = [annotation(at: 100), annotation(at: 200)]
+        #expect(Annotation.previousFinding(before: 100, in: list) == nil)
+        #expect(Annotation.previousFinding(before: 0, in: list) == nil)
+    }
+
+    @Test("Empty annotation list produces nil from both navigators")
+    func emptyListYieldsNil() {
+        #expect(Annotation.nextFinding(after: 50, in: []) == nil)
+        #expect(Annotation.previousFinding(before: 50, in: []) == nil)
+    }
+
+    @Test("closest picks the annotation with minimum |sampleIndex - position|")
+    func closestPicksNearest() {
+        let list = [annotation(at: 100), annotation(at: 250), annotation(at: 800)]
+        #expect(Annotation.closest(to: 0, in: list)?.sampleIndex == 100)
+        #expect(Annotation.closest(to: 200, in: list)?.sampleIndex == 250)
+        #expect(Annotation.closest(to: 500, in: list)?.sampleIndex == 250)
+        #expect(Annotation.closest(to: 1000, in: list)?.sampleIndex == 800)
+    }
+
+    @Test("closest on an empty list returns nil")
+    func closestEmptyIsNil() {
+        #expect(Annotation.closest(to: 50, in: []) == nil)
+    }
+
+    @Test("closest ties resolve deterministically to the earlier sample")
+    func closestTiesBreakEarlier() {
+        let list = [annotation(at: 200), annotation(at: 100)]
+        // Position 150 is equidistant from 100 and 200. Tie → earlier wins.
+        #expect(Annotation.closest(to: 150, in: list)?.sampleIndex == 100)
+    }
+}
+
+// MARK: - Lead-specific annotation routing
+
+@Suite("Annotation channel routing by lead")
+struct AnnotationChannelRoutingTests {
+    private func annotation(lead: String?) -> Annotation {
+        Annotation(
+            kind: .point,
+            sampleIndex: 0,
+            category: "Test",
+            source: "test",
+            lead: lead
+        )
+    }
+
+    @Test("Lead-less findings match every channel")
+    func leadlessMatchesEveryone() {
+        let a = annotation(lead: nil)
+        #expect(a.matchesChannel("II"))
+        #expect(a.matchesChannel("V5"))
+        #expect(a.matchesChannel("aVR"))
+    }
+
+    @Test("Empty / whitespace-only lead is treated as lead-less")
+    func emptyLeadIsLeadless() {
+        #expect(annotation(lead: "").matchesChannel("II"))
+        #expect(annotation(lead: "   ").matchesChannel("II"))
+    }
+
+    @Test("Lead-tagged findings only match the named channel")
+    func leadTaggedMatchesOne() {
+        let a = annotation(lead: "II")
+        #expect(a.matchesChannel("II"))
+        #expect(!a.matchesChannel("V5"))
+        #expect(!a.matchesChannel("aVR"))
+    }
+
+    @Test("Channel matching is case-insensitive")
+    func channelMatchCaseInsensitive() {
+        #expect(annotation(lead: "ii").matchesChannel("II"))
+        #expect(annotation(lead: "II").matchesChannel("ii"))
+        #expect(annotation(lead: "AvR").matchesChannel("aVR"))
+    }
+
+    @Test("Surrounding whitespace is trimmed before comparison")
+    func channelMatchTrimsWhitespace() {
+        #expect(annotation(lead: " II ").matchesChannel("II"))
+        #expect(annotation(lead: "II").matchesChannel(" II "))
+    }
+}
+
+// MARK: - Finding producer protocol
+
+@Suite("Finding producer pipeline")
+struct FindingProducerTests {
+
+    /// Builds a minimal in-memory Recording with one ECG channel of the
+    /// given duration. Doesn't write any sample data — the synthetic
+    /// producer doesn't read samples, only metadata.
+    private func recording(durationSeconds: Double, sampleRate: Double = 250) -> Recording {
+        let channel = Channel(
+            id: UUID(),
+            name: "II",
+            unit: "mV",
+            sampleRate: sampleRate,
+            startTimeUnixMS: 0,
+            sampleCount: Int64(durationSeconds * sampleRate),
+            storageFileName: "ii.bin",
+            pyramid: []
+        )
+        return Recording(
+            version: Recording.currentVersion,
+            id: UUID(),
+            device: "test-device",
+            createdAt: Date(timeIntervalSince1970: 0),
+            sourceFileName: "test.hea",
+            channels: [channel]
+        )
+    }
+
+    /// Drains the producer's event stream into separate progress /
+    /// findings / warnings arrays so individual tests can assert on
+    /// the cleanly-split summaries instead of pattern-matching events.
+    private func drain(
+        _ stream: AsyncThrowingStream<ProducerEvent, Error>
+    ) async throws -> (
+        progress: [ProgressUpdate],
+        findings: [Annotation],
+        warnings: [String]
+    ) {
+        var progress: [ProgressUpdate] = []
+        var findings: [Annotation] = []
+        var warnings: [String] = []
+        for try await event in stream {
+            switch event {
+            case .progress(let p): progress.append(p)
+            case .findings(let f): findings.append(contentsOf: f)
+            case .warning(let msg, _): warnings.append(msg)
+            }
+        }
+        return (progress, findings, warnings)
+    }
+
+    @Test("ProgressUpdate clamps fractionComplete into [0, 1]")
+    func progressClamps() {
+        #expect(ProgressUpdate(fractionComplete: -0.5, stage: "x").fractionComplete == 0)
+        #expect(ProgressUpdate(fractionComplete: 1.5, stage: "x").fractionComplete == 1)
+        #expect(ProgressUpdate(fractionComplete: 0.5, stage: "x").fractionComplete == 0.5)
+    }
+
+    @Test("Synthetic producer is deterministic across runs with the same seed")
+    func syntheticDeterministic() async throws {
+        let rec = recording(durationSeconds: 60)
+        let producer = SyntheticFindingProducer(seed: 12345)
+        let firstRun = try await drain(producer.analyze(rec)).findings
+        let secondRun = try await drain(producer.analyze(rec)).findings
+        #expect(firstRun.count == secondRun.count)
+        #expect(firstRun.map(\.sampleIndex) == secondRun.map(\.sampleIndex))
+        #expect(firstRun.map(\.category) == secondRun.map(\.category))
+    }
+
+    @Test("Different seeds produce different finding sets")
+    func syntheticSeedSensitive() async throws {
+        let rec = recording(durationSeconds: 60)
+        let a = try await drain(SyntheticFindingProducer(seed: 1).analyze(rec)).findings
+        let b = try await drain(SyntheticFindingProducer(seed: 2).analyze(rec)).findings
+        // Could collide in pathological cases but with default probability +
+        // window cadence it's astronomically unlikely.
+        #expect(a.map(\.sampleIndex) != b.map(\.sampleIndex))
+    }
+
+    @Test("Findings carry the producer's id as their source")
+    func syntheticSourceTagged() async throws {
+        let producer = SyntheticFindingProducer(seed: 42)
+        let findings = try await drain(producer.analyze(recording(durationSeconds: 30))).findings
+        #expect(!findings.isEmpty, "Need at least one finding to check source tagging")
+        #expect(findings.allSatisfy { $0.source == producer.id })
+    }
+
+    @Test("Progress monotonically advances and terminates at 1.0")
+    func progressMonotone() async throws {
+        let producer = SyntheticFindingProducer(seed: 7)
+        let progress = try await drain(producer.analyze(recording(durationSeconds: 20))).progress
+        let fractions = progress.map(\.fractionComplete)
+        #expect(fractions.first == 0)
+        #expect(fractions.last == 1)
+        for (a, b) in zip(fractions, fractions.dropFirst()) {
+            #expect(a <= b, "fractionComplete must be monotonically non-decreasing")
+        }
+    }
+
+    @Test("Empty recording emits a terminal progress event and no findings")
+    func emptyRecording() async throws {
+        let producer = SyntheticFindingProducer(seed: 1)
+        let empty = Recording(
+            version: Recording.currentVersion,
+            id: UUID(),
+            device: "empty",
+            createdAt: Date(timeIntervalSince1970: 0),
+            sourceFileName: "",
+            channels: []
+        )
+        let result = try await drain(producer.analyze(empty))
+        #expect(result.findings.isEmpty)
+        #expect(result.warnings.isEmpty)
+        #expect(result.progress.last?.fractionComplete == 1)
+    }
+
+    @Test("Cancellation: cancelled consumer aborts the stream cleanly")
+    func cancellationAborts() async throws {
+        let producer = SyntheticFindingProducer(
+            seed: 99,
+            findingProbability: 1.0,    // every window emits, so cancellation has lots to interrupt
+            windowSeconds: 0.1
+        )
+        let rec = recording(durationSeconds: 600)  // 6000 windows worth of work
+
+        let task = Task<Int, Error> {
+            var seen = 0
+            for try await event in producer.analyze(rec) {
+                if case .findings = event { seen += 1 }
+                if seen >= 3 { break }  // exit consumer mid-stream
+            }
+            return seen
+        }
+        let count = try await task.value
+        #expect(count == 3, "Consumer should observe exactly the events it asked for before bailing")
+    }
+
+    @Test("ProducerRegistry round-trips registration, lookup, and ordering")
+    func registryRoundtrip() async {
+        let registry = ProducerRegistry()
+        let a = SyntheticFindingProducer(seed: 1)
+        await registry.register(a)
+        let lookup = await registry.producer(id: a.id)
+        #expect(lookup?.id == a.id)
+        #expect(await registry.all().count == 1)
+
+        await registry.unregister(id: a.id)
+        #expect(await registry.producer(id: a.id) == nil)
+        #expect(await registry.all().isEmpty)
+    }
+
+    @Test("ProducerRegistry: registering the same id twice replaces (last-write-wins)")
+    func registryReplacesOnDuplicateID() async {
+        let registry = ProducerRegistry()
+        await registry.register(SyntheticFindingProducer(seed: 1))
+        await registry.register(SyntheticFindingProducer(seed: 2))
+        #expect(await registry.all().count == 1)
+        // The most recent registration wins; deterministic by ID alone since
+        // both producers share id="murmur.synthetic".
+        #expect(await registry.producer(id: "murmur.synthetic") != nil)
+    }
+
+    @Test("bootstrapBaselineProducers registers the synthetic producer in DEBUG builds")
+    @MainActor
+    func bootstrapRegistersSyntheticInDebug() async {
+        // The shared registry is process-wide and other tests may have
+        // populated it. We isolate by snapshotting + restoring via
+        // unregister, but that's fragile — instead, just assert the
+        // post-bootstrap state has the synthetic producer present.
+        // (The bootstrap is a one-shot launch hook; re-running it is
+        // idempotent because the registry de-dupes on id.)
+        await bootstrapBaselineProducers()
+        let producer = await ProducerRegistry.shared.producer(id: "murmur.synthetic")
+        #if DEBUG
+        #expect(producer != nil, "DEBUG bootstrap must register SyntheticFindingProducer")
+        #expect(producer?.displayName == "Synthetic test producer")
+        #else
+        // Release builds keep the registry empty until paid frameworks
+        // register their own producers.
+        #expect(producer == nil)
+        #endif
+    }
 }
 

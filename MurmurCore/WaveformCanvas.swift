@@ -45,6 +45,14 @@ struct WaveformCanvas: NSViewRepresentable {
     // Visible annotations only (already filtered by caller).
     let annotations: [Annotation]
 
+    /// Display range in mV. Defaults to ±5 (the clinical clipping
+    /// reference). Set tighter by the caller when auto-scale is on so
+    /// a low-amplitude channel uses the full canvas height. The
+    /// clipping scanner stays anchored at ±5 separately — display
+    /// range and clip detection are different concepts.
+    var displayMin: Double = -5
+    var displayMax: Double = 5
+
     func makeCoordinator() -> Coordinator {
         Coordinator()
     }
@@ -110,6 +118,8 @@ struct WaveformCanvas: NSViewRepresentable {
         guard let renderer = coordinator.renderer else { return }
         renderer.uniforms.startSample = Float(startSample)
         renderer.uniforms.endSample   = Float(endSample)
+        renderer.uniforms.yMin        = Float(displayMin)
+        renderer.uniforms.yMax        = Float(displayMax)
 
         // LOD selection based on the view's pixel width.
         let pixelWidth = Double(view.bounds.width)
@@ -323,29 +333,51 @@ struct WaveformClippingOverlay: View {
     }
 }
 
-/// Annotation labels anchored to the top of the canvas. For point findings the
-/// label sits at the finding's sample. For ranges, the label sits at the range
-/// midpoint. Color comes from `CategoryPalette` so labels match the rule/fill.
+/// Annotation labels anchored to the top of the canvas. For point findings
+/// the label sits at the finding's sample. For ranges, the label sits at
+/// the range midpoint. Color comes from `CategoryPalette` so labels match
+/// the rule/fill.
+///
+/// Adjacent same-category point annotations collapse into single
+/// `Cat ×N` aggregates when the viewport is zoomed out far enough that
+/// their text labels would overlap — the merge threshold is computed
+/// from the current samples-per-pixel times an approximate label width.
+/// Range annotations always render unmerged because their own extents
+/// already convey position.
 struct WaveformAnnotationOverlay: View {
     let annotations: [Annotation]   // already filtered to viewport
     let startSample: Int64
     let endSample: Int64
 
+    /// Approximate label width in points. Any two same-category points
+    /// closer than this on screen would visually overlap, so we cluster
+    /// them. 36pt covers "PVC ×99" at caption2 weight.
+    private static let labelPitchPx: CGFloat = 36
+
     var body: some View {
         GeometryReader { geo in
             let span = max(1, endSample - startSample)
-            ForEach(annotations) { ann in
+            let canvasWidth = max(1, geo.size.width)
+            let samplesPerPixel = Double(span) / Double(canvasWidth)
+            let mergeThresholdSamples = Int64(samplesPerPixel * Double(Self.labelPitchPx))
+            let clusters = AnnotationClustering.cluster(
+                annotations,
+                mergeWithinSamples: mergeThresholdSamples
+            )
+            ForEach(clusters) { cluster in
                 let anchorSample: Int64 = {
-                    switch ann.kind {
-                    case .point: return ann.sampleIndex
-                    case .range: return (ann.sampleIndex + ann.renderEndSample) / 2
+                    switch cluster.representative.kind {
+                    case .point: return cluster.sampleIndex
+                    case .range:
+                        let r = cluster.representative
+                        return (r.sampleIndex + r.renderEndSample) / 2
                     }
                 }()
                 let frac = Double(anchorSample - startSample) / Double(span)
-                Text(ann.displayLabel)
+                Text(cluster.displayLabel)
                     .font(.caption2.monospaced().weight(.semibold))
-                    .foregroundStyle(CategoryPalette.swiftUIColor(for: ann.category))
-                    .position(x: CGFloat(frac) * geo.size.width, y: 8)
+                    .foregroundStyle(CategoryPalette.swiftUIColor(for: cluster.category))
+                    .position(x: CGFloat(frac) * canvasWidth, y: 8)
             }
         }
         .allowsHitTesting(false)
