@@ -1,0 +1,110 @@
+{
+  "identifier" : "B7F0E5C2-3E4A-4D8B-9F1A-2C8E5D6B7A9F",
+  "nonRenewingSubscriptions" : [],
+  "products" : [
+    {
+      "displayPrice" : "4.99",
+      "familyShareable" : false,
+      "internalID" : "ANNOTATION-AUTH-0001",
+      "localizations" : [
+        {
+          "description" : "Manually create, edit, and delete findings on top of any recording. Free viewer continues to support reading and disposition.",
+          "displayName" : "Annotation Authoring",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.kevinlong.murmur.annotationauthoring",
+      "referenceName" : "Annotation Authoring",
+      "type" : "NonConsumable"
+    },
+    {
+      "displayPrice" : "9.99",
+      "familyShareable" : false,
+      "internalID" : "SILVER-METRICS-0001",
+      "localizations" : [
+        {
+          "description" : "Cardiopulmonary Telemetry Silver-Layer metrics computed on device. Deterministic, peer-reviewed methods. Research use only.",
+          "displayName" : "Silver Layer Metrics",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.kevinlong.murmur.silvermetrics",
+      "referenceName" : "Silver Layer Metrics",
+      "type" : "NonConsumable"
+    },
+    {
+      "displayPrice" : "19.99",
+      "familyShareable" : false,
+      "internalID" : "VT-DETECTION-0001",
+      "localizations" : [
+        {
+          "description" : "SE-ResLSTM detector for malignant ventricular arrhythmias in noisy ICU telemetry. Research use only — not for clinical decision support.",
+          "displayName" : "VT/VF Detection (RUO)",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.kevinlong.murmur.vtdetection",
+      "referenceName" : "VT/VF Detection",
+      "type" : "NonConsumable"
+    }
+  ],
+  "settings" : {
+    "_compatibilityTimeRate" : 1,
+    "_disableDialogs" : false,
+    "_failTransactionsEnabled" : false,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Load Products"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Purchase"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Verification"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Store Sync"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Subscription Status"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Transaction"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Manage Subscriptions Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Refund Request Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Offer Code Redeem Sheet"
+      }
+    ]
+  },
+  "subscriptionGroups" : [],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

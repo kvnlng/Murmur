@@ -85,6 +85,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
+				Murmur/Murmur.storekit,
 			);
 			target = 0A9B42CE2FDF06BA0059C903 /* Murmur */;
 		};
