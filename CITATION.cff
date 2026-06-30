@@ -8,10 +8,10 @@
 # are cited separately by routing through the in-app "Copy citation"
 # action — see docs/citation.md.
 #
-# The `doi:` and `version:` fields below are placeholders. They will
-# be populated by Zenodo's GitHub-release integration once the first
-# v1.x.x tag is pushed (see ROADMAP "Citation Phase A"). Do not edit
-# manually — Zenodo writes back to this file on each release.
+# DOI/version/date-released filled in after the first Zenodo deposit
+# (v1.2.1, minted 2026-06-30). The `doi:` field carries the CONCEPT
+# DOI — the parent record that always resolves to the latest version.
+# Per-version DOIs live alongside their release on Zenodo.
 
 cff-version: 1.2.0
 message: "If you use Murmur Studio in your research, please cite it as below."
@@ -39,7 +39,6 @@ authors:
   - family-names: Long
     given-names: Kevin
     orcid: "https://orcid.org/0000-0001-8881-2481"
-# DOI populated by Zenodo on first release.
-# doi: 10.5281/zenodo.XXXXXXX
-# version: 1.0.0
-# date-released: 2026-XX-XX
+doi: 10.5281/zenodo.21077528
+version: 1.2.1
+date-released: 2026-06-30

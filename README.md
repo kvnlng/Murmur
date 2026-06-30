@@ -1,5 +1,7 @@
 # Murmur Studio
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21077528.svg)](https://doi.org/10.5281/zenodo.21077528)
+
 A free, open-source native macOS viewer for PhysioNet WFDB recordings,
 with optional paid research extensions on the App Store.
 

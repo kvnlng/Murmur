@@ -25,9 +25,10 @@ the tool hands them, so the routing below is enforced automatically.
 
 ## BibTeX (free viewer)
 
-> *DOI and version below are placeholders; the canonical entry will be
-> populated by Zenodo's GitHub-release integration once the first
-> tagged release ships.*
+The `doi` below is the **concept DOI** — it always resolves to the
+latest archived version. If you need to pin to a specific release for
+reproducibility, swap in the per-version DOI from the Zenodo record's
+"Versions" panel.
 
 ```bibtex
 @software{murmur_studio,
@@ -36,8 +37,8 @@ the tool hands them, so the routing below is enforced automatically.
                    PhysioNet WFDB recordings}},
   year         = {2026},
   publisher    = {Zenodo},
-  version      = {1.0.0},
-  doi          = {10.5281/zenodo.XXXXXXX},
+  version      = {1.2.1},
+  doi          = {10.5281/zenodo.21077528},
   url          = {https://github.com/kvnlng/Murmur}
 }
 ```
@@ -50,8 +51,8 @@ AU  - Long, Kevin
 TI  - Murmur Studio: A native macOS viewer for PhysioNet WFDB recordings
 PY  - 2026
 PB  - Zenodo
-ET  - 1.0.0
-DO  - 10.5281/zenodo.XXXXXXX
+ET  - 1.2.1
+DO  - 10.5281/zenodo.21077528
 UR  - https://github.com/kvnlng/Murmur
 ER  -
 ```
