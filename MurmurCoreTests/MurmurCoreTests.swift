@@ -705,6 +705,27 @@ struct PurchaseStoreTests {
         #expect(store.canRun(producerID: "murmur.annotation") == false)
     }
     #endif
+
+    @Test("purchase throws productNotLoaded when the product hasn't been fetched")
+    func purchaseThrowsWhenProductMissing() async {
+        // Fresh store; products dict stays empty because the test
+        // bundle has no StoreKit configuration to load against.
+        // Asking to purchase any product should refuse cleanly with
+        // productNotLoaded rather than crashing or hanging.
+        let store = PurchaseStore()
+        do {
+            _ = try await store.purchase(.silverMetrics)
+            Issue.record("Expected purchase to throw productNotLoaded")
+        } catch let error as PurchaseStore.PurchaseError {
+            if case .productNotLoaded = error {
+                // Expected path.
+            } else {
+                Issue.record("Wrong PurchaseError case: \(error)")
+            }
+        } catch {
+            Issue.record("Unexpected error type: \(error)")
+        }
+    }
 }
 
 // MARK: - Test fixtures
