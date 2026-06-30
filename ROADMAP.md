@@ -6,7 +6,7 @@ The PhysioNet WFDB record (`.hea` + `.dat`) is the *context* the analyst
 needs to interpret each finding; the findings themselves are the primary
 data surface.
 
-## Current state (updated 2026-06-18)
+## Current state (updated 2026-06-29)
 
 **Project rename (2026-06-18)** — `Plotting` → `Murmur` across Xcode
 project, sources, docs, and GitHub repo. First-launch migration in
@@ -192,9 +192,10 @@ so existing analyst data stays intact.
   the imported bundle and records its filename on the manifest so the
   context panel can read/write it.
 
-**Tests** — 194 total (190 unit + 4 UI). All five Near-term roadmap
-items are now done; suite went 135 → 190 over the App-Store-rejection
-fix, coverage hardening, and the near-term feature work.
+**Tests** — 346 total (287 unit + 59 UI). Suite has grown ~135 → 346
+across the App-Store-rejection fix, the open-core architecture work
+in `758b040`, the producer-pipeline coverage, and the bypass-test
+push to 100% interaction coverage.
 
 ## Architecture
 
@@ -275,28 +276,25 @@ runtime, so we burned cycles on round-trip diagnostics. Better tests
 would have caught the regressions in CI.
 
 See `docs/interaction-coverage.md` for the catalog of every analyst-facing
-interaction with its test status. **Current score: 6 ✅ automated /
-22 🟡 RELEASE.md-smoke / 1 ⬜ uncovered out of 29 (~21% automated).**
-The doc names the next 3 XCUI tests to write to push automated coverage
-toward ~38%.
+interaction with its test status. **Current score: 29 ✅ automated /
+0 🟡 manual-only / 0 ⬜ uncovered out of 29 (100% automated)** as of
+2026-06-27, achieved via bypass tests in `MurmurUIBypassTests` that
+exercise post-system-modal code paths via launch args.
 
-**Phase 1 — make existing patterns testable (1 session)**
-- [ ] Launch arg `--ui-test-zoomed-sample` that opens the synthetic
-      fixture with a 1-second viewport, so drag pans actually have
-      somewhere to move to and a "drag changes viewport" test is
-      meaningful
-- [ ] Launch arg `--ui-test-hover-at=x,y` that calls the same
-      `hoverLocation` / `hoverIsActive` update closure the
-      `HoverTrackingView` does — bypasses the `XCUICoordinate.hover()`
-      flakiness on macOS so the crosshair render path is testable
-- [ ] Refactor key SwiftUI containers to expose nested elements
-      through `.accessibilityElement(children: .contain)` so XCUI can
-      find Text elements like the time-window-label (the test we had
-      to drop yesterday)
-- [ ] Write 6-8 XCUI tests against the new hooks: drag pans the
-      viewport, hover renders the crosshair, click finding row jumps
-      viewport, attach-findings flow end-to-end, window resize honors
-      the new minimum, lock toolbar gates editing
+**Phase 1 — make existing patterns testable (✅ DONE)**
+- [x] Launch arg `--ui-test-zoomed-sample` that opens the synthetic
+      fixture with a 1-second viewport. Implemented in
+      `UITestSupport.swift` + consumed by `BedsideView`.
+- [x] Launch arg `--ui-test-hover-at=x,y` that drives the same
+      `hoverLocation` update closure `HoverTrackingView` uses,
+      bypassing macOS `XCUICoordinate.hover()` flakiness.
+- [x] Accessibility-element refactor across key SwiftUI containers
+      so XCUI can address nested Text elements like the time-window
+      label.
+- [x] XCUI coverage written against the new hooks — drag pans,
+      hover crosshair, finding-row jump, attach-findings flow,
+      window-resize minimum, lock toolbar gating, plus the bypass
+      suite that pushed total coverage to 100%.
 
 **Phase 2 — Xcode Cloud workflow (1 session)**
 - [x] Setup walkthrough captured in `XCODE_CLOUD.md` at the repo root.
@@ -385,72 +383,58 @@ Tasks:
       `resolvingSymlinksInPath()` on both sides — needed because the
       bookmark API now returns the canonical `/private/var/folders/`
       form once the test process escapes the sandboxed host.
-- [ ] **Deferred to next session: `FindingProducer` protocol design**
-      + refactor `SyntheticRecording` into the first concrete
-      `SyntheticFindingProducer` conformance.
-
-  Sketch (starting point — to be revised in the design session):
+- [x] **`FindingProducer` protocol design + `SyntheticFindingProducer`
+      first conformance.** Landed in commit `758b040`. Final shape:
 
   ```swift
-  public protocol FindingProducer: Sendable {
-      var id: String { get }              // → annotations[].source
-      var displayName: String { get }     // UI surface (Findings panel filter, IAP labels)
-      func analyze(_ recording: Recording) async throws -> [Annotation]
+  protocol FindingProducer: Sendable {
+      var id: String { get }
+      var displayName: String { get }
+      func analyze(_ recording: Recording) -> AsyncThrowingStream<ProducerEvent, Error>
+  }
+
+  enum ProducerEvent: Sendable {
+      case progress(ProgressUpdate)
+      case findings([Annotation])
+      case warning(message: String, underlying: Error?)
   }
   ```
 
-  Open design questions to weigh before writing any code:
+  Design decisions resolved (recorded in `FindingProducer.swift`):
+  - **Async** — `AsyncThrowingStream<ProducerEvent>` rather than
+    sync-returning `[Annotation]`.
+  - **Streaming** — events interleave progress + finding batches
+    + per-window warnings, so the UI shows partial results as
+    scanning advances.
+  - **Cancellation** — consumer cancels the `Task`; producers
+    MUST call `try Task.checkCancellation()` on window boundaries.
+  - **Error semantics** — per-window failures emit `.warning`
+    events and the run continues; only fully-irrecoverable
+    errors throw and terminate the stream.
+  - **Confidence calibration** — producer's responsibility;
+    `Annotation.confidence` is documented as already calibrated.
+  - **Registry** — `ProducerRegistry` actor (entitlement-unaware);
+    IAP gating filters at the call site against `PurchaseStore`.
+  - **Synthetic producer** — single `SyntheticFindingProducer`
+    with `seed` parameter; doubles as demo + deterministic test
+    fixture.
 
-  - **Sync vs async.** Sketch is async. Synthetic is instant —
-    overkill — but ML inference is heavy, and we don't want a
-    sync→async migration later. Lean async.
-  - **Whole-recording vs streaming.** PyTorch arrhythmia models
-    typically slide a window over channels (e.g. 10s @ 250 Hz =
-    2,500 samples). API choice: take whole `Recording` and let the
-    producer window internally vs. expose
-    `AsyncSequence<Window>` so the host streams windows in. Whole-
-    recording is simpler; streaming gives partial-results +
-    progress for free.
-  - **Progress reporting.** Closure-based callback, `AsyncStream`
-    of progress structs, or `@Observable` state on the producer
-    instance? Density-timeline UI will want to show "scanning…
-    32%". Lean toward `AsyncStream<ProgressUpdate>` since the
-    producer already returns an async result.
-  - **Cancellation.** Mandatory `try Task.checkCancellation()` on
-    window boundaries — needs to be in the contract or it gets
-    forgotten. Document as a requirement; enforce at call site.
-  - **Error semantics.** Partial results on per-window failure
-    (`Result<[Annotation], Error>` per window) vs abort whole run.
-    Partial is more analyst-friendly; aborting is simpler. Lean
-    partial.
-  - **Confidence calibration.** Raw model probabilities vs
-    platt-scaled calibrated. Producer's responsibility (it knows
-    its own model), not the host's. Document expectation that
-    `confidence` field is calibrated, not raw.
-  - **Producer registry.** Where do registered producers live?
-    `ProducerRegistry` actor in MurmurCore that the app registers
-    against at startup, with IAP-aware filtering? Or a static
-    `FindingProducer.all` returning a list? Lean toward actor
-    registry — IAP gating becomes "filter the registry by
-    entitlement at the call site".
-  - **Test-only producers.** `SyntheticFindingProducer` doubles
-    as both a demo producer for end users AND a deterministic
-    fixture for tests. Worth splitting? Or keep one type with a
-    `seed` parameter for reproducibility?
+  Still TODO: protocol + supporting types are currently `internal`;
+  promote to `public` (alongside `Annotation`, `Recording`, `Channel`)
+  when the paid framework targets land so out-of-module conformers
+  can construct findings against them.
 
-  When tackling this, design against an imagined `TorchScriptFindingProducer`
-  in your head so the contract is sharp before any ML code lands.
-
-  Implementation tasks once design settles:
-  - [ ] Define protocol + ProgressUpdate + error types in MurmurCore
-  - [ ] Refactor `SyntheticRecording` → `SyntheticFindingProducer`
-  - [ ] Wire `BedsideView`/`FindingsPanel` to consume producer-emitted
-        annotations alongside sidecar annotations (same UI path —
+  Remaining implementation tasks:
+  - [x] Define protocol + ProgressUpdate + ProducerRegistry in MurmurCore
+  - [x] `SyntheticFindingProducer` first conformance
+  - [x] `ProducersPanel` UI consumes the stream (progress + findings)
+  - [ ] Wire producer-emitted findings into the existing
+        `FindingsPanel` alongside sidecar annotations (same UI path —
         just different `source` field on each annotation)
   - [ ] Test coverage: producer registry roundtrip, cancellation,
         progress emission, deterministic synthetic output
-  - [ ] Update memory `project_murmurcore_architecture.md` to reference
-        the final shape of the protocol
+  - [ ] Update memory `project_murmurcore_architecture.md` to
+        reference the shipped protocol shape
 - [x] Cleanup: `MurmurCore/MurmurCore.swift` stub deleted;
       `MurmurCoreTests/MurmurCoreTests.swift` slimmed to imports +
       header comment (target reserved for future MurmurInference-style
@@ -563,25 +547,32 @@ Local engineering + repo work; no App Store interaction. Should
 complete *before* Phase 1 begins so StoreKit foundation lands in
 the right architectural shape.
 
-- [ ] Re-public the GitHub repo. Confirm Xcode Cloud auth still
-      resolves once the repo is public again.
+- [x] Re-public the GitHub repo. `kvnlng/Murmur` is PUBLIC; the
+      docs-site Pages workflow runs cleanly.
+- [x] Promote the `FindingProducer` protocol design out of "Phase 4
+      Deferred" — defined in `MurmurCore/FindingProducer.swift`
+      with the registry + bootstrap helper. (See Phase 4 above for
+      the full decision log.)
+- [x] Phase 0 stub `PurchaseStore` shipped in `MurmurCore/PurchaseStore.swift`:
+      `ProductID` enum + `owns(_:)` + `canRun(producerID:)`. StoreKit 2
+      wiring lands in Phase 1.
+- [x] Rewrite `README.md` to reflect the open-core posture (free
+      MIT viewer + three paid IAP extensions; App Store listing
+      "Murmur Studio").
+- [x] Update `docs/architecture.md` to show MurmurCore + 3 paid
+      framework targets and the FindingProducer seam.
+- [x] Stand up Phase A scaffolding for Citation infrastructure —
+      `CITATION.cff` + `.zenodo.json` committed at repo root,
+      `CitationBuilder.swift` groundwork in MurmurCore.
 - [ ] Subdivide MurmurCore further: extract `MurmurAnnotation`,
       `MurmurSilver`, `MurmurInference` framework targets. Empty
       placeholders are fine until Phases 1–3 fill them in.
 - [ ] Set up the private `Murmur-Extensions` repo and confirm SPM
       resolution from the app target into it via Xcode Cloud.
-- [ ] Promote the `FindingProducer` protocol design out of "Phase 4
-      Deferred" in the Quality infrastructure section above —
-      define it in MurmurCore as the contract every paid framework
-      will implement.
-- [ ] Rewrite `README.md` to reflect the open-core posture: lead
-      with "free, open-source native macOS WFDB viewer" + "optional
-      paid research extensions." Acknowledge the App Store listing
-      "Murmur Studio."
-- [ ] Update `docs/architecture.md` to show MurmurCore + 3 paid
-      framework targets and the FindingProducer seam.
-- [ ] Stand up Phase A of Citation infrastructure (below) — the
-      public repo is now eligible for Zenodo's auto-DOI integration.
+- [ ] Enable the GitHub→Zenodo OAuth integration at
+      `zenodo.org/account/settings/github/` and flip the toggle on
+      `kvnlng/Murmur`. Then cut the first GitHub Release (from the
+      already-pushed `v1.2.0` tag) so Zenodo mints the canonical DOI.
 
 ### Phase 1 — StoreKit foundation + Silver Metrics IAP
 
