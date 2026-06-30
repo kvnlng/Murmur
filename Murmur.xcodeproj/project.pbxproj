@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0A23754E2FF43E5700FDDBCA /* MurmurAnnotation in Frameworks */ = {isa = PBXBuildFile; productRef = 0A23754D2FF43E5700FDDBCA /* MurmurAnnotation */; };
+		0A2375502FF43E5700FDDBCA /* MurmurInference in Frameworks */ = {isa = PBXBuildFile; productRef = 0A23754F2FF43E5700FDDBCA /* MurmurInference */; };
+		0A2375522FF43E5700FDDBCA /* MurmurSilver in Frameworks */ = {isa = PBXBuildFile; productRef = 0A2375512FF43E5700FDDBCA /* MurmurSilver */; };
 		0AC4C9532FEED49000A3D0A5 /* InlineSnapshotTesting in Frameworks */ = {isa = PBXBuildFile; productRef = 0AC4C9522FEED49000A3D0A5 /* InlineSnapshotTesting */; };
 		0AC4C9552FEED49000A3D0A5 /* SnapshotTesting in Frameworks */ = {isa = PBXBuildFile; productRef = 0AC4C9542FEED49000A3D0A5 /* SnapshotTesting */; };
 		0AC4C9572FEED49000A3D0A5 /* SnapshotTestingCustomDump in Frameworks */ = {isa = PBXBuildFile; productRef = 0AC4C9562FEED49000A3D0A5 /* SnapshotTestingCustomDump */; };
@@ -124,6 +127,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				0AC4C9722FEF04B900A3D0A5 /* MurmurCore.framework in Frameworks */,
+				0A2375522FF43E5700FDDBCA /* MurmurSilver in Frameworks */,
+				0A2375502FF43E5700FDDBCA /* MurmurInference in Frameworks */,
+				0A23754E2FF43E5700FDDBCA /* MurmurAnnotation in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -229,6 +235,9 @@
 			);
 			name = Murmur;
 			packageProductDependencies = (
+				0A23754D2FF43E5700FDDBCA /* MurmurAnnotation */,
+				0A23754F2FF43E5700FDDBCA /* MurmurInference */,
+				0A2375512FF43E5700FDDBCA /* MurmurSilver */,
 			);
 			productName = Murmur;
 			productReference = 0A9B42CF2FDF06BA0059C903 /* Murmur.app */;
@@ -371,6 +380,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				0AC4C9512FEED49000A3D0A5 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */,
+				0A23754C2FF43E5700FDDBCA /* XCRemoteSwiftPackageReference "Murmur-Extensions" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 0A9B42D02FDF06BA0059C903 /* Products */;
@@ -966,6 +976,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		0A23754C2FF43E5700FDDBCA /* XCRemoteSwiftPackageReference "Murmur-Extensions" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/kvnlng/Murmur-Extensions.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.1.0;
+			};
+		};
 		0AC4C9512FEED49000A3D0A5 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/pointfreeco/swift-snapshot-testing";
@@ -977,6 +995,21 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		0A23754D2FF43E5700FDDBCA /* MurmurAnnotation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0A23754C2FF43E5700FDDBCA /* XCRemoteSwiftPackageReference "Murmur-Extensions" */;
+			productName = MurmurAnnotation;
+		};
+		0A23754F2FF43E5700FDDBCA /* MurmurInference */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0A23754C2FF43E5700FDDBCA /* XCRemoteSwiftPackageReference "Murmur-Extensions" */;
+			productName = MurmurInference;
+		};
+		0A2375512FF43E5700FDDBCA /* MurmurSilver */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0A23754C2FF43E5700FDDBCA /* XCRemoteSwiftPackageReference "Murmur-Extensions" */;
+			productName = MurmurSilver;
+		};
 		0AC4C9522FEED49000A3D0A5 /* InlineSnapshotTesting */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 0AC4C9512FEED49000A3D0A5 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */;
