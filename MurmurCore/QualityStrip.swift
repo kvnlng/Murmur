@@ -75,9 +75,22 @@ struct QualityStrip: View {
                 .lineLimit(1)
                 .frame(width: Self.labelWidth, alignment: .leading)
             heatBody(for: channel)
+                // Identifier is on the heatBody, NOT the outer HStack, so
+                // XCUI clicks the center of the tappable heat band and
+                // produces a meaningful `fraction` for the tap gesture.
+                // Putting the id on the row includes the 110pt label in
+                // the element's frame; on narrow CI windows the row's
+                // centroid lands inside the label (or the first few px of
+                // heatBody), producing fraction≈0, which
+                // `RecordingViewport.animateJump` treats as a no-op when
+                // the viewport is already at start — and the CI test
+                // `testClickingQualityLaneJumpsViewport` times out.
+                // AlarmStrip gets away with the outer-row id because its
+                // visible bars are accessibility sub-elements XCUI targets
+                // directly; QualityStrip's Canvas has no sub-elements.
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("quality-lane-\(channel.name)")
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("quality-lane-\(channel.name)")
     }
 
     private func heatBody(for channel: Channel) -> some View {
