@@ -7,6 +7,7 @@
 
 import AppKit
 import MurmurCore
+import MurmurMetrics
 import SwiftUI
 
 @main
@@ -33,6 +34,8 @@ struct MurmurApp: App {
         }
     }
 
+    @Environment(\.openWindow) private var openWindow
+
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -40,6 +43,15 @@ struct MurmurApp: App {
         }
         .defaultSize(width: 1320, height: 880)
         .commands {
+            // Window menu additions — separate from Help. `openWindow`
+            // is only available inside a view scope, so we expose the
+            // metrics scene ID and call it from a Button action closure.
+            CommandGroup(after: .windowArrangement) {
+                Button("ECG Metrics") {
+                    openWindow(id: "ecg-metrics")
+                }
+                .keyboardShortcut("m", modifiers: [.command, .shift])
+            }
             // Replace the system Help menu (which would otherwise point at a
             // non-existent Help Book) with links into the public docs site
             // and a mailto for direct support.
@@ -69,5 +81,11 @@ struct MurmurApp: App {
         Settings {
             SettingsView()
         }
+        // Auxiliary single-instance window for the paid ECG Metrics
+        // surface. Opened from Window → "ECG Metrics" or ⌘⇧M.
+        Window("ECG Metrics", id: "ecg-metrics") {
+            ECGMetricsSurface()
+        }
+        .defaultSize(width: 380, height: 320)
     }
 }
