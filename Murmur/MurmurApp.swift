@@ -82,10 +82,14 @@ struct MurmurApp: App {
             SettingsView()
         }
         // Auxiliary single-instance window for the paid ECG Metrics
-        // surface. Opened from Window → "ECG Metrics" or ⌘⇧M.
+        // surface. Opened from Window → "ECG Metrics" or ⌘⇧M. We
+        // suppress the auto-generated Window-menu entry (which would
+        // duplicate our explicit CommandGroup Button above) via
+        // `.commandsRemoved()`; the explicit entry owns the shortcut.
         Window("ECG Metrics", id: "ecg-metrics") {
             ECGMetricsSurface()
         }
         .defaultSize(width: 380, height: 320)
+        .commandsRemoved()
     }
 }

@@ -24,6 +24,9 @@ import XCTest
 import SwiftUI
 import SnapshotTesting
 @testable import MurmurCore
+#if canImport(MurmurMetrics)
+import MurmurMetrics
+#endif
 
 @MainActor
 final class SnapshotTests: XCTestCase {
@@ -176,6 +179,54 @@ final class SnapshotTests: XCTestCase {
         .background(Color.white)
         assertSnapshot(of: render(view, size: CGSize(width: 360, height: 60)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
+
+    // MARK: - ECGMetricsView / ECGMetricsLockedView
+    //
+    // Gated on `canImport(MurmurMetrics)` so the file still compiles
+    // for anyone who hasn't linked the private framework into this
+    // test target. Local-only per the CI skip in setUpWithError.
+
+    #if canImport(MurmurMetrics)
+
+    func testECGMetricsView_populated() {
+        // Alternating 800 / 850 ms intervals produce a stable, easily
+        // hand-checkable report. Keeps the pixel diff meaningful — if
+        // the layout drifts, the digits move.
+        let intervals: [Double] = [800, 850, 800, 850, 800, 850, 800, 850, 800, 850]
+        let report = ECGMetricsService.compute(fromRRIntervalsMs: intervals)
+        let view = ECGMetricsView(report: report)
+            .frame(width: 300)
+            .padding()
+            .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 340, height: 260)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
+    func testECGMetricsView_empty() {
+        // `nil` report renders the "no beat data available" empty state
+        // rather than a card of zeros — proves the branch renders.
+        let view = ECGMetricsView(report: nil)
+            .frame(width: 300)
+            .padding()
+            .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 340, height: 140)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
+    func testECGMetricsLockedView() {
+        // Locked/marketing variant with a stable price string. The Buy
+        // and Restore closures do nothing — this is a layout snapshot,
+        // not an interaction test.
+        let view = ECGMetricsLockedView(
+            displayPrice: "$9.99",
+            onBuy: {},
+            onRestore: {}
+        )
+        .frame(width: 340)
+        .padding()
+        .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 380, height: 260)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
+    #endif // canImport(MurmurMetrics)
 }
 
 #endif // canImport(SnapshotTesting)
