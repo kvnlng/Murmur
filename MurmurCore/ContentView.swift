@@ -66,28 +66,18 @@ public struct ContentView: View {
             loadUITestSampleIfRequested()
             #endif
         }
-        // Sync the process-wide `CurrentRecordingContext` whenever the
-        // main window's state changes. Auxiliary windows (ECG Metrics,
-        // etc.) observe that context; centralising the sync here keeps
-        // every `state = .directView(...)` call site in this file
-        // ignorant of who's listening downstream.
-        .onChange(of: currentDirectoryKey, initial: true) { _, _ in
-            syncCurrentRecordingContext()
-        }
     }
 
-    /// Directory URL when the viewer is showing a recording, `nil`
-    /// otherwise. Used as the `onChange` key so context sync fires
-    /// on every recording-open / close without depending on
-    /// `Recording` being `Equatable` (it isn't).
-    private var currentDirectoryKey: URL? {
-        if case .directView(let dir, _) = state { return dir }
-        return nil
-    }
-
-    /// Push the current `state` into `CurrentRecordingContext.shared`.
-    private func syncCurrentRecordingContext() {
-        switch state {
+    /// Assign `AppState` and mirror the transition into
+    /// `CurrentRecordingContext.shared` in one atomic step. Every
+    /// call site that used to write to `state` directly goes through
+    /// this instead so auxiliary windows (ECG Metrics, etc.) reliably
+    /// see the recording change — the previous `.onChange` approach
+    /// depended on SwiftUI observation that didn't fire on all
+    /// state transitions in practice.
+    private func setAppState(_ newState: AppState) {
+        state = newState
+        switch newState {
         case .directView(let dir, let recording):
             CurrentRecordingContext.shared.set(recording: recording, directory: dir)
         case .empty, .browsing:
@@ -123,7 +113,7 @@ public struct ContentView: View {
         do {
             let directory = try SyntheticRecording.makeFixture()
             let recording = try RecordingStore.shared.loadManifest(at: directory)
-            state = .directView(directory: directory, recording: recording)
+            setAppState(.directView(directory: directory, recording: recording))
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -246,7 +236,7 @@ public struct ContentView: View {
             }
             currentImportTask?.cancel()
             importStates = [:]
-            state = .browsing(folder: folderURL, records: records)
+            setAppState(.browsing(folder: folderURL, records: records))
             recentsStore.record(folder: folderURL)
             let firstFilename = records.first?.filename
             selection = firstFilename
@@ -289,10 +279,21 @@ public struct ContentView: View {
 
     /// Called when the sidebar selection changes.
     private func handleSelectionChanged(_ filename: String?, folder: URL) {
-        guard let filename else { return }
+        // The browsing view keeps `state` at `.browsing` and shows the
+        // picked record inline in its detail pane — the whole
+        // browse-then-select flow never transitions state to
+        // `.directView`. Push the currently-visible recording into
+        // `CurrentRecordingContext` here so auxiliary windows
+        // (ECG Metrics, etc.) can react.
+        guard let filename else {
+            CurrentRecordingContext.shared.clear()
+            return
+        }
         switch importStates[filename] {
-        case .imported, .importing:
-            return     // already cached or in flight
+        case .imported(let dir, let recording):
+            CurrentRecordingContext.shared.set(recording: recording, directory: dir)
+        case .importing:
+            return     // waiting for startImport's completion to fire the set
         default:
             startImport(filename: filename, folder: folder)
         }
@@ -316,6 +317,15 @@ public struct ContentView: View {
                 )
                 await MainActor.run {
                     importStates[filename] = .imported(directory: summary.directory, recording: summary.recording)
+                    // If this import corresponds to the record currently
+                    // selected in the browsing sidebar, publish it as the
+                    // current recording so ECG Metrics + friends light up.
+                    if selection == filename {
+                        CurrentRecordingContext.shared.set(
+                            recording: summary.recording,
+                            directory: summary.directory
+                        )
+                    }
                 }
             } catch {
                 if !Task.isCancelled {
@@ -422,7 +432,7 @@ public struct ContentView: View {
         if let existing = preppedLargeBundlePath() {
             do {
                 let recording = try RecordingStore.shared.loadManifest(at: existing)
-                state = .directView(directory: existing, recording: recording)
+                setAppState(.directView(directory: existing, recording: recording))
                 return
             } catch {
                 // Fall through and regenerate.
@@ -441,7 +451,7 @@ public struct ContentView: View {
             )
             let summary = try WFDBImporter.importRecord(heaURL: heaURL, outputDirectory: bundleParent)
             let recording = try RecordingStore.shared.loadManifest(at: summary.directory)
-            state = .directView(directory: summary.directory, recording: recording)
+            setAppState(.directView(directory: summary.directory, recording: recording))
         } catch {
             errorMessage = "Large-fixture prep failed: \(error.localizedDescription)"
         }
@@ -457,7 +467,7 @@ public struct ContentView: View {
         }
         do {
             let recording = try RecordingStore.shared.loadManifest(at: bundle)
-            state = .directView(directory: bundle, recording: recording)
+            setAppState(.directView(directory: bundle, recording: recording))
         } catch {
             errorMessage = "Failed to load prepped large bundle: \(error.localizedDescription)"
         }

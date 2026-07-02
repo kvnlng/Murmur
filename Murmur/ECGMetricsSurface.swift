@@ -44,45 +44,13 @@ struct ECGMetricsSurface: View {
     var body: some View {
         Group {
             if store.owns(.ecgMetrics) {
-                VStack(alignment: .leading, spacing: 8) {
-                    ECGMetricsView(report: reportForCurrentRecording)
-                    if reportForCurrentRecording == nil {
-                        emptyDiagnostic
-                    }
-                }
+                ECGMetricsView(report: reportForCurrentRecording)
             } else {
                 lockedBody
             }
         }
         .padding()
         .frame(minWidth: 340, minHeight: 240, alignment: .top)
-    }
-
-    /// Displayed only when the entitled report renders empty, and
-    /// only in this transitional build. Surfaces counts so we can
-    /// see why `normalBeatSampleIndices()` isn't matching on real
-    /// WFDB recordings loaded via TestFlight. Remove once the
-    /// beat-filter mystery is settled.
-    private var emptyDiagnostic: some View {
-        let ann = recordingContext.recording?.annotations ?? []
-        let atr = ann.filter { $0.source.hasPrefix("wfdb.atr") }
-        let normals = atr.filter { $0.category == "N" }
-        let sources = Set(ann.map(\.source)).sorted().joined(separator: ", ")
-        let categories = Set(atr.map(\.category)).sorted().prefix(8).joined(separator: ", ")
-        return VStack(alignment: .leading, spacing: 2) {
-            Text("diagnostic (temp):")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Text("recording loaded: \(recordingContext.recording == nil ? "no" : "yes")")
-            Text("annotations: \(ann.count)")
-            Text("sources: \(sources.isEmpty ? "—" : sources)")
-            Text("wfdb.atr count: \(atr.count)")
-            Text("wfdb.atr categories (first 8): \(categories.isEmpty ? "—" : categories)")
-            Text("Normal (category==\"N\"): \(normals.count)")
-        }
-        .font(.caption2.monospaced())
-        .foregroundStyle(.secondary)
-        .textSelection(.enabled)
     }
 
     // MARK: - Locked branch
