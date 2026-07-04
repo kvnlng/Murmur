@@ -1,6 +1,15 @@
 {
-  "originHash" : "09b08963887ce6eac26952e8acb25256a8ec102f2b5528ae68a97fa296723712",
+  "originHash" : "17197a12ef9f1f16648288c011984627b112feefa05418f757b8d7761c0810a0",
   "pins" : [
+    {
+      "identity" : "murmur-extensions",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/kvnlng/Murmur-Extensions",
+      "state" : {
+        "revision" : "2c4e7ce40bf7f0c3f75fa7ac45b23125e04355dc",
+        "version" : "0.7.0"
+      }
+    },
     {
       "identity" : "swift-custom-dump",
       "kind" : "remoteSourceControl",
