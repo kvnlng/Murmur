@@ -33,6 +33,22 @@
 import Charts
 import SwiftUI
 
+/// Vertical event marker for the trend lane. Analyst-authored (drug
+/// administration, dose change, procedural event, etc.). Sourced by
+/// the caller from any `Annotation` whose category the reviewer has
+/// promoted to "event-worthy" — no built-in classification.
+public struct IntervalTrendEvent: Sendable, Equatable, Identifiable {
+    public let id: UUID
+    public let timeSeconds: Double
+    public let label: String
+
+    public init(id: UUID = UUID(), timeSeconds: Double, label: String) {
+        self.id = id
+        self.timeSeconds = timeSeconds
+        self.label = label
+    }
+}
+
 struct IntervalTrendLane: View {
 
     /// Absolute time range (seconds from recording start) for the
@@ -79,6 +95,13 @@ struct IntervalTrendLane: View {
     /// by the app.
     let guides: [IntervalTrendGuide]
 
+    /// Analyst-authored events (drug administration, dose change,
+    /// etc.) surfaced as vertical markers on the axis so a drift can
+    /// be read against WHAT CHANGED. Sourced from the recording's
+    /// annotations by the caller — the lane makes no policy about
+    /// which annotations count as events.
+    let events: [IntervalTrendEvent]
+
     /// Add a guide at a user-picked value + label. Non-nil enables the
     /// "+ guide" chip in the caption row.
     let onAddGuide: ((Double, String) -> Void)?
@@ -103,6 +126,7 @@ struct IntervalTrendLane: View {
         showMode: IntervalTrendShowMode,
         selectedBinPreset: IntervalTrendBinPreset,
         guides: [IntervalTrendGuide] = [],
+        events: [IntervalTrendEvent] = [],
         externalHoverTimeSeconds: Double? = nil,
         onLaneHover: ((Double?) -> Void)? = nil,
         onBinClick: ((Double) -> Void)? = nil,
@@ -118,6 +142,7 @@ struct IntervalTrendLane: View {
         self.showMode = showMode
         self.selectedBinPreset = selectedBinPreset
         self.guides = guides
+        self.events = events
         self.externalHoverTimeSeconds = externalHoverTimeSeconds
         self.onLaneHover = onLaneHover
         self.onBinClick = onBinClick
@@ -309,6 +334,29 @@ struct IntervalTrendLane: View {
                         yEnd: .value("baseline-hi", band.upperBound)
                     )
                     .foregroundStyle(Color.green.opacity(0.14))
+                }
+
+                // Analyst-authored events — vertical markers on the
+                // axis so drift can be read against WHAT CHANGED.
+                // Rendered BEFORE guides so a horizontal guide draws
+                // on top of the event's line (guides frame values;
+                // events frame time — order chosen so labels don't
+                // occlude each other).
+                ForEach(events) { event in
+                    RuleMark(x: .value("event-t", event.timeSeconds))
+                        .foregroundStyle(Color.purple.opacity(0.65))
+                        .lineStyle(StrokeStyle(lineWidth: 1.2))
+                        .annotation(position: .top, alignment: .center, spacing: 2) {
+                            Text(event.label)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 1)
+                                .background(
+                                    Capsule().fill(Color.purple.opacity(0.85))
+                                )
+                                .accessibilityIdentifier("interval-trend-lane-event-\(event.id.uuidString)")
+                        }
                 }
 
                 // Analyst-placed threshold guides — dashed horizontal

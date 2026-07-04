@@ -401,6 +401,32 @@ final class SnapshotTests: XCTestCase {
         assertSnapshot(of: render(view, size: CGSize(width: 552, height: 160)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 
+    func testIntervalTrendLane_withGuidesAndEvents() {
+        // The overlay layer: analyst-set threshold guides (dashed
+        // horizontal lines) + analyst-authored events (vertical
+        // markers). Exercises the "(user-set)" tagging and the
+        // event-label rendering.
+        let guides = [
+            IntervalTrendGuide(metric: .qtc, valueMs: 500, label: "500 ms (user-set)")
+        ]
+        let events = [
+            IntervalTrendEvent(timeSeconds: 480, label: "Sotalol started")
+        ]
+        let view = IntervalTrendLane(
+            timeRangeSeconds: 0...1800,
+            data: makeCanonicalTrendData(),
+            metric: .qtc,
+            showMode: .medianAndIQR,
+            selectedBinPreset: .twoMinute,
+            guides: guides,
+            events: events
+        )
+        .frame(width: 520)
+        .padding()
+        .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 552, height: 180)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
     func testIntervalTrendLane_emptyState() {
         let data = IntervalTrendData(
             bins: [],

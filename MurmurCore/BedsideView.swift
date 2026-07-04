@@ -815,6 +815,7 @@ struct BedsideView: View {
                 showMode: trendLaneContext.showMode,
                 selectedBinPreset: trendLaneContext.binPreset,
                 guides: trendGuideStore.guides(for: trendLaneContext.metric),
+                events: trendLaneEvents,
                 externalHoverTimeSeconds: laneContext.hoveredSource == .ecg
                     ? laneContext.hoveredTimeSeconds
                     : nil,
@@ -857,6 +858,40 @@ struct BedsideView: View {
         guard sr > 0, viewport.totalSamples > 0 else { return 0...1 }
         let end = Double(viewport.totalSamples) / sr
         return 0...max(0.001, end)
+    }
+
+    /// Derives interval-trend events from the recording's annotations.
+    /// Any point annotation whose category matches an "event-worthy"
+    /// token (WFDB comment `"`, or `comment` / `event` / `note` /
+    /// `drug` / `dose` category) surfaces as a vertical marker on the
+    /// trend axis. No app-asserted classification — this is a pure
+    /// rendering rule over what the analyst / producer already wrote.
+    private var trendLaneEvents: [IntervalTrendEvent] {
+        guard let firstChannel = recording.channels.first,
+              firstChannel.sampleRate > 0 else { return [] }
+        let sr = firstChannel.sampleRate
+        return allAnnotations.compactMap { ann in
+            guard ann.kind == .point else { return nil }
+            guard isEventCategory(ann.category) else { return nil }
+            let trimmedNote = ann.note?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let label = (trimmedNote?.isEmpty == false ? trimmedNote : nil)
+                ?? ann.displayLabel
+            return IntervalTrendEvent(
+                id: ann.id,
+                timeSeconds: Double(ann.sampleIndex) / sr,
+                label: label
+            )
+        }
+    }
+
+    private func isEventCategory(_ category: String) -> Bool {
+        let key = category.trimmingCharacters(in: .whitespaces).lowercased()
+        switch key {
+        case "\"", "comment", "event", "note", "drug", "dose", "drug_admin":
+            return true
+        default:
+            return false
+        }
     }
 
     /// Click-through from the trend lane back to a specific beat.
