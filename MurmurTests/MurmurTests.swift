@@ -4382,3 +4382,186 @@ struct FindingProducerTests {
     }
 }
 
+// MARK: - Interval trend computer
+
+@Suite("IntervalTrendComputer")
+struct IntervalTrendComputerTests {
+
+    private func beat(
+        rPeak: Int64,
+        qtcMs: Double? = 420,
+        prMs: Double? = 155,
+        qrsMs: Double? = 92,
+        qtMs: Double? = 380,
+        fragileConfidence: Double = 0.9
+    ) -> MarkingsBeat {
+        MarkingsBeat(
+            rPeakSampleIndex: rPeak,
+            rPeakConfidence: 1.0,
+            pOnset:    MarkingsFiducial(kind: .pOnset,    sampleIndex: rPeak - 60, confidence: fragileConfidence),
+            pOffset:   MarkingsFiducial(kind: .pOffset,   sampleIndex: rPeak - 30, confidence: fragileConfidence),
+            qrsOnset:  MarkingsFiducial(kind: .qrsOnset,  sampleIndex: rPeak - 15, confidence: fragileConfidence),
+            qrsOffset: MarkingsFiducial(kind: .qrsOffset, sampleIndex: rPeak + 15, confidence: fragileConfidence),
+            tOnset:    MarkingsFiducial(kind: .tOnset,    sampleIndex: rPeak + 40, confidence: fragileConfidence),
+            tOffset:   MarkingsFiducial(kind: .tOffset,   sampleIndex: rPeak + 80, confidence: fragileConfidence),
+            prMs: prMs, qrsMs: qrsMs, qtMs: qtMs, qtcMs: qtcMs, precedingRRMs: 800
+        )
+    }
+
+    private func template() -> MarkingsTemplate {
+        MarkingsTemplate(
+            sampleCount: 200,
+            medianPRMs: 150, iqrPRMs: 12,
+            medianQRSMs: 90, iqrQRSMs: 6,
+            medianQTMs: 380, iqrQTMs: 18,
+            qtcFormulaName: "Fridericia",
+            medianQTcMs: 420, iqrQTcMs: 16
+        )
+    }
+
+    @Test("Empty beats yields empty bins")
+    func emptyBeats() {
+        let out = IntervalTrendComputer.compute(
+            beats: [],
+            template: template(),
+            sampleRate: 250,
+            metric: .qtc,
+            binSeconds: 120,
+            templateBeatCount: 200,
+            qtcFormulaName: "Fridericia"
+        )
+        #expect(out.bins.isEmpty)
+        #expect(out.baselineBand != nil, "baseline still comes from the template even with no beats")
+    }
+
+    @Test("QTc bins carry median + IQR from per-beat values")
+    func qtcBinsHaveMedianAndIQR() {
+        // Place 10 beats within a single 2-min bin, all at sample rate 250 Hz.
+        // Bin covers 0…120 s → samples 0…30_000.
+        let beats: [MarkingsBeat] = (0..<10).map { i in
+            beat(rPeak: Int64(500 + i * 500), qtcMs: 410 + Double(i) * 4)  // 410, 414, …, 446
+        }
+        let out = IntervalTrendComputer.compute(
+            beats: beats,
+            template: template(),
+            sampleRate: 250,
+            metric: .qtc,
+            binSeconds: 120,
+            templateBeatCount: 200,
+            qtcFormulaName: "Fridericia"
+        )
+        #expect(out.bins.count == 1)
+        let bin = out.bins[0]
+        #expect(bin.beatCount == 10)
+        #expect(bin.isEligible)
+        // Median of 410…446 (step 4) = 428.
+        #expect(abs(bin.median - 428) < 0.01)
+        #expect(bin.q1 < bin.median)
+        #expect(bin.q3 > bin.median)
+    }
+
+    @Test("Bins with low T-offset confidence are marked ineligible")
+    func lowConfidenceBinsAreIneligible() {
+        // 5 beats, T-offset confidence deliberately below the 0.60 floor.
+        let beats: [MarkingsBeat] = (0..<5).map { i in
+            beat(rPeak: Int64(500 + i * 500), qtcMs: 460, fragileConfidence: 0.3)
+        }
+        let out = IntervalTrendComputer.compute(
+            beats: beats,
+            template: template(),
+            sampleRate: 250,
+            metric: .qtc,
+            binSeconds: 120,
+            templateBeatCount: 200,
+            qtcFormulaName: "Fridericia"
+        )
+        #expect(out.bins.count == 1)
+        #expect(!out.bins[0].isEligible)
+        // Ineligible bins carry an empty perBeatValues array —
+        // scatter mode won't leak low-confidence points as
+        // confident scatter.
+        #expect(out.bins[0].perBeatValues.isEmpty)
+    }
+
+    @Test("Baseline band comes from the template's median±IQR/2 for the metric")
+    func baselineFromTemplate() {
+        let out = IntervalTrendComputer.compute(
+            beats: [beat(rPeak: 500)],
+            template: template(),
+            sampleRate: 250,
+            metric: .qtc,
+            binSeconds: 120,
+            templateBeatCount: 200,
+            qtcFormulaName: "Fridericia"
+        )
+        guard let band = out.baselineBand, let median = out.baselineMedian else {
+            Issue.record("baseline band + median should be present when template has QTc stats")
+            return
+        }
+        #expect(median == 420)
+        // 420 ± 8 (half of IQR=16)
+        #expect(abs(band.lowerBound - 412) < 0.01)
+        #expect(abs(band.upperBound - 428) < 0.01)
+    }
+
+    @Test("Metric switch pulls the right field: PR / QRS / QTc")
+    func metricSwitchPullsCorrectField() {
+        let beats = [beat(rPeak: 500, qtcMs: 420, prMs: 160, qrsMs: 95, qtMs: 385)]
+        let qtcOut = IntervalTrendComputer.compute(
+            beats: beats, template: template(), sampleRate: 250,
+            metric: .qtc, binSeconds: 120, templateBeatCount: 200, qtcFormulaName: "Fridericia"
+        )
+        let prOut = IntervalTrendComputer.compute(
+            beats: beats, template: template(), sampleRate: 250,
+            metric: .pr, binSeconds: 120, templateBeatCount: 200, qtcFormulaName: "Fridericia"
+        )
+        let qrsOut = IntervalTrendComputer.compute(
+            beats: beats, template: template(), sampleRate: 250,
+            metric: .qrs, binSeconds: 120, templateBeatCount: 200, qtcFormulaName: "Fridericia"
+        )
+        #expect(qtcOut.bins.first?.median == 420)
+        #expect(prOut.bins.first?.median == 160)
+        #expect(qrsOut.bins.first?.median == 95)
+    }
+
+    @Test("Repro caption echoes formula, bin length, and template N verbatim")
+    func reproCaptionEchoesParameters() {
+        let out = IntervalTrendComputer.compute(
+            beats: [beat(rPeak: 500)],
+            template: template(),
+            sampleRate: 250,
+            metric: .qtc,
+            binSeconds: 120,
+            templateBeatCount: 214,
+            qtcFormulaName: "Fridericia"
+        )
+        #expect(out.reproCaption.contains("Fridericia"))
+        #expect(out.reproCaption.contains("2-min"))
+        #expect(out.reproCaption.contains("214"))
+    }
+
+    @Test("Bins are placed on a clock-aligned grid (0, binSeconds, 2·binSeconds, …)")
+    func binsAlignToGrid() {
+        // Beats spread across 0…4 minutes; expect bin starts at 0, 120.
+        let beats: [MarkingsBeat] = [
+            beat(rPeak: 250),      // 1 s
+            beat(rPeak: 25_000),   // 100 s → bin 0
+            beat(rPeak: 30_500),   // 122 s → bin 1
+            beat(rPeak: 55_000)    // 220 s → bin 1
+        ]
+        let out = IntervalTrendComputer.compute(
+            beats: beats,
+            template: template(),
+            sampleRate: 250,
+            metric: .qtc,
+            binSeconds: 120,
+            templateBeatCount: 200,
+            qtcFormulaName: "Fridericia"
+        )
+        // Expect 2 bins: [0,120) and [120,240).
+        #expect(out.bins.count == 2)
+        #expect(out.bins[0].startSeconds == 0)
+        #expect(out.bins[1].startSeconds == 120)
+    }
+}
+

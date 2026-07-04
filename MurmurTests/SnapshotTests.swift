@@ -331,6 +331,68 @@ final class SnapshotTests: XCTestCase {
         assertSnapshot(of: render(view, size: CGSize(width: 300, height: 200)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 
+    // MARK: - IntervalTrendLane
+
+    func testIntervalTrendLane_medianAndIQRWithBaseline() {
+        // A hand-built IntervalTrendData covering 15 bins over one hour,
+        // with a mid-recording low-confidence stretch to exercise the
+        // dimmed-point / eligible-run splitting logic.
+        let bins: [IntervalTrendBin] = (0..<15).map { i in
+            let start = Double(i) * 120  // 2-min bins
+            // Drift up slowly then settle
+            let rise = 40 / (1 + exp(-(Double(i) - 6) / 1.5))
+            let median = 420 + rise
+            let eligible = !(i == 8 || i == 9)
+            return IntervalTrendBin(
+                startSeconds: start,
+                endSeconds: start + 120,
+                median: eligible ? median : median + 8,
+                q1: eligible ? median - 6 : median,
+                q3: eligible ? median + 6 : median,
+                isEligible: eligible,
+                beatCount: 60,
+                perBeatValues: eligible ? [] : []
+            )
+        }
+        let data = IntervalTrendData(
+            bins: bins,
+            baselineBand: 412...428,
+            baselineMedian: 420,
+            reproCaption: "QTc · Fridericia · 2-min bins · normal template = 214 beats"
+        )
+        let view = IntervalTrendLane(
+            timeRangeSeconds: 0...1800,
+            data: data,
+            metric: .qtc,
+            showMode: .medianAndIQR,
+            selectedBinPreset: .twoMinute
+        )
+        .frame(width: 520)
+        .padding()
+        .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 552, height: 160)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
+    func testIntervalTrendLane_emptyState() {
+        let data = IntervalTrendData(
+            bins: [],
+            baselineBand: nil,
+            baselineMedian: nil,
+            reproCaption: "QTc · Fridericia · 2-min bins · no template"
+        )
+        let view = IntervalTrendLane(
+            timeRangeSeconds: 0...300,
+            data: data,
+            metric: .qtc,
+            showMode: .medianAndIQR,
+            selectedBinPreset: .twoMinute
+        )
+        .frame(width: 520)
+        .padding()
+        .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 552, height: 140)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
     // MARK: - ECGMetricsView / ECGMetricsLockedView
     //
     // Gated on `canImport(MurmurMetrics)` so the file still compiles

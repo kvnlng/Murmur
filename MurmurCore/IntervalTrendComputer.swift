@@ -153,17 +153,23 @@ public enum IntervalTrendComputer {
         qtcFormulaName: String,
         confidenceFloor: Double = 0.60
     ) -> IntervalTrendData {
+        // Baseline band comes from the template independently of the
+        // bins — even the empty-beats state still shows where the
+        // patient's normal falls on the y-axis.
+        let (baselineBand, baselineMedian) = baseline(for: metric, template: template)
+        let caption = reproCaption(
+            metric: metric,
+            binSeconds: binSeconds,
+            templateBeatCount: templateBeatCount ?? template?.sampleCount,
+            qtcFormulaName: qtcFormulaName
+        )
+
         guard sampleRate > 0, binSeconds > 0, !beats.isEmpty else {
             return IntervalTrendData(
                 bins: [],
-                baselineBand: nil,
-                baselineMedian: nil,
-                reproCaption: reproCaption(
-                    metric: metric,
-                    binSeconds: binSeconds,
-                    templateBeatCount: templateBeatCount,
-                    qtcFormulaName: qtcFormulaName
-                )
+                baselineBand: baselineBand,
+                baselineMedian: baselineMedian,
+                reproCaption: caption
             )
         }
 
@@ -224,17 +230,11 @@ public enum IntervalTrendComputer {
             binStart = binEnd
         }
 
-        let (baselineBand, baselineMedian) = baseline(for: metric, template: template)
         return IntervalTrendData(
             bins: bins,
             baselineBand: baselineBand,
             baselineMedian: baselineMedian,
-            reproCaption: reproCaption(
-                metric: metric,
-                binSeconds: binSeconds,
-                templateBeatCount: templateBeatCount ?? template?.sampleCount,
-                qtcFormulaName: qtcFormulaName
-            )
+            reproCaption: caption
         )
     }
 
