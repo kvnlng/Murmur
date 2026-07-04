@@ -313,7 +313,7 @@ final class SnapshotTests: XCTestCase {
             qtcFormulaName: "Fridericia",
             medianQTcMs: 428.0, iqrQTcMs: 16.0
         )
-        let view = BeatCalipers(beat: beat, template: template, qtcFormula: .fridericia)
+        let view = BeatCalipers(beat: beat, sampleRate: 360, template: template, qtcFormula: .fridericia)
             .frame(width: 250)
             .padding()
             .background(Color.white)
@@ -327,7 +327,7 @@ final class SnapshotTests: XCTestCase {
             rPeakSampleIndex: 12500,
             prMs: 155.0, qrsMs: 92.0, qtMs: 410.0, qtcMs: 445.0, precedingRRMs: 820.0
         )
-        let view = BeatCalipers(beat: beat, template: nil, qtcFormula: .fridericia)
+        let view = BeatCalipers(beat: beat, sampleRate: 360, template: nil, qtcFormula: .fridericia)
             .frame(width: 250)
             .padding()
             .background(Color.white)

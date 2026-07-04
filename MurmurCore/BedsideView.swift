@@ -1253,6 +1253,7 @@ private struct ChannelPanel: View {
                    let beat = markingsContext.beats.first(where: { $0.rPeakSampleIndex == focusIdx }) {
                     BeatCalipers(
                         beat: beat,
+                        sampleRate: markingsContext.sampleRate,
                         template: markingsContext.template,
                         qtcFormula: markingsContext.qtcFormula
                     )

@@ -28,6 +28,10 @@ struct BeatCalipers: View {
     /// The beat whose numbers to display.
     let beat: MarkingsBeat
 
+    /// Sample rate of the source channel — converts `beat.rPeakSampleIndex`
+    /// into a wall-clock second label.
+    let sampleRate: Double
+
     /// Per-patient normal template — powers the delta columns. When
     /// nil, deltas are suppressed.
     let template: MarkingsTemplate?
@@ -55,7 +59,7 @@ struct BeatCalipers: View {
 
     private var header: some View {
         HStack(spacing: 6) {
-            Text("Beat @ \(String(format: "%.1f", beatTimeSeconds)) s")
+            Text(headerLabel)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.primary)
                 .accessibilityIdentifier("beat-calipers-anchor")
@@ -67,13 +71,11 @@ struct BeatCalipers: View {
         }
     }
 
-    private var beatTimeSeconds: Double {
-        // The rPeak sample position + sample rate would give an
-        // absolute time; we don't carry sample rate here, so the
-        // caller-visible position is the R-peak sample number as a
-        // rough anchor. For a proper wall-clock label, the caller can
-        // wrap this view and provide a preformatted string.
-        Double(beat.rPeakSampleIndex)
+    private var headerLabel: String {
+        let seconds = sampleRate > 0
+            ? Double(beat.rPeakSampleIndex) / sampleRate
+            : 0
+        return "Beat \(String(format: "%.2f", seconds)) s · sample \(beat.rPeakSampleIndex)"
     }
 
     // MARK: - Row
