@@ -58,6 +58,10 @@ struct BedsideView: View {
     /// interval, bin length, show mode). The lane hides itself when
     /// `markingsContext` has no beats.
     @State private var trendLaneContext = IntervalTrendLaneContext.shared
+    /// Analyst-placed threshold guides on the interval trend lane —
+    /// user-set only, never built-in clinical cutoffs. Persists to
+    /// `<bundle>/interval_guides.json`.
+    @State private var trendGuideStore: IntervalTrendGuideStore
 
     static let initialDurationSeconds: Double = 10
 
@@ -89,6 +93,7 @@ struct BedsideView: View {
         // workflow; strips mode is opt-in for cross-lead comparison.
         _layoutMode = State(initialValue: firstECG.map { .focus($0.id) } ?? .strips)
         _dispositionStore = State(initialValue: DispositionStore(bundleDirectory: recordingDirectory))
+        _trendGuideStore = State(initialValue: IntervalTrendGuideStore(bundleDirectory: recordingDirectory))
     }
 
     /// ECG / pressure channels — rendered on the Metal canvas.
@@ -809,6 +814,7 @@ struct BedsideView: View {
                 metric: trendLaneContext.metric,
                 showMode: trendLaneContext.showMode,
                 selectedBinPreset: trendLaneContext.binPreset,
+                guides: trendGuideStore.guides(for: trendLaneContext.metric),
                 externalHoverTimeSeconds: laneContext.hoveredSource == .ecg
                     ? laneContext.hoveredTimeSeconds
                     : nil,
@@ -826,6 +832,16 @@ struct BedsideView: View {
                 },
                 onPickShowMode: { mode in
                     trendLaneContext.showMode = mode
+                },
+                onAddGuide: { valueMs, label in
+                    trendGuideStore.add(
+                        metric: trendLaneContext.metric,
+                        valueMs: valueMs,
+                        label: label
+                    )
+                },
+                onRemoveGuide: { guideID in
+                    trendGuideStore.remove(guideID)
                 }
             )
         }

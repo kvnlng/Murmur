@@ -4565,3 +4565,76 @@ struct IntervalTrendComputerTests {
     }
 }
 
+// MARK: - Interval trend guide store
+
+@MainActor
+@Suite("IntervalTrendGuideStore")
+struct IntervalTrendGuideStoreTests {
+
+    private func makeTempBundle() -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("murmur-guide-test-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    @Test("Fresh store is empty")
+    func startsEmpty() {
+        let dir = makeTempBundle()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = IntervalTrendGuideStore(bundleDirectory: dir)
+        #expect(store.guides.isEmpty)
+    }
+
+    @Test("Add stores guide + persists to disk, reload sees it")
+    func addAndReload() {
+        let dir = makeTempBundle()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let a = IntervalTrendGuideStore(bundleDirectory: dir)
+        a.add(metric: .qtc, valueMs: 500, label: "500 ms (user-set)")
+        #expect(a.guides.count == 1)
+        #expect(a.guides.first?.valueMs == 500)
+        // Fresh store on the same directory reads the sidecar.
+        let b = IntervalTrendGuideStore(bundleDirectory: dir)
+        #expect(b.guides.count == 1)
+        #expect(b.guides.first?.label == "500 ms (user-set)")
+    }
+
+    @Test("guides(for:) filters by metric and sorts by value ascending")
+    func filterAndSort() {
+        let dir = makeTempBundle()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = IntervalTrendGuideStore(bundleDirectory: dir)
+        store.add(metric: .qtc, valueMs: 550, label: "550")
+        store.add(metric: .pr,  valueMs: 200, label: "200")
+        store.add(metric: .qtc, valueMs: 500, label: "500")
+        let qtc = store.guides(for: .qtc)
+        #expect(qtc.map(\.valueMs) == [500, 550])
+        let pr = store.guides(for: .pr)
+        #expect(pr.map(\.valueMs) == [200])
+    }
+
+    @Test("Empty-label add falls back to '<value> ms' so tag is never blank")
+    func emptyLabelFallback() {
+        let dir = makeTempBundle()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = IntervalTrendGuideStore(bundleDirectory: dir)
+        store.add(metric: .qtc, valueMs: 480, label: "  ")
+        #expect(store.guides.first?.label == "480 ms")
+    }
+
+    @Test("Remove drops the guide + persists")
+    func removeDrops() {
+        let dir = makeTempBundle()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = IntervalTrendGuideStore(bundleDirectory: dir)
+        store.add(metric: .qtc, valueMs: 500, label: "500")
+        guard let id = store.guides.first?.id else { Issue.record("expected guide"); return }
+        store.remove(id)
+        #expect(store.guides.isEmpty)
+        // Reload sees the removal.
+        let reloaded = IntervalTrendGuideStore(bundleDirectory: dir)
+        #expect(reloaded.guides.isEmpty)
+    }
+}
+

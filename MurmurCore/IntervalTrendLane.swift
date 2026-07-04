@@ -74,6 +74,19 @@ struct IntervalTrendLane: View {
     let onPickBinPreset: ((IntervalTrendBinPreset) -> Void)?
     let onPickShowMode: ((IntervalTrendShowMode) -> Void)?
 
+    /// Analyst-placed threshold guides for the current metric.
+    /// Rendered as dashed horizontal lines with tags — never asserted
+    /// by the app.
+    let guides: [IntervalTrendGuide]
+
+    /// Add a guide at a user-picked value + label. Non-nil enables the
+    /// "+ guide" chip in the caption row.
+    let onAddGuide: ((Double, String) -> Void)?
+
+    /// Remove a guide by id. Non-nil enables the guide's tap-to-remove
+    /// context menu on the lane.
+    let onRemoveGuide: ((UUID) -> Void)?
+
     /// Currently-selected bin-length preset — displayed on the chip.
     let selectedBinPreset: IntervalTrendBinPreset
 
@@ -89,24 +102,30 @@ struct IntervalTrendLane: View {
         metric: IntervalTrendMetric,
         showMode: IntervalTrendShowMode,
         selectedBinPreset: IntervalTrendBinPreset,
+        guides: [IntervalTrendGuide] = [],
         externalHoverTimeSeconds: Double? = nil,
         onLaneHover: ((Double?) -> Void)? = nil,
         onBinClick: ((Double) -> Void)? = nil,
         onPickMetric: ((IntervalTrendMetric) -> Void)? = nil,
         onPickBinPreset: ((IntervalTrendBinPreset) -> Void)? = nil,
-        onPickShowMode: ((IntervalTrendShowMode) -> Void)? = nil
+        onPickShowMode: ((IntervalTrendShowMode) -> Void)? = nil,
+        onAddGuide: ((Double, String) -> Void)? = nil,
+        onRemoveGuide: ((UUID) -> Void)? = nil
     ) {
         self.timeRangeSeconds = timeRangeSeconds
         self.data = data
         self.metric = metric
         self.showMode = showMode
         self.selectedBinPreset = selectedBinPreset
+        self.guides = guides
         self.externalHoverTimeSeconds = externalHoverTimeSeconds
         self.onLaneHover = onLaneHover
         self.onBinClick = onBinClick
         self.onPickMetric = onPickMetric
         self.onPickBinPreset = onPickBinPreset
         self.onPickShowMode = onPickShowMode
+        self.onAddGuide = onAddGuide
+        self.onRemoveGuide = onRemoveGuide
     }
 
     var body: some View {
@@ -159,6 +178,36 @@ struct IntervalTrendLane: View {
             metricPicker
             binPicker
             showModePicker
+            addGuideChip
+        }
+    }
+
+    @ViewBuilder
+    private var addGuideChip: some View {
+        if let onAdd = onAddGuide {
+            Menu {
+                Section("Add guide (\(metric.displayName), ms)") {
+                    ForEach([300, 350, 400, 450, 500, 550, 600], id: \.self) { value in
+                        Button("\(value) ms — user-set") {
+                            onAdd(Double(value), "\(value) ms (user-set)")
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 2) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 9, weight: .semibold))
+                    Text("guide")
+                        .font(.caption2)
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.secondary.opacity(0.12), in: Capsule())
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .accessibilityIdentifier("interval-trend-lane-add-guide")
         }
     }
 
@@ -260,6 +309,39 @@ struct IntervalTrendLane: View {
                         yEnd: .value("baseline-hi", band.upperBound)
                     )
                     .foregroundStyle(Color.green.opacity(0.14))
+                }
+
+                // Analyst-placed threshold guides — dashed horizontal
+                // lines with a right-anchored label. The "(user-set)"
+                // string on every label makes it impossible to mistake
+                // for a built-in clinical cutoff.
+                ForEach(guides) { guide in
+                    RuleMark(y: .value("guide", guide.valueMs))
+                        .foregroundStyle(Color.secondary.opacity(0.55))
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [5, 3]))
+                        .annotation(position: .topTrailing, alignment: .trailing, spacing: 2) {
+                            Text(guide.label)
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 1)
+                                .background(
+                                    Capsule().fill(Color(nsColor: .windowBackgroundColor).opacity(0.9))
+                                )
+                                .overlay(
+                                    Capsule().stroke(Color.secondary.opacity(0.35), lineWidth: 0.5)
+                                )
+                                .contextMenu {
+                                    if let remove = onRemoveGuide {
+                                        Button(role: .destructive) {
+                                            remove(guide.id)
+                                        } label: {
+                                            Label("Remove guide", systemImage: "trash")
+                                        }
+                                    }
+                                }
+                                .accessibilityIdentifier("interval-trend-lane-guide-\(guide.id.uuidString)")
+                        }
                 }
 
                 // IQR ribbon — one AreaMark per eligible run so the
@@ -405,6 +487,7 @@ struct IntervalTrendLane: View {
         .frame(height: Self.laneHeight)
         .accessibilityIdentifier("interval-trend-lane-empty")
     }
+
 
     // MARK: - Bin partitioning
 
