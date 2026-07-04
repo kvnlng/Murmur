@@ -54,6 +54,10 @@ struct BedsideView: View {
     /// overlay drawn in ChannelPanel and the deviation-ranked
     /// navigation shortcuts (`[` / `]`) on BedsideView itself.
     @State private var markingsContext = IntervalMarkingsContext.shared
+    /// Analyst-facing config for the interval trend lane (which
+    /// interval, bin length, show mode). The lane hides itself when
+    /// `markingsContext` has no beats.
+    @State private var trendLaneContext = IntervalTrendLaneContext.shared
 
     static let initialDurationSeconds: Double = 10
 
@@ -641,6 +645,7 @@ struct BedsideView: View {
                         )
                     }
                     variabilityLaneStrip
+                    intervalTrendLaneStrip
                     trendStrip
                     alarmStrip
                     stateStrip
@@ -666,6 +671,7 @@ struct BedsideView: View {
                     summaryHeader
                     findingsOverview
                     variabilityLaneStrip
+                    intervalTrendLaneStrip
                     trendStrip
                     alarmStrip
                     stateStrip
@@ -777,6 +783,76 @@ struct BedsideView: View {
                     laneContext.windowPreset = preset
                 }
             )
+        }
+    }
+
+    /// Interval trend lane — third view of the fiducial store,
+    /// trending an interval (default QTc/Fridericia, 2-min bins) over
+    /// the whole recording. Design spec:
+    /// `project_interval_trend_lanes_design.md`. Hidden when there are
+    /// no beats in the fiducial store (no template + no data to bin).
+    @ViewBuilder
+    private var intervalTrendLaneStrip: some View {
+        if !markingsContext.beats.isEmpty {
+            let data = IntervalTrendComputer.compute(
+                beats: markingsContext.beats,
+                template: markingsContext.template,
+                sampleRate: markingsContext.sampleRate,
+                metric: trendLaneContext.metric,
+                binSeconds: trendLaneContext.binSeconds,
+                templateBeatCount: markingsContext.template?.sampleCount,
+                qtcFormulaName: markingsContext.qtcFormula.displayName
+            )
+            IntervalTrendLane(
+                timeRangeSeconds: recordingTimeRange,
+                data: data,
+                metric: trendLaneContext.metric,
+                showMode: trendLaneContext.showMode,
+                selectedBinPreset: trendLaneContext.binPreset,
+                externalHoverTimeSeconds: laneContext.hoveredSource == .ecg
+                    ? laneContext.hoveredTimeSeconds
+                    : nil,
+                onLaneHover: { time in
+                    laneContext.setHover(time: time, from: .lane)
+                },
+                onBinClick: { time in
+                    handleIntervalTrendBinClick(atTimeSeconds: time)
+                },
+                onPickMetric: { metric in
+                    trendLaneContext.metric = metric
+                },
+                onPickBinPreset: { preset in
+                    trendLaneContext.binPreset = preset
+                },
+                onPickShowMode: { mode in
+                    trendLaneContext.showMode = mode
+                }
+            )
+        }
+    }
+
+    /// Whole-recording time range (seconds from recording start).
+    /// The interval trend lane's default zoom is the whole recording,
+    /// per the design spec ("the story is a slow drift, not a single
+    /// beat"). The x-axis clips to this rather than the viewport so a
+    /// zoomed-in analyst sees the full trend and where they are on it.
+    private var recordingTimeRange: ClosedRange<Double> {
+        let sr = viewport.sampleRate
+        guard sr > 0, viewport.totalSamples > 0 else { return 0...1 }
+        let end = Double(viewport.totalSamples) / sr
+        return 0...max(0.001, end)
+    }
+
+    /// Click-through from the trend lane back to a specific beat.
+    /// Finds the beat closest to the clicked bin center and asks
+    /// `IntervalMarkingsContext` to jump the viewport + focus that
+    /// beat — same drilldown mechanism the deviation-navigation
+    /// shortcuts use.
+    private func handleIntervalTrendBinClick(atTimeSeconds seconds: Double) {
+        guard markingsContext.sampleRate > 0 else { return }
+        let sampleIndex = Int64(seconds * markingsContext.sampleRate)
+        if let beat = markingsContext.nearestBeat(toSampleIndex: sampleIndex) {
+            markingsContext.requestJump(toSampleIndex: beat.rPeakSampleIndex)
         }
     }
 
