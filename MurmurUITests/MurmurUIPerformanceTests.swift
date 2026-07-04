@@ -80,7 +80,11 @@ final class MurmurUIPerformanceTests: XCTestCase {
         // Launch happens outside the measure block so we're timing the
         // interaction, not the launch (covered by testSyntheticFixtureLoadTime).
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-test-sample", "--ui-test-initial-duration=2"]
+        app.launchArguments = [
+            "--ui-test-sample",
+            "--ui-test-initial-duration=2",
+            "--ui-test-expand-all-findings-groups"
+        ]
         app.launch()
 
         let viewportState = app.descendants(matching: .any)
@@ -294,7 +298,10 @@ final class MurmurUIPerformanceTests: XCTestCase {
         // Catches regressions in the inspector animation cost as the
         // findings panel grows feature-wise (chips, badges, etc.).
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-test-sample"]
+        app.launchArguments = [
+            "--ui-test-sample",
+            "--ui-test-expand-all-findings-groups"
+        ]
         app.launch()
 
         let toggle = app.buttons.matching(identifier: "findings-toggle").firstMatch

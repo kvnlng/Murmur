@@ -80,6 +80,14 @@
 //        letting XCUI assert the URL each Help menu item / link targets
 //        without launching a browser.
 //
+//    --ui-test-expand-all-findings-groups
+//        Auto-expands every deviation-ranked group row in the review
+//        queue on first render, so tests that need `finding-row-<cat>`
+//        exemplars visible can proceed without first driving a click
+//        on the group's disclosure chevron. Only affects the default
+//        expandedGroups set; the analyst's toggle behaviour is
+//        unchanged.
+//
 
 #if DEBUG
 import Foundation
@@ -166,6 +174,15 @@ enum UITestSupport {
         guard let raw = value(forFlag: "ui-test-zoom-to"),
               let n = Double(raw), n > 0 else { return nil }
         return n
+    }
+
+    /// True when `--ui-test-expand-all-findings-groups` is passed.
+    /// The review-queue rail reads this and initialises its expanded-
+    /// groups set to include every category, so exemplar rows
+    /// (`finding-row-<category>`) are addressable without first
+    /// driving a click on the group's disclosure chevron.
+    static var expandAllFindingsGroups: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-expand-all-findings-groups")
     }
 
     /// Filled by `ContentView` when `--ui-test-attach-findings` is set.

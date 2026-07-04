@@ -97,6 +97,27 @@ struct FindingsPanel: View {
             queueList
         }
         .accessibilityIdentifier("findings-panel")
+        .onAppear(perform: applyUITestExpandOverride)
+        // Attach-findings and producer runs add new categories after
+        // onAppear fires. Re-apply the override when the annotation
+        // list changes so newly-arrived categories (e.g. "ATTACH")
+        // stay expanded for the test that dropped them in.
+        .onChange(of: annotations.count) { _, _ in
+            applyUITestExpandOverride()
+        }
+    }
+
+    /// If the `--ui-test-expand-all-findings-groups` launch arg is
+    /// set, expand every group's exemplar list so tests can address
+    /// `finding-row-<category>` directly. Analyst behaviour is
+    /// unchanged; the toggle path still works — the override just
+    /// widens the set to include every category currently present.
+    private func applyUITestExpandOverride() {
+        #if DEBUG
+        guard UITestSupport.expandAllFindingsGroups else { return }
+        let allCategories = Set(annotations.map(\.category))
+        expandedGroups = allCategories
+        #endif
     }
 
     // MARK: - Header (triage tally + sort + filter)
@@ -277,6 +298,7 @@ struct FindingsPanel: View {
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.secondary.opacity(0.04))
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("rhythm-context-banner")
     }
 

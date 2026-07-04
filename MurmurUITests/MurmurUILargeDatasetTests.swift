@@ -162,7 +162,10 @@ final class MurmurUILargeDatasetTests: XCTestCase {
         // generator places findings evenly through the recording, so the
         // last few finding-row-VT / -VF entries are >55 min in.
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-test-load-prepped-bundle"]
+        app.launchArguments = [
+            "--ui-test-load-prepped-bundle",
+            "--ui-test-expand-all-findings-groups"
+        ]
         app.launch()
 
         let bedside = app.descendants(matching: .any)

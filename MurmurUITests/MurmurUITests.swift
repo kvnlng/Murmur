@@ -121,7 +121,8 @@ final class MurmurUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments += [
             "--ui-test-sample",
-            "--ui-test-initial-duration=2"
+            "--ui-test-initial-duration=2",
+            "--ui-test-expand-all-findings-groups"
         ]
         app.launch()
 
@@ -388,7 +389,10 @@ final class MurmurUITests: XCTestCase {
         // unfiltered state shows all 3 finding-row entries. Click the VT
         // chip → only VT shows (VF row disappears).
         let app = XCUIApplication()
-        app.launchArguments += ["--ui-test-sample"]
+        app.launchArguments += [
+            "--ui-test-sample",
+            "--ui-test-expand-all-findings-groups"
+        ]
         app.launch()
 
         let vfRow = app.buttons.matching(identifier: "finding-row-VF").firstMatch
@@ -445,7 +449,10 @@ final class MurmurUITests: XCTestCase {
         // confirm/dismiss buttons should not appear in the tree. Flip
         // edit-mode on; they should appear.
         let app = XCUIApplication()
-        app.launchArguments += ["--ui-test-sample"]
+        app.launchArguments += [
+            "--ui-test-sample",
+            "--ui-test-expand-all-findings-groups"
+        ]
         app.launch()
 
         let vfRow = app.buttons.matching(identifier: "finding-row-VF").firstMatch
@@ -640,7 +647,10 @@ final class MurmurUITests: XCTestCase {
         // render path. A regression here would silently strand findings
         // behind a panel the analyst can't reopen.
         let app = XCUIApplication()
-        app.launchArguments += ["--ui-test-sample"]
+        app.launchArguments += [
+            "--ui-test-sample",
+            "--ui-test-expand-all-findings-groups"
+        ]
         app.launch()
 
         let toggle = app.buttons.matching(identifier: "findings-toggle").firstMatch
@@ -717,13 +727,81 @@ final class MurmurUIBypassTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments += [
             "--ui-test-sample",
-            "--ui-test-attach-findings"
+            "--ui-test-attach-findings",
+            "--ui-test-expand-all-findings-groups"
         ]
         app.launch()
 
         let attachRow = app.buttons.matching(identifier: "finding-row-ATTACH").firstMatch
         XCTAssertTrue(attachRow.waitForExistence(timeout: 10),
                       "Attached finding should land in the findings panel as finding-row-ATTACH")
+    }
+
+    // MARK: - Tier 8b: deviation-ranked review queue
+
+    @MainActor
+    func testReviewQueueGroupsCollapseByDefault() throws {
+        // Guards: the review-queue rewrite's default collapsed state.
+        // Groups (finding-group-<category>) should be visible on
+        // launch, but their child exemplar rows (finding-row-<cat>)
+        // should not be — clicking the group is what reveals them.
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-sample"]
+        app.launch()
+
+        // The synthetic fixture has VT + VF categories, so at least
+        // one group row must resolve.
+        let vfGroup = app.buttons.matching(identifier: "finding-group-VF").firstMatch
+        XCTAssertTrue(vfGroup.waitForExistence(timeout: 5),
+                      "finding-group-VF should render as a collapsed group row by default")
+
+        // The exemplar row for the same category must NOT be visible
+        // before the group is expanded.
+        let vfRow = app.buttons.matching(identifier: "finding-row-VF").firstMatch
+        XCTAssertFalse(vfRow.waitForExistence(timeout: 1),
+                       "finding-row-VF should be hidden until the group is expanded")
+    }
+
+    @MainActor
+    func testReviewQueueGroupExpandRevealsExemplars() throws {
+        // Guards: click a group → its child exemplar rows appear;
+        // click again → they disappear. Load-bearing for the
+        // deviation-ranked queue's semantics.
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-sample"]
+        app.launch()
+
+        let vfGroup = app.buttons.matching(identifier: "finding-group-VF").firstMatch
+        XCTAssertTrue(vfGroup.waitForExistence(timeout: 5))
+
+        // Expand.
+        vfGroup.click()
+        let vfRow = app.buttons.matching(identifier: "finding-row-VF").firstMatch
+        XCTAssertTrue(vfRow.waitForExistence(timeout: 3),
+                      "Clicking a group row should reveal its exemplar rows")
+
+        // Collapse.
+        vfGroup.click()
+        XCTAssertTrue(MurmurUITests.waitForElementToDisappear(vfRow, timeout: 3),
+                      "Clicking an expanded group row should collapse it")
+    }
+
+    @MainActor
+    func testReviewQueueRhythmContextBannerRendersFromHeader() throws {
+        // Guards: the rhythm-context banner reads recording.headerComments
+        // and surfaces them at the top of the queue. The synthetic
+        // fixture writes a rhythm-flavored comment into its `.hea`, so
+        // the banner must resolve. XCUI on macOS surfaces the banner's
+        // inner static texts more reliably than the HStack container's
+        // accessibility identifier, so probe for the "Rhythm context"
+        // heading text.
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-sample"]
+        app.launch()
+
+        let heading = app.staticTexts["Rhythm context"]
+        XCTAssertTrue(heading.waitForExistence(timeout: 5),
+                      "rhythm-context banner heading should render whenever headerComments is non-empty")
     }
 
     // MARK: - Tier 9: canvas gesture bypass (pan + zoom + hover)

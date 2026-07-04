@@ -191,6 +191,15 @@ enum SyntheticRecording {
             try int16Data.write(to: datURL, options: .atomic)
         }
 
+        // WFDB header comments — the importer preserves these verbatim
+        // onto `Recording.headerComments`, which the review-queue rail
+        // reads into its rhythm-context banner. Giving the demo
+        // fixture a couple of realistic-looking lines lets the
+        // banner render immediately on first launch instead of
+        // showing an empty header.
+        heaLines.append("# Synthetic demo recording — 8-lead ECG + vitals + alarms")
+        heaLines.append("# Rhythm: sinus with occasional VT / VF segments (simulated)")
+
         let heaText = heaLines.joined(separator: "\n") + "\n"
         let heaURL = directory.appendingPathComponent("\(recordName).hea")
         try heaText.write(to: heaURL, atomically: true, encoding: .utf8)
