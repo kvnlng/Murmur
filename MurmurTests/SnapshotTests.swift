@@ -127,9 +127,9 @@ final class SnapshotTests: XCTestCase {
         assertSnapshot(of: render(view, size: size), as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 
-    // MARK: - FindingDensityTimeline
+    // MARK: - OverviewMap
 
-    func testFindingDensityTimeline_mixedCategories() {
+    func testOverviewMap_mixedCategories() {
         let totalSamples: Int64 = 30_000
         let annotations: [Annotation] = [
             Annotation(kind: .point, sampleIndex: 1_000,  category: "PVC",  severity: .warning,  source: "demo"),
@@ -146,17 +146,17 @@ final class SnapshotTests: XCTestCase {
             sampleRate: 250,
             initialDurationSeconds: 10
         )
-        let view = FindingDensityTimeline(
+        let view = OverviewMap(
             annotations: annotations,
             totalSamples: totalSamples,
             sampleRate: 250,
             viewport: viewport,
-            onJump: { _ in }
+            channelName: "I"
         )
         .frame(width: 520)
         .padding()
         .background(Color.white)
-        assertSnapshot(of: render(view, size: CGSize(width: 552, height: 160)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+        assertSnapshot(of: render(view, size: CGSize(width: 552, height: 120)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 
     // MARK: - FindingsSummaryHeader

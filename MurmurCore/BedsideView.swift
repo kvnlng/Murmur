@@ -676,28 +676,38 @@ struct BedsideView: View {
         }
     }
 
-    /// The pinned stage. Contains the ECG canvas (with its overview
-    /// ribbon and axes) and — when a focus beat exists — the docked
-    /// caliper readout sitting beside the trace. Never scrolls; the
-    /// analyst's primary reading surface stays put while the
-    /// scrolling context under it moves.
+    /// The pinned stage. Contains the ECG canvas, the docked caliper
+    /// readout sitting beside it, and the one-map overview beneath.
+    /// Never scrolls; the analyst's primary reading surface stays put
+    /// while the scrolling context under it moves.
     private func pinnedStage(channel: Channel) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            ChannelPanel(
-                channel: channel,
-                directory: recordingDirectory,
-                viewport: viewport,
-                annotations: annotationsForChannel(channel),
-                sizing: .focus
-            )
-            // Tear down + rebuild when the focused lead changes —
-            // WaveformCanvas's MTKView caches the previous channel's
-            // sample buffer and the off-scale scanner is per-channel,
-            // so reusing the same SwiftUI identity would leave the
-            // viewer showing stale data after the chip-bar tap.
-            .id(channel.id)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 12) {
+                ChannelPanel(
+                    channel: channel,
+                    directory: recordingDirectory,
+                    viewport: viewport,
+                    annotations: annotationsForChannel(channel),
+                    sizing: .focus
+                )
+                // Tear down + rebuild when the focused lead changes —
+                // WaveformCanvas's MTKView caches the previous channel's
+                // sample buffer and the off-scale scanner is per-channel,
+                // so reusing the same SwiftUI identity would leave the
+                // viewer showing stale data after the chip-bar tap.
+                .id(channel.id)
 
-            dockedBeatInspector
+                dockedBeatInspector
+            }
+
+            OverviewMap(
+                annotations: filteredAnnotations,
+                totalSamples: channel.sampleCount,
+                sampleRate: channel.sampleRate,
+                viewport: viewport,
+                channelName: channel.name,
+                dispositionsByID: dispositionStore.records
+            )
         }
         .padding(.horizontal, 16)
         .padding(.top, 12)
@@ -840,29 +850,19 @@ struct BedsideView: View {
         }
     }
 
-    /// Summary chip row + recording-level finding-density timeline. Both
-    /// reuse `recording.annotations` so there's no new derived state to
-    /// keep in sync beyond `filter` — toggling a chip narrows the timeline
-    /// and the canvas in lockstep.
+    /// Summary chip row shown in the scrolling context under the pinned
+    /// stage. The density lanes that used to accompany this row merged
+    /// into the pinned overview map — see `OverviewMap`. Phase D will
+    /// relocate this chip row into the review-queue rail as the triage
+    /// filter surface.
     @ViewBuilder
     private var findingsOverview: some View {
         if !recording.annotations.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                FindingsSummaryHeader(
-                    summary: unfilteredSummary,
-                    filter: $filter,
-                    dispositionTally: dispositionStore.tally(for: recording.annotations)
-                )
-                if let firstChannel = recording.channels.first {
-                    FindingDensityTimeline(
-                        annotations: filteredAnnotations,
-                        totalSamples: firstChannel.sampleCount,
-                        sampleRate: firstChannel.sampleRate,
-                        viewport: viewport,
-                        dispositionsByID: dispositionStore.records
-                    )
-                }
-            }
+            FindingsSummaryHeader(
+                summary: unfilteredSummary,
+                filter: $filter,
+                dispositionTally: dispositionStore.tally(for: recording.annotations)
+            )
             .background(
                 RoundedRectangle(cornerRadius: 8)
                     .fill(.thinMaterial)
@@ -1194,12 +1194,6 @@ private struct ChannelPanel: View {
             .frame(maxHeight: sizing.expands ? .infinity : nil)
             WaveformTimeAxis(startTime: startTime, endTime: endTime)
                 .padding(.leading, 56)
-            OverviewRibbon(
-                channel: channel,
-                directory: directory,
-                viewport: viewport,
-                annotations: annotations
-            )
         }
         .padding(12)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))

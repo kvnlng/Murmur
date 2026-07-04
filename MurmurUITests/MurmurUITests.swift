@@ -196,8 +196,11 @@ final class MurmurUITests: XCTestCase {
 
     @MainActor
     func testClickingDensityLaneJumpsViewport() throws {
-        // Guards: FindingDensityTimeline's tap-to-jump path. The synthetic
-        // fixture has VT and VF findings, so two lanes render.
+        // Guards: OverviewMap's expanded per-category lane tap-to-jump path.
+        // The compact strip's scrub is covered by
+        // testClickingOverviewRibbonScrubsViewport; this asserts the
+        // per-category lane rows that appear once the map is expanded still
+        // jump the viewport when clicked.
         let app = XCUIApplication()
         app.launchArguments += [
             "--ui-test-sample",
@@ -208,8 +211,13 @@ final class MurmurUITests: XCTestCase {
         let viewportState = app.descendants(matching: .any)
             .matching(identifier: "ui-test-viewport-state").firstMatch
         XCTAssertTrue(viewportState.waitForExistence(timeout: 5))
-        let initial = viewportState.label
 
+        let expandToggle = app.buttons
+            .matching(identifier: "overview-map-expand-toggle").firstMatch
+        XCTAssertTrue(expandToggle.waitForExistence(timeout: 3))
+        expandToggle.click()
+
+        let initial = viewportState.label
         let vtLane = app.descendants(matching: .any)
             .matching(identifier: "density-lane-VT").firstMatch
         XCTAssertTrue(vtLane.waitForExistence(timeout: 3))
