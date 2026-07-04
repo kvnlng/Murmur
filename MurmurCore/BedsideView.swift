@@ -251,11 +251,12 @@ struct BedsideView: View {
                 annotations: allAnnotations,
                 viewport: viewport,
                 sampleRate: recording.channels.first?.sampleRate ?? 250,
+                headerComments: recording.headerComments,
                 filter: $filter,
                 dispositionStore: dispositionStore,
                 isEditing: isEditing
             )
-            .inspectorColumnWidth(min: 220, ideal: 320, max: 480)
+            .inspectorColumnWidth(min: 260, ideal: 340, max: 500)
         }
         .toolbar {
             ToolbarItem {

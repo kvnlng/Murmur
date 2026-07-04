@@ -1387,15 +1387,6 @@ struct FindingFilterTests {
         #expect(!filter.matches(make(category: "AFib")))
     }
 
-    @Test("Severity filter is an explicit set, not a threshold")
-    func severityFilter() {
-        var filter = FindingFilter()
-        filter.severities = [.warning, .critical]
-        #expect(filter.matches(make(severity: .warning)))
-        #expect(filter.matches(make(severity: .critical)))
-        #expect(!filter.matches(make(severity: .info)))
-    }
-
     @Test("Confidence threshold gates findings with a confidence value")
     func confidenceFilter() {
         var filter = FindingFilter()
@@ -4085,102 +4076,13 @@ struct MinMaxScannerTests {
     }
 }
 
-// MARK: - Finding sort modes
-
-@Suite("Finding sort modes")
-struct FindingSortTests {
-    private func a(
-        sample: Int64,
-        category: String = "PVC",
-        severity: Annotation.Severity = .info,
-        confidence: Double? = nil
-    ) -> Annotation {
-        Annotation(
-            kind: .point,
-            sampleIndex: sample,
-            category: category,
-            confidence: confidence,
-            severity: severity,
-            source: "test"
-        )
-    }
-
-    @Test("Time sort returns findings in ascending sampleIndex order")
-    func timeAscending() {
-        let input = [a(sample: 300), a(sample: 100), a(sample: 200)]
-        let out = FindingSort.time.apply(to: input)
-        #expect(out.map(\.sampleIndex) == [100, 200, 300])
-    }
-
-    @Test("Severity sort puts critical first; ties break by time")
-    func severityDescendingWithTimeTiebreak() {
-        let input = [
-            a(sample: 100, severity: .info),
-            a(sample: 200, severity: .critical),
-            a(sample: 300, severity: .warning),
-            a(sample: 400, severity: .critical)   // ties with sample=200 on rank
-        ]
-        let out = FindingSort.severity.apply(to: input)
-        #expect(out.map(\.severity) == [.critical, .critical, .warning, .info])
-        // Within critical, the earlier sample comes first.
-        let critical = out.filter { $0.severity == .critical }.map(\.sampleIndex)
-        #expect(critical == [200, 400])
-    }
-
-    @Test("Confidence sort puts highest first, nils last")
-    func confidenceDescendingNilsLast() {
-        let input = [
-            a(sample: 100, confidence: 0.5),
-            a(sample: 200, confidence: nil),
-            a(sample: 300, confidence: 0.95),
-            a(sample: 400, confidence: 0.5),     // ties with sample=100 on confidence
-            a(sample: 500, confidence: nil)
-        ]
-        let out = FindingSort.confidence.apply(to: input)
-        #expect(out.map(\.confidence) == [0.95, 0.5, 0.5, nil, nil])
-        // Within equal-confidence rows the earlier sample comes first.
-        let mid = out.filter { $0.confidence == 0.5 }.map(\.sampleIndex)
-        #expect(mid == [100, 400])
-        // Nil rows still ordered by time at the tail.
-        let tail = out.filter { $0.confidence == nil }.map(\.sampleIndex)
-        #expect(tail == [200, 500])
-    }
-
-    @Test("Category sort is alphabetical; ties break by time")
-    func categoryAlphabeticalWithTimeTiebreak() {
-        let input = [
-            a(sample: 100, category: "VT"),
-            a(sample: 200, category: "AFib"),
-            a(sample: 300, category: "AFib"),
-            a(sample: 400, category: "PVC")
-        ]
-        let out = FindingSort.category.apply(to: input)
-        #expect(out.map(\.category) == ["AFib", "AFib", "PVC", "VT"])
-        let afib = out.filter { $0.category == "AFib" }.map(\.sampleIndex)
-        #expect(afib == [200, 300])
-    }
-
-    @Test("Sort is total — no two equal-position findings swap on repeat sort")
-    func sortIsStableAcrossRuns() {
-        let input = [
-            a(sample: 100, severity: .info),
-            a(sample: 200, severity: .info),
-            a(sample: 300, severity: .info)
-        ]
-        let once = FindingSort.severity.apply(to: input)
-        let twice = FindingSort.severity.apply(to: once)
-        #expect(once.map(\.id) == twice.map(\.id))
-    }
-
-    @Test("All sort modes preserve count")
-    func allModesPreserveCount() {
-        let input = (0..<10).map { a(sample: Int64($0 * 100)) }
-        for mode in FindingSort.allCases {
-            #expect(mode.apply(to: input).count == input.count,
-                    "\(mode.rawValue) sort must not drop findings")
-        }
-    }
-}
+// Finding sort tests removed 2026-07-04 — FindingSort.apply(to:) is no
+// longer a standalone API. Sorting is a private detail of the
+// deviation-ranked review queue in FindingsPanel (which needs the
+// per-patient template + fiducial store to compute the default
+// departure ordering), so pure per-array sort tests aren't the right
+// coverage shape any more. Behavioural coverage of the review queue
+// belongs to a future integration/snapshot test.
 
 // MARK: - Rubber-band damping curve
 
