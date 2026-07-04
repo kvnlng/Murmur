@@ -48,15 +48,13 @@ below.
       "kind": "point",
       "startSample": 12345,
       "category": "PVC",
-      "confidence": 0.92,
-      "severity": "warning"
+      "confidence": 0.92
     },
     {
       "kind": "range",
       "startSample": 50000,
       "endSample":   65000,
       "category": "VF_onset",
-      "severity": "critical",
       "note": "Onset preceded by R-on-T",
       "lead": "II",
       "evidenceContextSeconds": 8.0
@@ -65,7 +63,6 @@ below.
       "kind": "point",
       "startUnixMS": 1717854312500,
       "category": "AFib",
-      "severity": "notice",
       "source": "rhythm-classifier-v1"
     }
   ]
@@ -92,7 +89,6 @@ below.
 | `category` | yes | string | Semantic finding category. Drives color. |
 | `label` | no | string | Display token. Falls back to `category`. |
 | `confidence` | no | float | 0…1. |
-| `severity` | no | string | `info` \| `notice` \| `warning` \| `critical`. Defaults to `info`. |
 | `source` | no | string | Producer ID. Defaults to file-level `source`. |
 | `note` | no | string | Free-form analyst-readable text. |
 | `lead` | no | string | Channel/lead label the finding applies to. |
@@ -109,22 +105,6 @@ ranges, supply matching `endSample` / `endUnixMS`.
 `startUnixMS` is resolved at import using the channel's `startTimeUnixMS`
 and `sampleRate`. Useful when the cluster works in absolute time and
 doesn't know the WFDB record's sample alignment yet.
-
-## Severity → render alpha
-
-The renderer modulates each bucket's alpha by the *max* severity of its
-findings:
-
-| Severity | Multiplier |
-|---|---|
-| info | 0.85× |
-| notice | 1.00× |
-| warning | 1.15× |
-| critical | 1.30× |
-
-Combined with the base alpha for the kind (0.85 for point rules, 0.22
-for range fills) this gives critical findings noticeably more visual
-weight without changing color.
 
 ## Categories
 
@@ -186,7 +166,6 @@ or just write a `Codable` mirror of the file shape and let
 | Error | Fix |
 |---|---|
 | `'startSample' is a required property` (or `startUnixMS`) | Every finding needs at least one of `startSample` or `startUnixMS`. The schema enforces this via `anyOf`. |
-| `severity is not one of […]` | Use only `info`, `notice`, `warning`, or `critical` — case-sensitive. |
 | `confidence: should be ≤ 1` | Send a fraction, not a percentage. |
 | `schemaVersion: should be equal to 1` | Pin to `1`. The viewer rejects unknown versions. |
 | Extra fields present | The schema sets `additionalProperties: false` to catch typos. If you have legitimate analysis metadata you want to ship, put it in `note` (free-form string) for now. |

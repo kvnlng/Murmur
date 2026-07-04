@@ -124,7 +124,6 @@ struct SyntheticFindingProducer: FindingProducer {
                             category: category,
                             label: category,
                             confidence: 0.5 + 0.5 * rng.nextUniform(),
-                            severity: .info,
                             source: producerID,
                             note: "Synthetic \(category) at window \(windowIndex + 1)/\(windowCount)"
                         )

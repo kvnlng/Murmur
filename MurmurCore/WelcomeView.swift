@@ -124,7 +124,7 @@ struct WelcomeView: View {
             bullet(
                 icon: "list.bullet.clipboard",
                 title: "Review findings in context",
-                detail: "Overlay your analysis cluster's annotations on the trace, filtered by category, severity, and confidence."
+                detail: "Overlay your analysis cluster's annotations on the trace, filtered by category and confidence."
             )
             bullet(
                 icon: "rectangle.expand.diagonal",

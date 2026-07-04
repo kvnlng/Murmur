@@ -69,7 +69,6 @@ final class SnapshotTests: XCTestCase {
             sampleIndex: 1500,
             category: "PVC",
             confidence: 0.92,
-            severity: .warning,
             source: "demo-detector-v2",
             note: "Couplet, R-on-T morphology"
         )
@@ -86,7 +85,6 @@ final class SnapshotTests: XCTestCase {
             sampleIndex: 6000,
             endSampleIndex: 9500,
             category: "VT",
-            severity: .critical,
             source: "vt-detector-v1"
         )
         let size = CGSize(width: 280, height: 110)
@@ -132,14 +130,14 @@ final class SnapshotTests: XCTestCase {
     func testOverviewMap_mixedCategories() {
         let totalSamples: Int64 = 30_000
         let annotations: [Annotation] = [
-            Annotation(kind: .point, sampleIndex: 1_000,  category: "PVC",  severity: .warning,  source: "demo"),
-            Annotation(kind: .point, sampleIndex: 2_500,  category: "PVC",  severity: .critical, source: "demo"),
-            Annotation(kind: .point, sampleIndex: 5_500,  category: "PVC",  severity: .info,     source: "demo"),
+            Annotation(kind: .point, sampleIndex: 1_000,  category: "PVC",  source: "demo"),
+            Annotation(kind: .point, sampleIndex: 2_500,  category: "PVC",  source: "demo"),
+            Annotation(kind: .point, sampleIndex: 5_500,  category: "PVC",  source: "demo"),
             Annotation(kind: .range, sampleIndex: 10_000, endSampleIndex: 17_500,
-                       category: "AFib", severity: .warning,  source: "demo"),
+                       category: "AFib", source: "demo"),
             Annotation(kind: .range, sampleIndex: 20_000, endSampleIndex: 21_200,
-                       category: "VT",   severity: .critical, source: "demo"),
-            Annotation(kind: .point, sampleIndex: 25_000, category: "noise", severity: .info, source: "demo")
+                       category: "VT",   source: "demo"),
+            Annotation(kind: .point, sampleIndex: 25_000, category: "noise", source: "demo")
         ]
         let viewport = RecordingViewport(
             totalSamples: totalSamples,
@@ -164,8 +162,7 @@ final class SnapshotTests: XCTestCase {
     // testFindingsSummaryHeader_mixedFindings: dropped from the snapshot suite.
     // The chip row lives inside a horizontal ScrollView; ImageRenderer measures
     // a ScrollView's natural size as zero and emits a blank image. The chip
-    // visuals (color + severity badge) are exercised by the density-timeline
-    // snapshot above; severity-alpha logic is covered by CategoryPaletteTests.
+    // visuals are exercised by the density-timeline snapshot above.
     // If this stops being an acceptable proxy we'd need a parallel non-Scroll
     // variant of the header for testing, which feels like SUT pollution.
 

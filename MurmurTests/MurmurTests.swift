@@ -1211,14 +1211,12 @@ struct AnnotationLoaderTests {
         #expect(result[0].kind == .point)
         #expect(result[0].sampleIndex == 12345)
         #expect(result[0].category == "PVC")
-        #expect(result[0].severity == .warning)
         #expect(result[0].confidence == 0.92)
         #expect(result[0].source == "vf-onset-detector-v2")    // file-level default
 
         #expect(result[1].kind == .range)
         #expect(result[1].sampleIndex == 50000)
         #expect(result[1].endSampleIndex == 65000)
-        #expect(result[1].severity == .critical)
         #expect(result[1].note == "Onset preceded by R-on-T")
     }
 
@@ -1313,23 +1311,6 @@ struct AnnotationLoaderTests {
         }
     }
 
-    @Test("Severity defaults to .info when omitted")
-    func severityDefaultsToInfo() throws {
-        let json = """
-        {
-          "schemaVersion": 1,
-          "findings": [
-            { "kind": "point", "startSample": 100, "category": "x", "source": "s" }
-          ]
-        }
-        """
-        let result = try AnnotationLoader.parse(
-            data: Data(json.utf8),
-            recordingStartUnixMS: 0,
-            sampleRate: 250.0
-        )
-        #expect(result[0].severity == .info)
-    }
 }
 
 // MARK: - WFDB → Annotation adapter
@@ -1347,7 +1328,6 @@ struct WFDBAnnotationAdapterTests {
         #expect(ann.category == "N")
         #expect(ann.label == "N")
         #expect(ann.source == "wfdb.atr")
-        #expect(ann.severity == .info)
     }
 }
 
@@ -1358,7 +1338,6 @@ struct FindingFilterTests {
 
     private func make(
         category: String = "PVC",
-        severity: Annotation.Severity = .info,
         source: String = "x",
         confidence: Double? = nil
     ) -> Annotation {
@@ -1367,7 +1346,6 @@ struct FindingFilterTests {
             sampleIndex: 0,
             category: category,
             confidence: confidence,
-            severity: severity,
             source: source
         )
     }
@@ -1376,7 +1354,7 @@ struct FindingFilterTests {
     func emptyFilterMatchesAll() {
         let filter = FindingFilter()
         #expect(filter.matches(make()))
-        #expect(filter.matches(make(category: "AFib", severity: .critical)))
+        #expect(filter.matches(make(category: "AFib")))
     }
 
     @Test("Category filter excludes non-matching")
@@ -1656,12 +1634,12 @@ struct RecentFoldersStoreTests {
 @Suite("Annotation summary")
 struct AnnotationSummaryTests {
 
-    private func point(_ category: String, at sample: Int64, severity: Annotation.Severity = .info) -> Annotation {
-        Annotation(kind: .point, sampleIndex: sample, category: category, severity: severity, source: "test")
+    private func point(_ category: String, at sample: Int64) -> Annotation {
+        Annotation(kind: .point, sampleIndex: sample, category: category, source: "test")
     }
 
-    private func range(_ category: String, from start: Int64, to end: Int64, severity: Annotation.Severity = .info) -> Annotation {
-        Annotation(kind: .range, sampleIndex: start, endSampleIndex: end, category: category, severity: severity, source: "test")
+    private func range(_ category: String, from start: Int64, to end: Int64) -> Annotation {
+        Annotation(kind: .range, sampleIndex: start, endSampleIndex: end, category: category, source: "test")
     }
 
     @Test("Empty input produces an empty summary")
@@ -1722,53 +1700,31 @@ struct AnnotationSummaryTests {
         #expect(noise?.isRangeDominant == false)
     }
 
-    @Test("Per-severity counts and maxSeverity are reported correctly")
-    func severityBreakdown() {
-        let summary = AnnotationSummary.build(
-            from: [
-                point("VT", at: 10,  severity: .critical),
-                point("VT", at: 30,  severity: .warning),
-                point("VT", at: 50,  severity: .info),
-                point("VT", at: 70,  severity: .warning)
-            ],
-            recordingDurationSamples: 10_000,
-            sampleRate: 250
-        )
-        let vt = try? #require(summary.rollups.first { $0.category == "VT" })
-        #expect(vt?.criticalCount == 1)
-        #expect(vt?.warningCount  == 2)
-        #expect(vt?.severityCounts[.info] == 1)
-        #expect(vt?.maxSeverity == .critical)
-    }
-
-    @Test("Rollups sort by max severity descending, then count descending")
+    @Test("Rollups sort by count descending")
     func sortOrder() {
-        // Categories: noise (3 info), PVC (1 critical + 2 info), AFib (2 warning),
-        // Order should be: PVC (critical), AFib (warning), noise (info, larger count)
+        // noise=3, PVC=2, AFib=1 → sorted noise, PVC, AFib.
         let summary = AnnotationSummary.build(
             from: [
-                point("noise", at: 1, severity: .info),
-                point("noise", at: 2, severity: .info),
-                point("noise", at: 3, severity: .info),
-                point("PVC", at: 10, severity: .critical),
-                point("PVC", at: 20, severity: .info),
-                point("PVC", at: 30, severity: .info),
-                point("AFib", at: 100, severity: .warning),
-                point("AFib", at: 200, severity: .warning)
+                point("noise", at: 1),
+                point("noise", at: 2),
+                point("noise", at: 3),
+                point("PVC", at: 10),
+                point("PVC", at: 20),
+                point("AFib", at: 100)
             ],
             recordingDurationSamples: 10_000,
             sampleRate: 250
         )
         let categories = summary.rollups.map(\.category)
-        #expect(categories == ["PVC", "AFib", "noise"])
+        #expect(categories == ["noise", "PVC", "AFib"])
     }
 
-    @Test("Tied severity + count breaks by category name ascending")
+    @Test("Tied counts break by category name ascending")
     func tieBreakByName() {
         let summary = AnnotationSummary.build(
             from: [
-                point("zeta",  at: 1, severity: .info),
-                point("alpha", at: 2, severity: .info)
+                point("zeta",  at: 1),
+                point("alpha", at: 2)
             ],
             recordingDurationSamples: 10_000,
             sampleRate: 250
@@ -2161,8 +2117,8 @@ struct DispositionStoreTests {
         return dir
     }
 
-    private func annotation(_ category: String = "VT", severity: Annotation.Severity = .warning) -> Annotation {
-        Annotation(kind: .point, sampleIndex: 0, category: category, severity: severity, source: "test")
+    private func annotation(_ category: String = "VT") -> Annotation {
+        Annotation(kind: .point, sampleIndex: 0, category: category, source: "test")
     }
 
     @Test("Fresh store starts empty")
@@ -2679,27 +2635,6 @@ struct CategoryPaletteTests {
         #expect(c1 == c2)
     }
 
-    @Test("Severity modulates alpha in the documented direction")
-    func severityAlphaOrdering() {
-        let base: Float = 0.5
-        let info = CategoryPalette.alpha(for: .info, baseAlpha: base)
-        let notice = CategoryPalette.alpha(for: .notice, baseAlpha: base)
-        let warning = CategoryPalette.alpha(for: .warning, baseAlpha: base)
-        let critical = CategoryPalette.alpha(for: .critical, baseAlpha: base)
-        // Strictly monotonic increase from info → critical.
-        #expect(info < notice)
-        #expect(notice < warning)
-        #expect(warning < critical)
-    }
-
-    @Test("Severity alpha clamps to 1.0 — never paints above full opacity")
-    func severityAlphaClampedAtOne() {
-        // baseAlpha 0.9 * 1.30 = 1.17, must clamp to 1.0.
-        let alpha = CategoryPalette.alpha(for: .critical, baseAlpha: 0.9)
-        #expect(alpha <= 1.0)
-        #expect(alpha == 1.0)
-    }
-
     @Test("Empty-string category routes through the hash fallback without crashing")
     func emptyStringIsHashed() {
         let color = CategoryPalette.color(for: "")
@@ -3193,7 +3128,6 @@ struct BundleAnnotationsFileTests {
             sampleIndex: sample,
             category: category,
             confidence: 0.9,
-            severity: .warning,
             source: "test"
         )
     }
@@ -3758,7 +3692,6 @@ struct MarkdownReportTests {
         at sample: Int64,
         category: String = "PVC",
         confidence: Double? = nil,
-        severity: Annotation.Severity = .info,
         source: String = "test"
     ) -> Annotation {
         Annotation(
@@ -3767,7 +3700,6 @@ struct MarkdownReportTests {
             sampleIndex: sample,
             category: category,
             confidence: confidence,
-            severity: severity,
             source: source
         )
     }

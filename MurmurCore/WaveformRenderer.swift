@@ -319,15 +319,8 @@ final class WaveformRenderer: NSObject, MTKViewDelegate {
         // Partition by category and kind.
         var pointsByCategory: [String: [Int64]] = [:]
         var rangesByCategory: [String: [(Int64, Int64)]] = [:]
-        var maxSeverityByCategory: [String: Annotation.Severity] = [:]
 
         for ann in visible {
-            let prevSeverity = maxSeverityByCategory[ann.category] ?? .info
-            if ann.severity > prevSeverity {
-                maxSeverityByCategory[ann.category] = ann.severity
-            } else if maxSeverityByCategory[ann.category] == nil {
-                maxSeverityByCategory[ann.category] = ann.severity
-            }
             switch ann.kind {
             case .point:
                 pointsByCategory[ann.category, default: []].append(ann.sampleIndex)
@@ -338,6 +331,8 @@ final class WaveformRenderer: NSObject, MTKViewDelegate {
         }
 
         // Build point buckets — line list, 2 vertices per annotation.
+        // Point rules render at a constant 0.85 alpha per kind, matching
+        // the overview minimap so the two surfaces read consistently.
         pointBuckets = pointsByCategory.compactMap { (category, samples) -> AnnotationBucket? in
             var pts: [SIMD2<Float>] = []
             pts.reserveCapacity(samples.count * 2)
@@ -352,14 +347,12 @@ final class WaveformRenderer: NSObject, MTKViewDelegate {
                 options: .storageModeShared
             ) else { return nil }
             var color = CategoryPalette.color(for: category)
-            color.w = CategoryPalette.alpha(
-                for: maxSeverityByCategory[category] ?? .info,
-                baseAlpha: 0.85
-            )
+            color.w = 0.85
             return AnnotationBucket(buffer: buf, count: pts.count, color: color)
         }
 
         // Build range buckets — one (startSample, endSample) per instance.
+        // Range fills use 0.45 alpha to match OverviewMap.swift.
         rangeBuckets = rangesByCategory.compactMap { (category, ranges) -> AnnotationBucket? in
             let pairs = ranges.map { SIMD2<Float>(Float($0.0), Float($0.1)) }
             guard let buf = device.makeBuffer(
@@ -368,10 +361,7 @@ final class WaveformRenderer: NSObject, MTKViewDelegate {
                 options: .storageModeShared
             ) else { return nil }
             var color = CategoryPalette.color(for: category)
-            color.w = CategoryPalette.alpha(
-                for: maxSeverityByCategory[category] ?? .info,
-                baseAlpha: 0.22         // ranges are translucent fills
-            )
+            color.w = 0.45
             return AnnotationBucket(buffer: buf, count: pairs.count, color: color)
         }
     }

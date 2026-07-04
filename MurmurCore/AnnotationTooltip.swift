@@ -4,7 +4,7 @@
 //
 //  Floating panel rendered next to the cursor when hovering over a finding
 //  on the waveform canvas. Shows the producer's note, confidence, source,
-//  and a category-colored severity dot — the full context the analyst would
+//  and a category-colored dot — the full context the analyst would
 //  otherwise have to scroll the findings panel to see.
 //
 //  Lives in its own file (extracted from BedsideView) so the bedside view
@@ -25,12 +25,6 @@ struct AnnotationTooltip: View {
                     .frame(width: 8, height: 8)
                 Text(annotation.displayLabel)
                     .font(.caption.weight(.semibold))
-                Text("·")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                Text(annotation.severity.rawValue.uppercased())
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.secondary)
             }
             HStack(spacing: 6) {
                 Text(timeLabel)

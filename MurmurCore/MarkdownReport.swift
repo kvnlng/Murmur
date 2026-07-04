@@ -67,13 +67,13 @@ enum MarkdownReport {
         } else {
             lines.append("## Findings (\(sorted.count))")
             lines.append("")
-            lines.append("| Time | Category | Severity | Confidence | Disposition | Source |")
-            lines.append("|---|---|---|---|---|---|")
+            lines.append("| Time | Category | Confidence | Disposition | Source |")
+            lines.append("|---|---|---|---|---|")
             for ann in sorted {
                 let time = formatTime(seconds: Double(ann.sampleIndex) / sampleRate)
                 let confidence = ann.confidence.map { String(format: "%.2f", $0) } ?? "—"
                 let disposition = formatDisposition(dispositions[ann.id])
-                lines.append("| \(time) | \(escape(ann.category)) | \(ann.severity.rawValue) | \(confidence) | \(disposition) | \(escape(ann.source)) |")
+                lines.append("| \(time) | \(escape(ann.category)) | \(confidence) | \(disposition) | \(escape(ann.source)) |")
             }
         }
         lines.append("")

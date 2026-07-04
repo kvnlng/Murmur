@@ -151,7 +151,7 @@ Pure Metal, no Swift Charts.
 4. **Grid major** — line list, red-pink @ 55% alpha.
 5. **Grid landmark** — line list, deep salmon @ 85% alpha (every 5th major; the standard 1 s / 2.5 mV reference).
 6. **Trace OR envelope** — triangle-strip polyline OR instanced quads.
-7. **Point annotations** — line list per category, severity-modulated alpha.
+7. **Point annotations** — line list per category, constant 0.85 alpha.
 
 ### Trace vertex strategy
 

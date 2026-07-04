@@ -4,8 +4,7 @@
 //
 //  Compact horizontal chip row that answers "what's in this recording?" at
 //  a glance. Each chip shows category color + a primary metric (count for
-//  point-dominant categories, total time for range-dominant ones) and an
-//  optional severity indicator when any critical or warning events exist.
+//  point-dominant categories, total time for range-dominant ones).
 //
 //  Tapping a chip toggles the category in the shared `FindingFilter` — same
 //  semantics as the chip bar in `FindingsPanel`, so the two affordances
@@ -132,11 +131,6 @@ private struct SummaryChip: View {
                 Text(metricLabel)
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
-                if rollup.criticalCount > 0 {
-                    severityBadge(count: rollup.criticalCount, tint: .red, label: "critical")
-                } else if rollup.warningCount > 0 {
-                    severityBadge(count: rollup.warningCount, tint: .orange, label: "warning")
-                }
             }
             .padding(.horizontal, 9)
             .padding(.vertical, 4)
@@ -162,18 +156,6 @@ private struct SummaryChip: View {
         return "\(rollup.totalCount)"
     }
 
-    private func severityBadge(count: Int, tint: Color, label: String) -> some View {
-        Text("\(count)")
-            .font(.caption2.weight(.bold).monospacedDigit())
-            .foregroundStyle(tint)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 1)
-            .background(
-                Capsule().fill(tint.opacity(0.15))
-            )
-            .accessibilityLabel("\(count) \(label)")
-    }
-
     private var helpString: String {
         var parts: [String] = ["\(rollup.totalCount) finding\(rollup.totalCount == 1 ? "" : "s")"]
         if rollup.rangeCount > 0 {
@@ -183,8 +165,6 @@ private struct SummaryChip: View {
                 parts.append("\(Int((fraction * 100).rounded()))% of recording")
             }
         }
-        if rollup.criticalCount > 0 { parts.append("\(rollup.criticalCount) critical") }
-        if rollup.warningCount > 0 { parts.append("\(rollup.warningCount) warning") }
         return parts.joined(separator: " · ")
     }
 }
@@ -215,12 +195,12 @@ enum ChipDuration {
 
 #Preview("Mixed findings") {
     let annotations: [Annotation] = [
-        Annotation(kind: .point, sampleIndex: 100,  category: "PVC",  severity: .warning,  source: "demo"),
-        Annotation(kind: .point, sampleIndex: 200,  category: "PVC",  severity: .critical, source: "demo"),
-        Annotation(kind: .point, sampleIndex: 350,  category: "PVC",  severity: .info,     source: "demo"),
-        Annotation(kind: .range, sampleIndex: 1_000, endSampleIndex: 1_750, category: "AFib", severity: .warning, source: "demo"),
-        Annotation(kind: .range, sampleIndex: 2_000, endSampleIndex: 2_120, category: "VT",   severity: .critical, source: "demo"),
-        Annotation(kind: .point, sampleIndex: 2_500, category: "noise", severity: .info,    source: "demo")
+        Annotation(kind: .point, sampleIndex: 100,  category: "PVC",  source: "demo"),
+        Annotation(kind: .point, sampleIndex: 200,  category: "PVC",  source: "demo"),
+        Annotation(kind: .point, sampleIndex: 350,  category: "PVC",  source: "demo"),
+        Annotation(kind: .range, sampleIndex: 1_000, endSampleIndex: 1_750, category: "AFib", source: "demo"),
+        Annotation(kind: .range, sampleIndex: 2_000, endSampleIndex: 2_120, category: "VT",   source: "demo"),
+        Annotation(kind: .point, sampleIndex: 2_500, category: "noise", source: "demo")
     ]
     let summary = AnnotationSummary.build(
         from: annotations,

@@ -23,12 +23,6 @@ struct CategoryRollup: Identifiable, Equatable {
     /// Zero for point-only categories. Cumulative, not deduped — overlapping
     /// ranges add up.
     let totalRangeSamples: Int64
-    /// Per-severity occurrence counts. Severities with zero events are
-    /// omitted.
-    let severityCounts: [Annotation.Severity: Int]
-    /// Highest severity seen in this category. `.info` when the category is
-    /// entirely informational or empty.
-    let maxSeverity: Annotation.Severity
 
     var id: String { category }
 
@@ -38,15 +32,13 @@ struct CategoryRollup: Identifiable, Equatable {
     var isRangeDominant: Bool {
         rangeCount > 0 && totalRangeSamples > 0
     }
-
-    var criticalCount: Int { severityCounts[.critical] ?? 0 }
-    var warningCount: Int  { severityCounts[.warning]  ?? 0 }
 }
 
 /// Per-recording rollup: one entry per category, plus a grand total.
 struct AnnotationSummary: Equatable {
-    /// Sorted: max severity descending (critical first), then total count
-    /// descending, then category name as a deterministic tiebreaker.
+    /// Sorted: total count descending, then category name as a deterministic
+    /// tiebreaker. Severity-based ordering was removed 2026-07-04 (see the
+    /// Annotation.swift header comment for the RUO rationale).
     let rollups: [CategoryRollup]
     let totalCount: Int
     /// Total samples in the recording, if known. Lets the view compute
@@ -62,7 +54,7 @@ struct AnnotationSummary: Equatable {
     )
 
     /// Builds the rollup. Pure, allocation-conscious — one pass through the
-    /// annotation list, a second pass to sort by severity and count.
+    /// annotation list, a second pass to sort by count.
     static func build(
         from annotations: [Annotation],
         recordingDurationSamples: Int64?,
@@ -93,19 +85,12 @@ struct AnnotationSummary: Equatable {
                     bucket.totalRangeSamples += span
                 }
             }
-            bucket.severityCounts[ann.severity, default: 0] += 1
-            if ann.severity > bucket.maxSeverity {
-                bucket.maxSeverity = ann.severity
-            }
             buckets[ann.category] = bucket
         }
 
         let rollups = buckets.values
             .map(\.rollup)
             .sorted { lhs, rhs in
-                if lhs.maxSeverity != rhs.maxSeverity {
-                    return lhs.maxSeverity > rhs.maxSeverity
-                }
                 if lhs.totalCount != rhs.totalCount {
                     return lhs.totalCount > rhs.totalCount
                 }
@@ -137,8 +122,6 @@ struct AnnotationSummary: Equatable {
         var pointCount: Int = 0
         var rangeCount: Int = 0
         var totalRangeSamples: Int64 = 0
-        var severityCounts: [Annotation.Severity: Int] = [:]
-        var maxSeverity: Annotation.Severity = .info
 
         var rollup: CategoryRollup {
             CategoryRollup(
@@ -146,9 +129,7 @@ struct AnnotationSummary: Equatable {
                 totalCount: totalCount,
                 pointCount: pointCount,
                 rangeCount: rangeCount,
-                totalRangeSamples: totalRangeSamples,
-                severityCounts: severityCounts,
-                maxSeverity: maxSeverity
+                totalRangeSamples: totalRangeSamples
             )
         }
     }

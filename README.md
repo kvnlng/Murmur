@@ -47,9 +47,9 @@ The free viewer targets macOS 26+ with Swift 6 and Metal.
   box) plus multi-frequency records with per-signal `.dat` files.
   Folder picker covers `.hea` + sibling `.dat` / `.atr` /
   `.annotations.json`.
-- **Findings panel** — right-side inspector with category, severity,
-  source, and confidence filter chips. Filter is shared with the
-  canvas: filtered-out findings stop rendering everywhere.
+- **Findings panel** — right-side inspector with category, source,
+  and confidence filter chips. Filter is shared with the canvas:
+  filtered-out findings stop rendering everywhere.
 - **Analyst disposition workflow** — confirm / dismiss / reset on
   each finding, persisted to a versioned sidecar at
   `<bundle>/dispositions.json` so re-running upstream analysis never

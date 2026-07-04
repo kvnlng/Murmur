@@ -117,7 +117,7 @@ as:
 - A row in the right-side findings panel for every finding
 
 Categories drive color (red = ventricular, purple = atrial, blue =
-conduction, slate = noise). Severity drives alpha.
+conduction, slate = noise).
 
 See the [annotation schema]({{ site.baseurl }}/annotation-schema) for
 the wire format.

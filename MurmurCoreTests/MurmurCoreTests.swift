@@ -42,7 +42,6 @@ struct AnnotationTests {
         #expect(a.category == "PVC")
         #expect(a.label == nil)
         #expect(a.confidence == nil)
-        #expect(a.severity == .info)
         #expect(a.source == "test")
         #expect(a.note == nil)
         #expect(a.lead == nil)
@@ -62,7 +61,6 @@ struct AnnotationTests {
             category: "AFib",
             label: "Atrial fib",
             confidence: 0.87,
-            severity: .warning,
             source: "murmur.metrics",
             note: "ectopic burst",
             lead: "II",
@@ -75,7 +73,6 @@ struct AnnotationTests {
         #expect(a.unixMillisEnd == 2_000_000)
         #expect(a.label == "Atrial fib")
         #expect(a.confidence == 0.87)
-        #expect(a.severity == .warning)
         #expect(a.note == "ectopic burst")
         #expect(a.lead == "II")
         #expect(a.evidenceContextSeconds == 30)
@@ -92,7 +89,6 @@ struct AnnotationTests {
             category: "VT",
             label: "VT run",
             confidence: 0.91,
-            severity: .critical,
             source: "murmur.vtdetect",
             note: "n",
             lead: "MLII",
@@ -162,41 +158,6 @@ struct AnnotationTests {
     func matchesChannelMismatch() {
         let a = Annotation(kind: .point, sampleIndex: 0, category: "x", source: "t", lead: "II")
         #expect(a.matchesChannel("V1") == false)
-    }
-}
-
-@Suite("Annotation.Severity — ordering and conformances")
-struct SeverityTests {
-
-    @Test("rank is monotonic info < notice < warning < critical")
-    func rankMonotonic() {
-        #expect(Annotation.Severity.info.rank == 0)
-        #expect(Annotation.Severity.notice.rank == 1)
-        #expect(Annotation.Severity.warning.rank == 2)
-        #expect(Annotation.Severity.critical.rank == 3)
-    }
-
-    @Test("Comparable conformance matches rank order")
-    func comparable() {
-        #expect(Annotation.Severity.info < .notice)
-        #expect(Annotation.Severity.notice < .warning)
-        #expect(Annotation.Severity.warning < .critical)
-        #expect(!(Annotation.Severity.critical < .warning))
-    }
-
-    @Test("CaseIterable returns all four cases")
-    func allCases() {
-        #expect(Annotation.Severity.allCases.count == 4)
-        #expect(Set(Annotation.Severity.allCases) == [.info, .notice, .warning, .critical])
-    }
-
-    @Test("Codable roundtrip preserves case")
-    func codableRoundtrip() throws {
-        for severity in Annotation.Severity.allCases {
-            let data = try JSONEncoder().encode(severity)
-            let decoded = try JSONDecoder().decode(Annotation.Severity.self, from: data)
-            #expect(decoded == severity)
-        }
     }
 }
 

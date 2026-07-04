@@ -233,7 +233,6 @@ enum SyntheticRecording {
             let endField = isVT
                 ? ",\n      \"endSample\": \(startSample + Int(sampleRate * 2))"
                 : ""
-            let severity = isVT ? "warning" : "critical"
             let confidence = isVT ? 0.85 : 0.78
             parts.append("""
                 {
@@ -242,7 +241,6 @@ enum SyntheticRecording {
                   "category": "\(category)",
                   "label": "\(category)",
                   "confidence": \(confidence),
-                  "severity": "\(severity)",
                   "note": "Synthetic \(category) finding #\(i + 1) of \(count)"
                 }
                 """)
@@ -274,7 +272,6 @@ enum SyntheticRecording {
               "category": "VT",
               "label": "VT",
               "confidence": 0.91,
-              "severity": "warning",
               "note": "Sustained ventricular tachycardia, ~120 BPM"
             },
             {
@@ -283,7 +280,6 @@ enum SyntheticRecording {
               "category": "VF",
               "label": "VF",
               "confidence": 0.78,
-              "severity": "critical",
               "note": "Possible ventricular fibrillation — confirm morphology"
             },
             {
@@ -293,7 +289,6 @@ enum SyntheticRecording {
               "category": "VT",
               "label": "VT",
               "confidence": 0.85,
-              "severity": "warning",
               "note": "Short VT run"
             }
           ]

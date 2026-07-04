@@ -74,10 +74,6 @@
           "maximum": 1,
           "description": "Producer model confidence, 0…1. Used by the findings panel's confidence-threshold filter."
         },
-        "severity": {
-          "enum": ["info", "notice", "warning", "critical"],
-          "description": "Display severity. Modulates renderer alpha (info 0.85x, notice 1.00x, warning 1.15x, critical 1.30x). Defaults to 'info' when omitted."
-        },
         "source": {
           "type": "string",
           "minLength": 1,
@@ -110,8 +106,7 @@
           "kind": "point",
           "startSample": 12345,
           "category": "PVC",
-          "confidence": 0.92,
-          "severity": "warning"
+          "confidence": 0.92
         },
         {
           "id": "1D7F4A9C-2E5B-4C8E-9F1A-0B2D3E4F5A6B",
@@ -119,7 +114,6 @@
           "startSample": 50000,
           "endSample": 65000,
           "category": "VF_onset",
-          "severity": "critical",
           "note": "Onset preceded by R-on-T",
           "lead": "II",
           "evidenceContextSeconds": 8.0
@@ -128,7 +122,6 @@
           "kind": "point",
           "startUnixMS": 1717854312500,
           "category": "AFib",
-          "severity": "notice",
           "source": "rhythm-classifier-v1"
         }
       ]

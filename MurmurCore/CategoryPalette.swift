@@ -60,17 +60,6 @@ enum CategoryPalette {
         return Color(.sRGB, red: Double(c.x), green: Double(c.y), blue: Double(c.z), opacity: Double(c.w))
     }
 
-    /// Severity tweaks alpha — more critical findings render slightly more
-    /// opaque (and read as more saturated against the pink paper).
-    static func alpha(for severity: Annotation.Severity, baseAlpha: Float) -> Float {
-        switch severity {
-        case .info:     return baseAlpha * 0.85
-        case .notice:   return baseAlpha
-        case .warning:  return min(1, baseAlpha * 1.15)
-        case .critical: return min(1, baseAlpha * 1.30)
-        }
-    }
-
     // MARK: - Fallback
 
     private static func hashColor(_ category: String) -> SIMD4<Float> {

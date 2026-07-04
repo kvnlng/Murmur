@@ -88,11 +88,10 @@ so existing analyst data stays intact.
 
 **Triage surfaces**
 - `AnnotationSummary` — pure aggregation over `[Annotation]` that rolls
-  each category up into counts, severity breakdowns, and total range
-  extent. Sorted critical-first, then by count.
+  each category up into counts and total range extent. Sorted by count.
 - `FindingsSummaryHeader` — compact horizontal chip row above the
-  canvas: `PVC 47 (12 critical) · AFib 38s · VT 3`. Click a chip to
-  toggle the shared `FindingFilter` for that category.
+  canvas: `PVC 47 · AFib 38s · VT 3`. Click a chip to toggle the shared
+  `FindingFilter` for that category.
 - `FindingDensityTimeline` — one thin lane per surviving category
   spanning the full recording. Points render as ticks, ranges as bars.
   Tap anywhere on a lane to jump the viewport. Lets the analyst see
@@ -128,8 +127,11 @@ so existing analyst data stays intact.
 
 **Annotation model (the wow factor)**
 - `Annotation` — `kind` (point/range), `category`, optional `label`,
-  `confidence`, `severity` (info/notice/warning/critical, Comparable),
-  `source`, optional `note`, `lead`, `evidenceContextSeconds`.
+  `confidence`, `source`, optional `note`, `lead`,
+  `evidenceContextSeconds`. (Severity was removed 2026-07-04 — an
+  app-asserted severity is a clinical verdict that breaks the RUO
+  stance; the wire format still decodes-and-drops `severity` for
+  back-compat.)
 - `AnnotationFile` JSON wire format (`schemaVersion: 1`) is the canonical
   ingest path. Timestamps accept either `startSample`/`endSample` (already
   aligned) or `startUnixMS`/`endUnixMS` (viewer resolves at import).
@@ -142,11 +144,11 @@ so existing analyst data stays intact.
 
 **Findings UI**
 - Right-side `inspector` drawer (`FindingsPanel`) with filter chip bar:
-  categories (each with its palette color dot), severities, sources, and
-  a confidence-threshold slider.
-- Findings list — color-grouped rows with time, severity badge, confidence,
-  source, and note preview. Click to jump the viewport; range findings
-  widen the viewport to show context around them.
+  categories (each with its palette color dot), sources, and a
+  confidence-threshold slider.
+- Findings list — color-grouped rows with time, confidence, source,
+  and note preview. Click to jump the viewport; range findings widen
+  the viewport to show context around them.
 - The filter is shared with the canvas — filtered-out findings stop
   rendering everywhere.
 - `CategoryPalette` — hand-tuned colors for common clinical categories
@@ -163,7 +165,8 @@ so existing analyst data stays intact.
   perpendicular in screen-pixel space, so line width stays constant in
   points regardless of zoom (Metal has no `glLineWidth` equivalent).
 - Annotation buckets group by `(category, kind)` so each category gets its
-  own color in a single instanced draw call. Severity modulates alpha.
+  own color in a single instanced draw call. Alpha is constant per kind
+  (0.85 for point rules, 0.45 for range fills).
 - SwiftUI overlays for axis tick labels (time + mV), annotation symbol
   text, and an off-scale chevron overlay driven by `ClippedRangeScanner`
   (▲/▼ markers at the canvas edge where the signal clipped above/below).
@@ -245,8 +248,8 @@ Three layers as agreed; all three now built:
 - [x] Hover tooltips on the canvas — `.onContinuousHover` hit-tests for
       the nearest finding (ranges that strictly contain the hover sample
       first, then point findings within a 6pt tolerance) and floats a
-      small panel with the category, severity, time, confidence, source,
-      and the producer's note.
+      small panel with the category, time, confidence, source, and the
+      producer's note.
 
 ### Canvas polish (deferred from the Metal upgrade pass)
 - [x] MSAA 4× on the waveform canvas. First attempt crashed at first
@@ -354,7 +357,7 @@ See Phase 4 below.
       and `ImageRenderer` measures ScrollView intrinsic size as zero
       → blank output. Would need a non-Scroll test variant or a
       different render strategy. Density-timeline snapshot exercises
-      chip color/severity rendering as a proxy.
+      chip color rendering as a proxy.
 - [x] Skip the Metal canvas itself — pixel diffs across GPUs/MSAA are
       unreliable; rely on the surrounding SwiftUI for visual
       regression coverage
@@ -451,8 +454,8 @@ Tasks:
 ### Medium-term
 - [ ] Lead-specific findings — render annotations only on the channels
       that match their `lead` field
-- [ ] Finding sorting modes (by time, by category, by confidence, by
-      severity) in the findings panel
+- [ ] Finding sorting modes (by time, by category, by confidence) in
+      the findings panel
 - [ ] Keyboard navigation: J/K through findings, →/← pan one window,
       +/− zoom
 - [ ] Per-channel y-axis autoscale (instead of fixed ±5 mV) when the
@@ -783,7 +786,7 @@ claims) but introduces user-generated content workflows.
 
 - [ ] Authoring UI inside `MurmurAnnotation` framework: marker
       placement (click to drop a point, drag to draw a range), edit
-      panel (category / severity / label / note), delete affordance.
+      panel (category / label / note), delete affordance.
 - [ ] Wires into the existing `Editing` toolbar latch — author mode
       requires the latch unlocked, matching the notes-edit gating
       pattern.

@@ -198,7 +198,6 @@ enum UITestSupport {
                   "category": "ATTACH",
                   "label": "ATTACH",
                   "confidence": 0.5,
-                  "severity": "info",
                   "note": "Synthetic finding injected via --ui-test-attach-findings"
                 }
               ]

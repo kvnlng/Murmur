@@ -32,7 +32,6 @@ public struct Annotation: Codable, Equatable, Sendable, Identifiable {
     public let category: String             // semantic finding category, e.g. "VF_onset", "PVC"
     public let label: String?               // short display token; falls back to category
     public let confidence: Double?          // 0…1 from the producer model, optional
-    public let severity: Severity
     public let source: String               // producer ID, e.g. "vf-onset-detector-v2"
     public let note: String?                // free-form analyst-readable text
     public let lead: String?                // channel/lead label if finding is lead-specific
@@ -43,25 +42,15 @@ public struct Annotation: Codable, Equatable, Sendable, Identifiable {
         case range
     }
 
-    public enum Severity: String, Codable, Sendable, CaseIterable, Comparable {
-        case info
-        case notice
-        case warning
-        case critical
-
-        public var rank: Int {
-            switch self {
-            case .info:     return 0
-            case .notice:   return 1
-            case .warning:  return 2
-            case .critical: return 3
-            }
-        }
-
-        public static func < (lhs: Severity, rhs: Severity) -> Bool {
-            lhs.rank < rhs.rank
-        }
-    }
+    /// Historical `Severity` enum was removed 2026-07-04. An
+    /// app-assigned "critical" on a beat is a clinical verdict —
+    /// it breaks Murmur Studio's RUO stance (thresholds are
+    /// user-set guides; the app never asserts a diagnosis).
+    /// The review queue now ranks by objective departure from the
+    /// per-patient normal template. Old `annotations.json` files
+    /// that carry a severity field are still accepted at import
+    /// time (see AnnotationFile.Finding) — the field is decoded
+    /// and dropped.
 
     public var displayLabel: String { label ?? category }
 
@@ -128,7 +117,6 @@ public struct Annotation: Codable, Equatable, Sendable, Identifiable {
         category: String,
         label: String? = nil,
         confidence: Double? = nil,
-        severity: Severity = .info,
         source: String,
         note: String? = nil,
         lead: String? = nil,
@@ -143,7 +131,6 @@ public struct Annotation: Codable, Equatable, Sendable, Identifiable {
         self.category = category
         self.label = label
         self.confidence = confidence
-        self.severity = severity
         self.source = source
         self.note = note
         self.lead = lead
@@ -172,7 +159,12 @@ struct AnnotationFile: Codable, Sendable {
         let category: String
         let label: String?
         let confidence: Double?
-        let severity: Annotation.Severity?
+        /// Historical field: severity was removed from the in-
+        /// memory model 2026-07-04 (RUO — see Annotation.swift
+        /// header comment). The wire format still accepts it so
+        /// older producers keep importing cleanly; the value is
+        /// decoded here and dropped in `resolve(finding:…)`.
+        let severity: String?
         let source: String?
         let note: String?
         let lead: String?
@@ -280,7 +272,6 @@ enum AnnotationLoader {
             category: finding.category,
             label: finding.label,
             confidence: finding.confidence,
-            severity: finding.severity ?? .info,
             source: finding.source ?? defaultSource,
             note: finding.note,
             lead: finding.lead,
@@ -305,7 +296,6 @@ extension Annotation {
             sampleIndex: wfdb.sampleIndex,
             category: wfdb.label,
             label: wfdb.label,
-            severity: .info,
             source: "wfdb.atr"
         )
     }
