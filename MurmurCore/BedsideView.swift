@@ -617,31 +617,7 @@ struct BedsideView: View {
         switch layoutMode {
         case .focus:
             if let channel = focusedChannel {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
-                        summaryHeader
-                        findingsOverview
-                        ChannelPanel(
-                            channel: channel,
-                            directory: recordingDirectory,
-                            viewport: viewport,
-                            annotations: annotationsForChannel(channel),
-                            sizing: .focus
-                        )
-                        // Tear down + rebuild when the focused lead changes —
-                        // WaveformCanvas's MTKView caches the previous channel's
-                        // sample buffer and the off-scale scanner is per-channel,
-                        // so reusing the same SwiftUI identity would leave the
-                        // viewer showing stale data after the chip-bar tap.
-                        .id(channel.id)
-                        variabilityLaneStrip
-                        trendStrip
-                        alarmStrip
-                        stateStrip
-                        qualityStrip
-                    }
-                    .padding(16)
-                }
+                focusModeLayout(channel: channel)
             } else {
                 ContentUnavailableView(
                     "No lead selected",
@@ -671,6 +647,94 @@ struct BedsideView: View {
                 }
                 .padding(16)
             }
+        }
+    }
+
+    /// Persistent-stage focus-mode layout — the ECG trace + docked
+    /// beat inspector pin at the top of the center column; the
+    /// review-queue context (findings overview, variability/trend/
+    /// alarm/quality lanes) scrolls beneath. The clinician's visual
+    /// clues stay on screen while the surrounding context moves.
+    /// See `project_layout_persistent_stage.md`.
+    private func focusModeLayout(channel: Channel) -> some View {
+        VStack(spacing: 0) {
+            pinnedStage(channel: channel)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    summaryHeader
+                    findingsOverview
+                    variabilityLaneStrip
+                    trendStrip
+                    alarmStrip
+                    stateStrip
+                    qualityStrip
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    /// The pinned stage. Contains the ECG canvas (with its overview
+    /// ribbon and axes) and — when a focus beat exists — the docked
+    /// caliper readout sitting beside the trace. Never scrolls; the
+    /// analyst's primary reading surface stays put while the
+    /// scrolling context under it moves.
+    private func pinnedStage(channel: Channel) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            ChannelPanel(
+                channel: channel,
+                directory: recordingDirectory,
+                viewport: viewport,
+                annotations: annotationsForChannel(channel),
+                sizing: .focus
+            )
+            // Tear down + rebuild when the focused lead changes —
+            // WaveformCanvas's MTKView caches the previous channel's
+            // sample buffer and the off-scale scanner is per-channel,
+            // so reusing the same SwiftUI identity would leave the
+            // viewer showing stale data after the chip-bar tap.
+            .id(channel.id)
+
+            dockedBeatInspector
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+        .background(.background)
+        .accessibilityIdentifier("pinned-stage")
+    }
+
+    /// The focus-beat caliper docked beside the trace. Renders when
+    /// a beat is focused; otherwise a placeholder holds the layout
+    /// width so the trace doesn't reflow when focus changes.
+    @ViewBuilder
+    private var dockedBeatInspector: some View {
+        if let focusIdx = markingsContext.focusedBeatSampleIndex,
+           let beat = markingsContext.beats.first(where: { $0.rPeakSampleIndex == focusIdx }) {
+            BeatCalipers(
+                beat: beat,
+                sampleRate: markingsContext.sampleRate,
+                template: markingsContext.template,
+                qtcFormula: markingsContext.qtcFormula
+            )
+            .frame(width: 220, alignment: .topLeading)
+            .accessibilityIdentifier("docked-beat-inspector")
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Focus beat")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text("Hover the trace to focus a beat")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(width: 220, alignment: .topLeading)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+            .accessibilityIdentifier("docked-beat-inspector-empty")
         }
     }
 
@@ -1242,26 +1306,6 @@ private struct ChannelPanel: View {
                     focusedRPeakSampleIndex: markingsContext.focusedBeatSampleIndex,
                     canvasSize: liveSize
                 )
-
-                // Focus-beat calipers — PR/QRS/QT/QTc readout + delta
-                // vs the per-patient normal template. Shown when a
-                // beat is focused AND the analyst is hovering the
-                // canvas (so we don't stack calipers with the
-                // pointer-not-here state).
-                if hoverIsActive,
-                   let focusIdx = markingsContext.focusedBeatSampleIndex,
-                   let beat = markingsContext.beats.first(where: { $0.rPeakSampleIndex == focusIdx }) {
-                    BeatCalipers(
-                        beat: beat,
-                        sampleRate: markingsContext.sampleRate,
-                        template: markingsContext.template,
-                        qtcFormula: markingsContext.qtcFormula
-                    )
-                    .padding(8)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                    .allowsHitTesting(false)
-                    .transition(.opacity)
-                }
 
                 if let hovered = hoveredAnnotation {
                     AnnotationTooltip(annotation: hovered, sampleRate: channel.sampleRate)
