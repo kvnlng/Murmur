@@ -188,15 +188,17 @@ Pure SwiftUI on top of the Metal layer.
 |---|---|
 | `BedsideView` | Top-level shell. Partitions channels into ECG (Metal canvas) and low-rate (context strips). Owns the shared viewport, the filter, and the analyst disposition store. |
 | `LeadChipBar` | Focus/Strips mode toggle + one chip per ECG lead. |
-| `ChannelPanel` | Per-lead container: header, voltage axis, Metal canvas, time axis, overview ribbon. |
+| `ChannelPanel` | Per-lead container: header, voltage axis, Metal canvas, time axis. In focus mode the panel sits inside the pinned stage. |
 | `WaveformTimeAxis` / `WaveformVoltageAxis` | Tick labels positioned by viewport math. |
 | `WaveformAnnotationOverlay` | Category-colored symbol labels at the top of each canvas. |
 | `WaveformClippingOverlay` | ▲/▼ chevrons at off-scale events. |
-| `OverviewRibbon` | Whole-recording envelope per lead (Swift Charts — small fixed widget). |
+| `OverviewMap` | Merged whole-recording locator + finding density strip pinned with the stage (retired `OverviewRibbon` + `FindingDensityTimeline` 2026-07-04). Compact by default; expand to per-category lanes. |
+| `BeatCalipers` | Focus-beat PR/QRS/QT/QTc readout with deltas vs the per-patient template. Docks beside the trace in the pinned stage; travels with the pin. |
+| `VariabilityLane` | Rolling HRV lane in the scrolling context below the pinned stage. Shared time axis with the pinned trace. |
+| `IntervalTrendLane` | Third view of the fiducial store — QTc/PR/QRS trended over the whole recording. User-set threshold guides + analyst-authored event markers. |
 | `RecordContextPanel` | `.hea` header comments + Markdown notes editor next to the recording bundle. |
-| `FindingsSummaryHeader` | Compact chip row above the canvas — one chip per category with count or duration, plus the analyst's disposition tally. |
-| `FindingDensityTimeline` | One thin lane per category spanning the full recording. Confirmed entries get a green ring; dismissed entries dim. |
-| `FindingsPanel` | Right-side inspector with filter chips, per-row confirm / dismiss / reset controls, and a triage tally. |
+| `FindingsSummaryHeader` | Compact chip row rendered in the scrolling context — one chip per category with count or duration, plus the analyst's disposition tally. |
+| `FindingsPanel` | Right-side inspector = deviation-ranked review queue. Groups by category with human labels + provenance; collapsed by default; rhythm-context banner reads `recording.headerComments`; sort default = Departure. |
 
 ### Low-rate context strips
 

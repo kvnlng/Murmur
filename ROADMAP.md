@@ -14,7 +14,22 @@ The PhysioNet WFDB record (`.hea` + `.dat`) is the substrate. Findings —
 whether upstream-producer output or analyst-authored — are the primary
 data surface; the waveform is the context that gives each finding meaning.
 
-## Current state (updated 2026-06-29)
+## Current state (updated 2026-07-04)
+
+**Persistent-stage redesign (2026-07-04)** — the ECG canvas + docked
+beat inspector + one-map overview now pin at the top of the center
+column; findings review queue + variability lane + interval trend
+lane scroll around them. `FindingsPanel` is a deviation-ranked review
+queue (Departure sort default; groups with human labels + provenance;
+collapsed normals row; rhythm-context banner). `OverviewMap`
+supersedes the old `OverviewRibbon` + `FindingDensityTimeline`.
+`IntervalTrendLane` + `IntervalTrendComputer` + `IntervalTrendGuideStore`
+land the third view of the one fiducial store (QTc/Fridericia 2-min
+bins by default; median + IQR ribbon; user-set threshold guides;
+event overlay from analyst-authored point annotations). Annotation
+severity removed from the model — app-asserted severity is a
+clinical verdict that breaks the RUO stance; the wire format still
+decodes-and-drops `severity` for back-compat.
 
 **Project rename (2026-06-18)** — `Plotting` → `Murmur` across Xcode
 project, sources, docs, and GitHub repo. First-launch migration in
@@ -31,15 +46,16 @@ so existing analyst data stays intact.
   sidecar at recording load, writes on every `confirm` / `dismiss` /
   `reset`. Mutations require the toolbar's `Editing` latch (same lock
   semantics as notes editing).
-- `FindingsPanel` rows show inline confirm/dismiss/reset controls when
-  unlocked; row chrome reflects state (green border + ✓ for confirmed,
-  strikethrough + ✗ for dismissed). The panel header shows a compact
-  `confirmed · dismissed · unreviewed` tally.
-- `FindingsSummaryHeader` total chip carries the same tally so analyst
+- `FindingsPanel` exemplar rows show inline confirm/dismiss/reset
+  controls when unlocked; dismissed rows dim to ~55% opacity. The
+  panel header shows a `To review · Confirmed · Dismissed` triage
+  tally.
+- `FindingsSummaryHeader` total chip (rendered in the scrolling
+  context under the pinned stage) carries the same tally so analyst
   progress is visible even when the inspector is hidden.
-- `FindingDensityTimeline` lanes dim dismissed events to ~30% and
-  outline confirmed events with a green ring, so triage state is
-  scannable at the full-recording level.
+- `OverviewMap`'s expanded per-category lanes dim dismissed events
+  to ~30% and outline confirmed events with a green ring, so triage
+  state is scannable at the full-recording level.
 
 **Quality shading**
 - `QualityStrip` — one heat band per quality / artifact-ratio channel
@@ -92,10 +108,11 @@ so existing analyst data stays intact.
 - `FindingsSummaryHeader` — compact horizontal chip row above the
   canvas: `PVC 47 · AFib 38s · VT 3`. Click a chip to toggle the shared
   `FindingFilter` for that category.
-- `FindingDensityTimeline` — one thin lane per surviving category
-  spanning the full recording. Points render as ticks, ranges as bars.
-  Tap anywhere on a lane to jump the viewport. Lets the analyst see
-  finding clusters across a multi-hour record at a glance.
+- `OverviewMap` (retired `OverviewRibbon` + `FindingDensityTimeline`
+  2026-07-04) — one compact density strip pinned with the trace,
+  colored ticks per annotation + viewport indicator + click-to-scrub.
+  Expand chevron reveals per-category lanes underneath for the
+  category-drill navigation the old timeline provided.
 
 **Welcome screen**
 - `WelcomeView` is the first-launch experience: a centered card on a
@@ -142,15 +159,24 @@ so existing analyst data stays intact.
 - `Recording` decode is back-compat: legacy manifests with
   `[WFDBAnnotation]` arrays still load and get adapted on the fly.
 
-**Findings UI**
-- Right-side `inspector` drawer (`FindingsPanel`) with filter chip bar:
-  categories (each with its palette color dot), sources, and a
-  confidence-threshold slider.
-- Findings list — color-grouped rows with time, confidence, source,
-  and note preview. Click to jump the viewport; range findings widen
-  the viewport to show context around them.
-- The filter is shared with the canvas — filtered-out findings stop
-  rendering everywhere.
+**Findings UI (review queue, 2026-07-04)**
+- Right-side `inspector` rail = `FindingsPanel`, a deviation-ranked
+  review queue. Default sort is Departure (magnitude of QTc / QRS /
+  QT vs `IntervalMarkingsContext.template`); Time / Confidence /
+  Category available via the sort menu chip.
+- Rows are grouped by category with a human label
+  (V → "Ventricular ectopy", A → "Atrial premature", `"` →
+  "Annotator comment", etc.) + provenance (`source`). Each group is
+  collapsed by default; click to reveal up to 6 exemplar rows,
+  sorted by departure. `--ui-test-expand-all-findings-groups`
+  launch arg auto-expands for XCUI tests.
+- Categories mapping to N / NORMAL / SINUS collapse into a single
+  dashed "beats within template" row at the bottom — the mass the
+  analyst opened the tool to escape.
+- Rhythm-context banner at the top surfaces
+  `recording.headerComments` verbatim as the session frame.
+- Filter chips: Category (multiselect menu) + Confidence (≥ 0 / 50 /
+  75 / 90). The same filter narrows the pinned `OverviewMap`.
 - `CategoryPalette` — hand-tuned colors for common clinical categories
   (reds = ventricular, purples = atrial, blues = conduction, slate =
   noise), with deterministic FNV-1a → HSV fallback for unknown categories.
@@ -335,8 +361,9 @@ See Phase 4 below.
 - [x] `MurmurTests/SnapshotTests.swift` covers the pure-data overlays:
       `AnnotationTooltip` (point + range), `WaveformTimeAxis` (default
       10s + zoomed 60s), `WaveformVoltageAxis`,
-      `FindingDensityTimeline` (mixed categories),
-      `FindingsSummaryHeader` (mixed + empty)
+      `OverviewMap` (mixed categories; retired
+      `FindingDensityTimeline` at the same time),
+      `FindingsSummaryHeader` (empty state)
 - [x] `swift-snapshot-testing` 1.18.x attached to MurmurTests target
 - [x] MurmurCore framework split: tests escape host-app sandbox,
       snapshot reads + writes work end-to-end
@@ -452,18 +479,25 @@ Tasks:
       isolated unit tests).
 
 ### Medium-term
-- [ ] Lead-specific findings — render annotations only on the channels
-      that match their `lead` field
-- [ ] Finding sorting modes (by time, by category, by confidence) in
-      the findings panel
-- [ ] Keyboard navigation: J/K through findings, →/← pan one window,
-      +/− zoom
-- [ ] Per-channel y-axis autoscale (instead of fixed ±5 mV) when the
-      signal sits in a narrower band
+- [x] Lead-specific findings — `Annotation.matchesChannel(_:)` +
+      `BedsideView.annotationsForChannel(_:)` route lead-tagged
+      findings only to matching channels; lead-less findings show
+      everywhere.
+- [x] Finding sorting modes — deviation-ranked review queue exposes
+      Departure (default), Time, Confidence, Category via the sort
+      menu chip in the queue rail.
+- [x] Keyboard navigation — arrows pan by one viewport width, `=`/`+`
+      and `-` zoom around centre, J/K step through filtered findings,
+      `[`/`]` step through deviation-ranked beats, C/D/X apply
+      confirm/dismiss/reset dispositions (all in `BedsideView.onKeyPress`).
+- [x] Per-channel y-axis autoscale — `autoscaleY` toggle on
+      `ChannelPanel` derives the display range from the scanned
+      `sampleRange` with 10% headroom; falls back to ±5 mV clinical
+      reference when off.
 - [ ] Beat clustering at low zoom — collapse adjacent points of the same
       category into a single hit-counter mark when they overlap
-- [ ] Snapshot export — current viewport as PNG with grid + findings, for
-      sharing with clinicians
+- [x] Snapshot export — `SnapshotExporter.swift` + toolbar action
+      capture the current bedside as PNG with grid + findings.
 
 ### Deferred
 - [ ] Multi-file WFDB records (per-signal `.dat`)
@@ -652,132 +686,107 @@ range/finding on top of them is the Annotation IAP. Engineered
 measurement throughout — no RUO badges (RUO language stays reserved for
 ML inference output in the VT module).
 
-**Variability lane (rolling HRV under the waveform)**
+**Variability lane (rolling HRV under the waveform) — SHIPPED**
 
-- [ ] One configurable metric lane rendered directly BENEATH the ECG,
-      sharing the same time axis (pan / zoom / scrub locked). Native-
-      viewer-only capability — no static HRV tool in the PhysioNet
-      catalog can do this shared-axis trajectory view.
-- [ ] Default rolling **RMSSD** over a 5-min window (Task Force 1996
-      short-term HRV standard) — least window-length-sensitive of the
-      time-domain measures, tracks parasympathetic tone. Alternates in
-      the same lane: pNN50, mean-RR / HR.
-- [ ] **SDNN is NOT offered as a rolling line** — sliding SDNN conflates
-      real variation with window length. SDNN available only as a
-      whole-segment summary, labelled as such.
-- [ ] Window-length presets 1 / 5 / 10 min + custom; step control
-      (default 30 s) for overlap/smoothness. Window length is a
-      first-class, visible, DOCUMENTED parameter — echoed in the
-      caption "Copy citation" emits. Metrics from different window
-      lengths are not comparable — UI must not invite naive
-      cross-window comparison.
-- [ ] Window-on-signal linkage (signature interaction): hover the lane
-      → translucent band highlights the beats in that window on the ECG
-      above; hover the ECG → the window's metric value pops on the
-      lane. The metric is never divorced from the beats that produced
-      it.
-- [ ] RR-artifact quality floor: windows failing the floor render
-      dimmed / hatched, NOT silently plotted as physiological spikes
-      (same instinct as the `ecg_artifact_ratio` shading pattern).
+- [x] Shared-axis rolling metric lane under the ECG (`VariabilityLane`
+      + `VariabilityLaneContext`; App target's
+      `VariabilityLaneOrchestrator` publishes samples from
+      MurmurMetrics). Pan/zoom/scrub locked to the pinned trace.
+- [x] Default rolling RMSSD; alternates (pNN50, mean-RR / HR) selectable
+      by the App-target orchestrator via the shared context.
+- [x] SDNN deliberately NOT offered as a rolling line.
+- [x] Window-length presets (1 / 5 / 10 min + custom) + step control,
+      persisted via `VariabilityLaneContext` (UserDefaults). Caption
+      echoes the choice for citation.
+- [x] Window-on-signal linkage — lane hover publishes to
+      `VariabilityLaneContext.hoveredTimeSeconds`, ECG canvas overlays
+      a translucent band over the contributing beats; ECG-side hover
+      pops the metric value on the lane.
+- [x] RR-artifact quality floor renders ineligible windows as dimmed
+      `PointMark`s (not silently dropped).
 - [ ] Range-drag on the lane → an annotation carrying metric + window +
       values ("HRV drop, 03:11–03:20") — reproducible, citable, into
       the observation→publication path. Authoring routes through the
       Annotation IAP.
 
-**Interval markings & delineation (on-waveform P/QRS/T + intervals)**
+**Interval markings & delineation (on-waveform P/QRS/T + intervals) — SHIPPED**
 
 Anchored on a per-patient **normal template** (median morphology +
 interval baselines built from high-confidence normal complexes). The
 analyst reads everything as deviation from THIS patient's own normal —
 not against a population cutoff.
 
-- [ ] Delineation pass populates a per-recording fiducial store; the
-      SAME store feeds the variability lane (as an RR series) and the
-      interval trend lanes below. **One pass, three views.**
-- [ ] Per-patient normal template drives three things: caliper defaults
-      (readouts show deltas vs patient normal, not just absolutes), a
-      ghost-overlay of the abnormal complex on the faint normal
-      template, and deviation-ranked navigation between beats (RR /
-      QRS-width / morphology distance).
-- [ ] Zoom level-of-detail markings — zoomed out: R-tick + per-beat
-      class color only; zoomed in: full P / QRS-on/off / T / ST
-      fiducials progressively appear. NEVER dense-mark every beat —
-      that buries the signal.
-- [ ] Focus-beat calipers — hover a beat → floating readout (PR, QRS,
-      QT, QTc + deltas vs template); click → pin interval brackets on
-      that beat. Full morphology annotation lives on the focused beat.
+- [x] Delineation pass populates the fiducial store
+      (`IntervalMarkingsContext.beats` + `.template`). Same store
+      feeds the variability lane, the on-beat markings, and the
+      interval trend lanes — **one pass, three views.**
+- [x] Per-patient normal template drives caliper delta columns
+      (`BeatCalipers` "+X ms vs template"), ghost-overlay on the
+      Metal canvas, and deviation-ranked navigation
+      (`IntervalMarkingsContext.beatsRankedByDeviation` + the
+      `[`/`]` keyboard shortcuts).
+- [x] Zoom LOD markings — `MarkingsDetailLevel.level(forViewportSeconds:)`
+      switches between R-ticks-only / QRS-only / full-fiducials at
+      3 s and 30 s viewport thresholds.
+- [x] Focus-beat calipers — hover a beat → docked `BeatCalipers`
+      readout beside the pinned trace with PR/QRS/QT/QTc + deltas.
 - [ ] Toggleable layers (P / QRS / T / ST / intervals) so a QT study
       and a conduction study each show only what's relevant.
-- [ ] **QTc formula is a parameter, not a number.** User-set,
-      DOCUMENTED, echoed in caption + citation. Default **Fridericia**;
-      Bazett / Framingham / Hodges available. Metrics under different
-      formulas are NOT comparable — do not let the UI invite naive
-      cross-formula comparison.
-- [ ] Fiducials are confidence-flagged and **EDITABLE** (T-offset
-      especially — detectors are tuned on normal sinus and wobble on
-      the ectopic / paced / near-VT beats that matter). Nudging a
-      fiducial recomputes the interval; the correction is a finding
-      (authoring = Annotation IAP). Visible honesty beats false
-      precision.
-- [ ] **Architecture guardrail:** dense per-beat fiducials/intervals
-      are a MEASUREMENT layer, NOT findings — do NOT write a P/QRS/T
-      marker per beat into `annotations.json`. Only notable events
-      become findings. Beat-class labels route through the existing
-      `DispositionStore` / `confirmedKind` model, or a separate
-      candidate producer (ML candidate producer would be RUO-badged;
-      geometry is not).
-- [ ] Compute in MurmurCore (pure Swift, Accelerate/vDSP); the geometry
-      emits unlabeled deviation + confidence.
+- [x] QTc formula is a user-set parameter (Fridericia default;
+      Bazett / Framingham / Hodges available), persisted via
+      `IntervalMarkingsContext.qtcFormula` and echoed on the caliper
+      QTc row + trend-lane repro caption.
+- [ ] Fiducials are confidence-flagged and **EDITABLE** (nudge to
+      recompute; the correction is a finding routed through the
+      Annotation IAP). Confidence flags exist on
+      `MarkingsFiducial.confidence`; nudge-to-edit still pending.
+- [x] Architecture guardrail — dense fiducials live only on
+      `IntervalMarkingsContext.beats`; nothing writes them into
+      `annotations.json`. Beat-class labels route through
+      `DispositionStore` / `confirmedKind`.
+- [x] Compute in MurmurCore surfaces the geometry as unlabeled
+      deviation + confidence via `MarkingsBeat` / `MarkingsTemplate`;
+      the paid MurmurMetrics framework owns the arithmetic.
 
-**Interval trend lanes (QTc-over-time, third view of the fiducial store)**
+**Interval trend lanes (QTc-over-time, third view of the fiducial store) — SHIPPED**
 
 Trend an interval metric over the WHOLE recording, reusing the
 variability-lane mechanism. Named use case: catching **drug-induced QT
 prolongation across hours**.
 
-- [ ] One lane beneath the ECG, shared time axis, default zoom = whole
-      recording (the ECG above renders as a compressed amplitude
-      envelope until the analyst zooms in). Pan / zoom / scrub locked
-      to the waveform, same as the variability lane.
-- [ ] Default trend: **QTc (Fridericia) with 2-min bins**. PR
-      (AV-block progression) and QRS-width follow as
-      switchable/stackable trends — not day-one clutter.
-- [ ] **Median + IQR ribbon**, NOT a single smoothed line — per-beat
-      QTc is noisy exactly where T-offset delineation wobbles; SHOW the
-      spread instead of hiding it. `Show` control: median-only /
-      median+IQR / per-beat scatter at high zoom.
-- [ ] Baseline band from the patient-normal template ("patient normal
-      · 418–438 ms (template)"). Drift is read as departure from this
-      band — unifies all three views on the one anchor.
-- [ ] Quality dimming: bins whose fiducial confidence fails (T-offset
-      is the fragile one for QTc) render dimmed/hatched — never plotted
-      as confident values.
-- [ ] **Threshold lines are USER-SET guides — the app NEVER ships
-      built-in clinical cutoffs.** A hardcoded "500 ms = Long QT" would
-      be a diagnostic assertion. Analyst places a labeled guide
-      ("guide · 500 ms (user-set)"); the app never asserts a verdict.
-      This is the load-bearing RUO call for this lane.
-- [ ] Event overlay: analyst annotations (drug admin, dose change,
-      etc.) drop as vertical markers on the shared axis so the drift
-      is read against WHAT CHANGED. Events are analyst-authored, not
-      app-asserted clinical events, not EHR imports.
-- [ ] **Drill-down (unifying interaction):** hover a trend point →
-      highlight the contributing beats on the ECG above; **click →
-      open that beat in the Intervals (markings) view** with full
-      fiducials + calipers. Trend lane = hours-scale map; markings
-      view = beat-scale detail. Generalizes the window-on-signal hover
-      from the variability lane into navigation.
-- [ ] Bin length is a visible, DOCUMENTED control — different-bin
-      trends are NOT comparable. Caption echoes formula + bin +
-      template-N-beats; "Copy citation" emits it.
+- [x] `IntervalTrendLane` — shared-axis lane under the ECG at whole-
+      recording zoom, pan/zoom/scrub locked to the viewport.
+- [x] Default QTc/Fridericia with 2-min bins; PR and QRS-width
+      switchable via the metric picker chip.
+- [x] Median line + IQR ribbon (default), per-beat scatter and
+      median-only alternates via the show-mode chip.
+- [x] Baseline band from `MarkingsTemplate.medianQTcMs ± IQR/2`.
+- [x] Quality dimming — bins failing the T-offset confidence floor
+      render as dimmed `PointMark`s (see
+      `IntervalTrendComputer.hasFragileFiducialsHighConfidence`).
+- [x] Threshold guides are USER-SET only — `IntervalTrendGuideStore`
+      persists per-recording to `interval_guides.json`; the `+ guide`
+      caption chip adds them, right-click a label removes them; every
+      rendered label carries "(user-set)".
+- [x] Event overlay — point annotations whose category matches an
+      event-worthy token (WFDB `"`, `comment`, `event`, `note`,
+      `drug`, `dose`, `drug_admin`) render as vertical purple
+      markers on the trend axis. Analyst-authored events; app never
+      imports EHR claims.
+- [x] Click-through — click a trend bin → `IntervalMarkingsContext`
+      requests a jump to the nearest beat, which focuses the caliper
+      readout beside the pinned trace.
+- [x] Bin length is a visible control (`IntervalTrendLaneContext.binPreset`);
+      repro caption echoes formula + bin + template N verbatim for
+      the citation copy path.
 
-**Build order across the three:** shared-axis variability lane first
-(RMSSD + 5-min defaults, then window-on-signal hover, then quality
-floor, then finding authoring) → delineation + per-patient normal
-template → focus-beat calipers → template ghost-overlay → deviation-
-ranked navigation → interval trend lanes (median+IQR, baseline band,
-quality dimming, event overlay/guides, click-through, authoring). Do
-not start trend lanes before the template and fiducial store exist.
+**Build order (historical):** shared-axis variability lane → on-beat
+delineation + template + calipers + deviation-ranked navigation →
+interval trend lanes (median+IQR + baseline band + quality dimming +
+threshold guides + event overlay + click-through). All three views of
+the one fiducial store are now on-screen. Remaining polish is
+authoring-dependent (range-drag → finding needs the Annotation IAP)
+and fiducial-edit UX (nudge-to-recompute).
 
 ### Phase 2 — Annotation Authoring IAP
 

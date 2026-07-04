@@ -56,8 +56,11 @@ automated, or one moves between buckets.
 | Pinch zoom canvas → viewport width scales | ✅ `MurmurUIBypassTests/testLaunchArgZoomToScalesViewportWidth` | Bypasses the gesture; `--ui-test-zoom-to=<seconds>` calls the same `viewport.setWidth` mutation. Native `MagnifyGesture` recognition stays manual-smoke |
 | Hover canvas → crosshair appears at cursor | ✅ `MurmurUIBypassTests/testLaunchArgHoverInjectionRendersCrosshair` | `--ui-test-hover-at=X,Y` injection fires the hover-update closure. Hover state itself doesn't reach the accessibility tree, so the assertion is a smoke check that the injection doesn't crash. Hit-test math covered by unit tests |
 | Click finding row → viewport animates to finding | ✅ `MurmurUITests/testClickingFindingRowChangesViewport` | Uses `ui-test-viewport-state` accessibility element to read pre/post state |
-| Click overview ribbon → viewport scrubs to clicked position | ✅ `MurmurUITests/testClickingOverviewRibbonScrubsViewport` | DragGesture(minimumDistance: 0) fires `onChanged` on a single click |
-| Click on density-timeline lane → viewport jumps to fraction | ✅ `MurmurUITests/testClickingDensityLaneJumpsViewport` | |
+| Click `OverviewMap` compact strip → viewport scrubs to clicked position | ✅ `MurmurUITests/testClickingOverviewRibbonScrubsViewport` | Legacy `overview-ribbon-<lead>` accessibility id preserved on the new `OverviewMap` strip; DragGesture(minimumDistance: 0) fires `onChanged` on a single click |
+| Expand `OverviewMap` + click a per-category lane → viewport jumps to fraction | ✅ `MurmurUITests/testClickingDensityLaneJumpsViewport` | Test clicks the `overview-map-expand-toggle` first, then a `density-lane-<category>` row |
+| Deviation-ranked review queue: groups collapse by default | ✅ `MurmurUIBypassTests/testReviewQueueGroupsCollapseByDefault` | `finding-group-VF` present; `finding-row-VF` hidden until expansion |
+| Deviation-ranked review queue: click group → exemplars appear, click again → collapse | ✅ `MurmurUIBypassTests/testReviewQueueGroupExpandRevealsExemplars` | |
+| Rhythm-context banner renders from `recording.headerComments` | ✅ `MurmurUIBypassTests/testReviewQueueRhythmContextBannerRendersFromHeader` | Probes via `app.staticTexts["Rhythm context"]` — XCUI on macOS finds inner text more reliably than HStack container ids |
 | Renderer produces non-blank output | ✅ `WaveformRendererDrawSceneTests/clearsToPaperPink` + `drawsTraceWhenSamplesLoaded` | Offscreen MTLTexture readback — catches the bundle-lookup / shader-compile / pipeline-state class of bug |
 
 ## Layout controls
