@@ -346,7 +346,15 @@ struct IntervalTrendLane: View {
                     RuleMark(x: .value("event-t", event.timeSeconds))
                         .foregroundStyle(Color.purple.opacity(0.65))
                         .lineStyle(StrokeStyle(lineWidth: 1.2))
-                        .annotation(position: .top, alignment: .center, spacing: 2) {
+                        // `.topLeading` inside the plot + fit-to-plot
+                        // overflow keeps the label from being clipped
+                        // by the surrounding RoundedRectangle.
+                        .annotation(
+                            position: .topLeading,
+                            alignment: .leading,
+                            spacing: 2,
+                            overflowResolution: .init(x: .fit(to: .plot), y: .fit(to: .plot))
+                        ) {
                             Text(event.label)
                                 .font(.caption2.weight(.semibold))
                                 .foregroundStyle(.white)
@@ -367,7 +375,12 @@ struct IntervalTrendLane: View {
                     RuleMark(y: .value("guide", guide.valueMs))
                         .foregroundStyle(Color.secondary.opacity(0.55))
                         .lineStyle(StrokeStyle(lineWidth: 1, dash: [5, 3]))
-                        .annotation(position: .topTrailing, alignment: .trailing, spacing: 2) {
+                        .annotation(
+                            position: .topTrailing,
+                            alignment: .trailing,
+                            spacing: 2,
+                            overflowResolution: .init(x: .fit(to: .plot), y: .fit(to: .plot))
+                        ) {
                             Text(guide.label)
                                 .font(.caption2.monospacedDigit())
                                 .foregroundStyle(.secondary)
@@ -597,11 +610,14 @@ struct IntervalTrendLane: View {
     // MARK: - Y-axis math
 
     private var yDomain: ClosedRange<Double> {
-        let values = data.bins
+        var values = data.bins
             .filter { $0.isEligible && $0.median.isFinite }
             .flatMap { [$0.q1, $0.q3, $0.median] }
+        // Guides must be visible on the lane — otherwise the analyst
+        // places a 500 ms guide, the bins sit at 420–465, and the
+        // guide silently disappears off-screen.
+        values.append(contentsOf: guides.map(\.valueMs))
         guard let lo = values.min(), let hi = values.max() else {
-            // Fall back to the baseline band if we have it.
             if let band = data.baselineBand {
                 let pad = max((band.upperBound - band.lowerBound) * 0.5, 20)
                 return (band.lowerBound - pad)...(band.upperBound + pad)

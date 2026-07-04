@@ -33,7 +33,7 @@ final class SnapshotTests: XCTestCase {
 
     // To re-record baselines after an intentional UI change, uncomment:
     // override func invokeTest() {
-    //     withSnapshotTesting(record: .all) {
+    //     withSnapshotTesting(record: .missing) {
     //         super.invokeTest()
     //     }
     // }
