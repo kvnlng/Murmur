@@ -46,6 +46,10 @@ struct MurmurApp: App {
                 // render. Lives here because the App target is the only place
                 // that imports both MurmurMetrics and MurmurCore.
                 .background(VariabilityLaneOrchestrator())
+                // Second invisible orchestrator: same pattern, computes P/Q/S/T
+                // fiducials + per-patient normal template + interval readouts,
+                // publishes to IntervalMarkingsContext.
+                .background(IntervalMarkingsOrchestrator())
         }
         .defaultSize(width: 1320, height: 880)
         .commands {

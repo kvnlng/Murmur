@@ -284,6 +284,56 @@ final class SnapshotTests: XCTestCase {
         assertSnapshot(of: render(view, size: CGSize(width: 552, height: 120)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 
+    // MARK: - BeatCalipers
+
+    func testBeatCalipers_withTemplate() {
+        // A beat with clear PR/QRS/QT/QTc and a template that has a
+        // clear median. Delta column shows the beat is a bit prolonged
+        // vs. the analyst's own normal template.
+        let beat = MarkingsBeat(
+            rPeakSampleIndex: 12500,
+            rPeakConfidence: 1.0,
+            pOnset:    MarkingsFiducial(kind: .pOnset,    sampleIndex: 12350, confidence: 0.85),
+            pOffset:   MarkingsFiducial(kind: .pOffset,   sampleIndex: 12420, confidence: 0.85),
+            qrsOnset:  MarkingsFiducial(kind: .qrsOnset,  sampleIndex: 12460, confidence: 0.95),
+            qrsOffset: MarkingsFiducial(kind: .qrsOffset, sampleIndex: 12530, confidence: 0.90),
+            tOnset:    MarkingsFiducial(kind: .tOnset,    sampleIndex: 12620, confidence: 0.75),
+            tOffset:   MarkingsFiducial(kind: .tOffset,   sampleIndex: 12740, confidence: 0.55),
+            prMs: 155.0,
+            qrsMs: 92.0,
+            qtMs: 410.0,
+            qtcMs: 445.0,
+            precedingRRMs: 820.0
+        )
+        let template = MarkingsTemplate(
+            sampleCount: 200,
+            medianPRMs: 148.0, iqrPRMs: 12.0,
+            medianQRSMs: 88.0, iqrQRSMs: 6.0,
+            medianQTMs: 395.0, iqrQTMs: 18.0,
+            qtcFormulaName: "Fridericia",
+            medianQTcMs: 428.0, iqrQTcMs: 16.0
+        )
+        let view = BeatCalipers(beat: beat, template: template, qtcFormula: .fridericia)
+            .frame(width: 250)
+            .padding()
+            .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 300, height: 200)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
+    func testBeatCalipers_noTemplate() {
+        // Delta columns should degrade gracefully to "—" when no
+        // template exists yet (early after recording load).
+        let beat = MarkingsBeat(
+            rPeakSampleIndex: 12500,
+            prMs: 155.0, qrsMs: 92.0, qtMs: 410.0, qtcMs: 445.0, precedingRRMs: 820.0
+        )
+        let view = BeatCalipers(beat: beat, template: nil, qtcFormula: .fridericia)
+            .frame(width: 250)
+            .padding()
+            .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 300, height: 200)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
     // MARK: - ECGMetricsView / ECGMetricsLockedView
     //
     // Gated on `canImport(MurmurMetrics)` so the file still compiles

@@ -72,6 +72,14 @@ final class RecordingViewport {
         endSample = clampedStart + clampedWidth
     }
 
+    /// Center the viewport on the given absolute sample index,
+    /// preserving the current width. Clamped to recording bounds.
+    func center(onSample sample: Int64) {
+        cancelAnimation()
+        let width = endSample - startSample
+        setStartInternal(sample - width / 2)
+    }
+
     /// Center the viewport around `fraction` (0...1) of the total recording,
     /// preserving the current width.
     func jump(toFraction fraction: Double) {

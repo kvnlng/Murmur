@@ -102,7 +102,10 @@ enum BinaryRecordingFile {
     }
 
     /// Reads a contiguous run of Float32 samples. `range` is sample indices, not bytes.
-    static func readSamples(url: URL, range: Range<Int64>) throws -> [Float] {
+    /// Public so paid-feature orchestrators in the App target (which
+    /// live outside MurmurCore) can pull the whole ECG buffer for
+    /// delineation. `MappedSampleAccess` itself stays internal.
+    public static func readSamples(url: URL, range: Range<Int64>) throws -> [Float] {
         let access = try mappedAccess(url: url)
         return access.samples(range: range)
     }

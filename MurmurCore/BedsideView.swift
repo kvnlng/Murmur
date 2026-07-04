@@ -50,6 +50,10 @@ struct BedsideView: View {
     /// Empty covers all "no lane" cases — no recording, no entitlement,
     /// too few beats — so BedsideView has no policy of its own.
     @State private var laneContext = VariabilityLaneContext.shared
+    /// Per-beat fiducials + normal template — powers the fiducial
+    /// overlay drawn in ChannelPanel and the deviation-ranked
+    /// navigation shortcuts (`[` / `]`) on BedsideView itself.
+    @State private var markingsContext = IntervalMarkingsContext.shared
 
     static let initialDurationSeconds: Double = 10
 
@@ -195,6 +199,17 @@ struct BedsideView: View {
         }
         .onKeyPress("k", phases: [.down, .repeat]) { _ in
             jumpToPreviousFinding()
+            return .handled
+        }
+        // Deviation-ranked navigation through fiducial beats — steps
+        // from the most-deviant beat toward more-typical ones on `]`,
+        // and back on `[`. Hidden when no template exists.
+        .onKeyPress("]", phases: [.down, .repeat]) { _ in
+            jumpToNextDeviationBeat()
+            return .handled
+        }
+        .onKeyPress("[", phases: [.down, .repeat]) { _ in
+            jumpToPreviousDeviationBeat()
             return .handled
         }
         // Disposition shortcuts. Gated on the same Editing latch the
@@ -545,6 +560,26 @@ struct BedsideView: View {
         guard let prev = Annotation.previousFinding(before: centre, in: filteredAnnotations) else { return }
         let total = max(1, viewport.totalSamples)
         viewport.animateJump(toFraction: Double(prev.sampleIndex) / Double(total), duration: 0.18)
+    }
+
+    /// Jump to the next beat by deviation-from-template ranking. Steps
+    /// from most-deviant toward more-typical. No-op when the fiducial
+    /// store is empty or no template is available.
+    private func jumpToNextDeviationBeat() {
+        guard let next = markingsContext.nextDeviationBeat(after: markingsContext.focusedBeatSampleIndex) else { return }
+        jumpViewport(toBeat: next.rPeakSampleIndex)
+    }
+
+    /// Jump to the previous beat by deviation-from-template ranking.
+    private func jumpToPreviousDeviationBeat() {
+        guard let prev = markingsContext.previousDeviationBeat(before: markingsContext.focusedBeatSampleIndex) else { return }
+        jumpViewport(toBeat: prev.rPeakSampleIndex)
+    }
+
+    private func jumpViewport(toBeat sample: Int64) {
+        let total = max(1, viewport.totalSamples)
+        viewport.animateJump(toFraction: Double(sample) / Double(total), duration: 0.18)
+        markingsContext.focus(beatSampleIndex: sample)
     }
 
     /// Action menu for the C / D / X disposition keyboard shortcuts.
@@ -1075,6 +1110,11 @@ private struct ChannelPanel: View {
     /// signal" signature interaction from the variability-lane spec.
     @State private var laneContext = VariabilityLaneContext.shared
 
+    /// Read of the per-beat fiducial store — powers the FiducialOverlay
+    /// drawn above the Metal canvas. Written by the App target's
+    /// IntervalMarkingsOrchestrator.
+    @State private var markingsContext = IntervalMarkingsContext.shared
+
 
     private static let yMin: Double = -5
     private static let yMax: Double =  5
@@ -1191,6 +1231,37 @@ private struct ChannelPanel: View {
                 laneWindowBand(in: liveSize)
                     .allowsHitTesting(false)
 
+                // Fiducial overlay — P/QRS/T marks per beat, LOD-
+                // driven by viewport duration. Hidden when the
+                // context is empty (no entitlement / no beats).
+                FiducialOverlay(
+                    beats: markingsContext.beats(inSampleRange: viewport.startSample...viewport.endSample),
+                    viewportSampleRange: viewport.startSample..<viewport.endSample,
+                    sampleRate: markingsContext.sampleRate,
+                    detailLevel: MarkingsDetailLevel.level(forViewportSeconds: viewport.durationSeconds),
+                    focusedRPeakSampleIndex: markingsContext.focusedBeatSampleIndex,
+                    canvasSize: liveSize
+                )
+
+                // Focus-beat calipers — PR/QRS/QT/QTc readout + delta
+                // vs the per-patient normal template. Shown when a
+                // beat is focused AND the analyst is hovering the
+                // canvas (so we don't stack calipers with the
+                // pointer-not-here state).
+                if hoverIsActive,
+                   let focusIdx = markingsContext.focusedBeatSampleIndex,
+                   let beat = markingsContext.beats.first(where: { $0.rPeakSampleIndex == focusIdx }) {
+                    BeatCalipers(
+                        beat: beat,
+                        template: markingsContext.template,
+                        qtcFormula: markingsContext.qtcFormula
+                    )
+                    .padding(8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+                }
+
                 if let hovered = hoveredAnnotation {
                     AnnotationTooltip(annotation: hovered, sampleRate: channel.sampleRate)
                         .frame(maxWidth: 260, alignment: .leading)
@@ -1225,11 +1296,24 @@ private struct ChannelPanel: View {
                 time: cursorTimeSeconds(at: location, in: canvasSize),
                 from: .ecg
             )
+            // Also focus the nearest fiducial beat so the FiducialOverlay
+            // highlights the R-tick + the BeatCalipers readout tracks
+            // the analyst's cursor.
+            let cursorSample = cursorSampleIndex(at: location, in: canvasSize)
+            markingsContext.focus(beatSampleIndex: markingsContext.nearestBeat(toSampleIndex: cursorSample)?.rPeakSampleIndex)
         } else {
             hoverIsActive = false
             hoveredAnnotation = nil
             laneContext.setHover(time: nil, from: .ecg)
+            markingsContext.focus(beatSampleIndex: nil)
         }
+    }
+
+    /// Absolute sample index at the given canvas-local point.
+    private func cursorSampleIndex(at location: CGPoint, in canvasSize: CGSize) -> Int64 {
+        let cursorX = max(0, min(canvasSize.width, location.x))
+        let span = max(1, viewport.endSample - viewport.startSample)
+        return viewport.startSample + Int64(Double(span) * Double(cursorX / canvasSize.width))
     }
 
     /// Absolute time (seconds from recording start) at the given

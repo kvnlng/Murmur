@@ -162,6 +162,33 @@ public extension Recording {
             .map(\.sampleIndex)
             .sorted()
     }
+
+    /// Read the entire sample buffer of the primary ECG channel from
+    /// its on-disk file inside `directory`. Returns nil when the
+    /// recording has no ECG channels or the file is unreadable.
+    ///
+    /// Public because the App target's paid-feature orchestrators
+    /// (MurmurMetrics-consuming) need whole-recording ECG access to
+    /// delineate beats, but the underlying `MappedSampleAccess` and
+    /// `BinaryRecordingFile` types remain internal. This helper is
+    /// the only sanctioned way across the module boundary.
+    func primaryECGSamples(inDirectory directory: URL) -> [Float]? {
+        let ecgChannels = channels.filter { !$0.isTrendChannel }
+        guard let channel = ecgChannels.first,
+              channel.sampleCount > 0 else { return nil }
+        let url = directory.appendingPathComponent(channel.storageFileName)
+        return try? BinaryRecordingFile.readSamples(
+            url: url,
+            range: 0..<channel.sampleCount
+        )
+    }
+
+    /// Primary ECG channel — the delineator needs `sampleRate` to
+    /// convert its results to milliseconds. `nil` when no ECG channel
+    /// exists.
+    var primaryECGChannel: Channel? {
+        channels.first { !$0.isTrendChannel }
+    }
 }
 
 public struct PyramidLevel: Codable, Equatable, Sendable {

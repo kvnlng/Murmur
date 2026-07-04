@@ -1,0 +1,162 @@
+//
+//  FiducialOverlay.swift
+//  MurmurCore
+//
+//  SwiftUI overlay drawn above the Metal ECG canvas that renders the
+//  per-beat fiducials from `IntervalMarkingsContext`. Zoom level-of-
+//  detail per the interval-markings spec:
+//
+//    - Zoomed OUT (> 30 s viewport): R-ticks only — beat presence at a
+//      glance without the visual clutter of thousands of P/T marks.
+//    - Mid zoom (3–30 s): R + QRS boundaries. Enough to see QRS width
+//      when scanning arrhythmia.
+//    - Zoomed IN (< 3 s): full P / QRS-on/off / T fiducials. This is
+//      where the analyst actually reads intervals.
+//
+//  Confidence-flagged: low-confidence fiducials render dimmer + with
+//  a hollow marker so the analyst can see where the detector is
+//  unsure. Matches the spec's "visible honesty beats false precision"
+//  guardrail.
+//
+//  Focused beat (from the calipers panel) draws a subtle accent glow
+//  so the analyst knows which beat's numbers are on screen. Pure
+//  overlay; no gesture handling here (calipers own that).
+//
+
+import SwiftUI
+
+struct FiducialOverlay: View {
+
+    /// Beats to render. Caller slices by viewport before passing in.
+    let beats: [MarkingsBeat]
+
+    /// Absolute time-range the canvas is showing (seconds from
+    /// recording start). Aligned with `viewport.startSample/endSample`
+    /// divided by `sampleRate`.
+    let viewportSampleRange: Range<Int64>
+
+    /// Sample rate — same value the orchestrator wrote into the
+    /// context. 0 disables drawing.
+    let sampleRate: Double
+
+    /// LOD chosen by the caller based on the viewport window length.
+    let detailLevel: MarkingsDetailLevel
+
+    /// The R-peak sample index of the beat currently focused by the
+    /// calipers panel, or nil when nothing is focused.
+    let focusedRPeakSampleIndex: Int64?
+
+    /// Canvas dimensions passed from the enclosing `GeometryReader`.
+    let canvasSize: CGSize
+
+    var body: some View {
+        if canvasSize.width > 0, sampleRate > 0, !beats.isEmpty {
+            ZStack(alignment: .topLeading) {
+                ForEach(beats) { beat in
+                    beatMarks(for: beat)
+                }
+            }
+            .frame(width: canvasSize.width, height: canvasSize.height, alignment: .topLeading)
+            .allowsHitTesting(false)
+            .accessibilityElement(children: .ignore)
+            .accessibilityIdentifier("fiducial-overlay")
+        }
+    }
+
+    // MARK: - Per-beat drawing
+
+    @ViewBuilder
+    private func beatMarks(for beat: MarkingsBeat) -> some View {
+        // R-tick at every LOD.
+        rTick(atSample: beat.rPeakSampleIndex, focused: beat.rPeakSampleIndex == focusedRPeakSampleIndex)
+
+        // QRS boundaries at .qrsOnly and higher.
+        if detailLevel != .rTicksOnly {
+            if let q = beat.qrsOnset { boundaryTick(fiducial: q, colorStyle: .qrs) }
+            if let s = beat.qrsOffset { boundaryTick(fiducial: s, colorStyle: .qrs) }
+        }
+
+        // Full fiducials at .fullFiducials only.
+        if detailLevel == .fullFiducials {
+            if let p = beat.pOnset  { boundaryTick(fiducial: p, colorStyle: .p) }
+            if let p = beat.pOffset { boundaryTick(fiducial: p, colorStyle: .p) }
+            if let t = beat.tOnset  { boundaryTick(fiducial: t, colorStyle: .t) }
+            if let t = beat.tOffset { boundaryTick(fiducial: t, colorStyle: .t) }
+        }
+    }
+
+    // MARK: - Individual marks
+
+    /// A slightly taller tick with a small label, drawn at every beat's
+    /// R-peak regardless of LOD.
+    @ViewBuilder
+    private func rTick(atSample sample: Int64, focused: Bool) -> some View {
+        if let x = xPosition(forSample: sample) {
+            let color = focused ? Color.accentColor : Color.accentColor.opacity(0.65)
+            Rectangle()
+                .fill(color)
+                .frame(width: focused ? 2 : 1.2, height: 12)
+                .offset(x: x - (focused ? 1 : 0.6), y: 0)
+        }
+    }
+
+    /// A short tick + optional dot for a boundary fiducial (P/QRS/T).
+    /// Confidence modulates alpha; low-confidence gets a hollow ring
+    /// so the analyst can spot it.
+    @ViewBuilder
+    private func boundaryTick(fiducial: MarkingsFiducial, colorStyle: FiducialColor) -> some View {
+        if let x = xPosition(forSample: fiducial.sampleIndex) {
+            // Alpha bottoms out at 0.30 so even low-confidence marks
+            // stay visible (analyst can then click to edit).
+            let alpha = max(0.30, fiducial.confidence)
+            let color = colorStyle.color.opacity(alpha)
+            let isLowConfidence = fiducial.confidence < 0.6
+            Rectangle()
+                .fill(color)
+                .frame(width: 1, height: 8)
+                .offset(x: x - 0.5, y: 14)
+            // Confidence marker: filled dot for confident, hollow ring
+            // for unsure.
+            if isLowConfidence {
+                Circle()
+                    .strokeBorder(color, lineWidth: 1)
+                    .frame(width: 5, height: 5)
+                    .offset(x: x - 2.5, y: 22)
+            } else {
+                Circle()
+                    .fill(color)
+                    .frame(width: 4, height: 4)
+                    .offset(x: x - 2, y: 22.5)
+            }
+        }
+    }
+
+    // MARK: - Coordinate mapping
+
+    /// Convert a sample index into an x-coordinate in canvas points.
+    /// Returns `nil` for samples outside the viewport.
+    private func xPosition(forSample sample: Int64) -> CGFloat? {
+        let start = viewportSampleRange.lowerBound
+        let end = viewportSampleRange.upperBound
+        guard sample >= start, sample <= end, end > start else { return nil }
+        let span = Double(end - start)
+        let fraction = Double(sample - start) / span
+        return CGFloat(fraction) * canvasSize.width
+    }
+
+    // MARK: - Color palette
+
+    private enum FiducialColor {
+        case p
+        case qrs
+        case t
+
+        var color: Color {
+            switch self {
+            case .p:   return Color(hue: 0.75, saturation: 0.55, brightness: 0.85)  // violet
+            case .qrs: return Color(hue: 0.02, saturation: 0.65, brightness: 0.90)  // red-orange
+            case .t:   return Color(hue: 0.55, saturation: 0.55, brightness: 0.80)  // teal
+            }
+        }
+    }
+}
