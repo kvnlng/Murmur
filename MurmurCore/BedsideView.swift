@@ -725,6 +725,11 @@ struct BedsideView: View {
         .padding(.top, 12)
         .padding(.bottom, 8)
         .background(.background)
+        // `.contain` keeps child accessibility elements (channel-panel-<lead>,
+        // docked-beat-inspector, overview-map) reachable — without it, the
+        // parent's accessibilityIdentifier collapses the subtree to one leaf
+        // and XCUI's `channel-panel-I` waits time out.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("pinned-stage")
     }
 

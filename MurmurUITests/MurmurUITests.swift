@@ -485,7 +485,10 @@ final class MurmurUITests: XCTestCase {
         // no dispositions yet → no reset button. Click dismiss → reset
         // button for that finding appears.
         let app = XCUIApplication()
-        app.launchArguments += ["--ui-test-sample"]
+        app.launchArguments += [
+            "--ui-test-sample",
+            "--ui-test-expand-all-findings-groups"
+        ]
         app.launch()
 
         let editToggle = app.descendants(matching: .any)
@@ -522,7 +525,10 @@ final class MurmurUITests: XCTestCase {
         // conditional render disappearing again. Sets up state by
         // dismissing first, then resets.
         let app = XCUIApplication()
-        app.launchArguments += ["--ui-test-sample"]
+        app.launchArguments += [
+            "--ui-test-sample",
+            "--ui-test-expand-all-findings-groups"
+        ]
         app.launch()
 
         let editToggle = app.descendants(matching: .any)
@@ -569,7 +575,10 @@ final class MurmurUITests: XCTestCase {
         // SwiftUI Menu on macOS opens a popup; selecting an item fires
         // the underlying onConfirm closure.
         let app = XCUIApplication()
-        app.launchArguments += ["--ui-test-sample"]
+        app.launchArguments += [
+            "--ui-test-sample",
+            "--ui-test-expand-all-findings-groups"
+        ]
         app.launch()
 
         let editToggle = app.descendants(matching: .any)

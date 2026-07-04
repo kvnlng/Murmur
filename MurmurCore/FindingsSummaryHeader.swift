@@ -44,6 +44,11 @@ struct FindingsSummaryHeader: View {
     }
 
     private var content: some View {
+        // Identifier lives on the inner HStack, not the ScrollView.
+        // XCUI on macOS resolves button hit-points through the outer
+        // container with the accessibility identifier — a ScrollView
+        // there produces "Unable to find hit point for ScrollView"
+        // when the test clicks `summary-chip-<category>`.
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 totalChip
@@ -60,8 +65,9 @@ struct FindingsSummaryHeader: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("findings-summary-header")
         }
-        .accessibilityIdentifier("findings-summary-header")
     }
 
     private var totalChip: some View {

@@ -96,6 +96,7 @@ struct FindingsPanel: View {
             }
             queueList
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("findings-panel")
         .onAppear(perform: applyUITestExpandOverride)
         // Attach-findings and producer runs add new categories after
@@ -188,10 +189,21 @@ struct FindingsPanel: View {
                 }
             }
         } label: {
-            chipLabel(key: "Sort", value: sort.displayName, highlighted: true)
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(.caption2)
+                Text("Sort: \(sort.displayName)")
+                    .font(.caption)
+            }
+            .foregroundStyle(Color.accentColor)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(Color.accentColor.opacity(0.10)))
+            .overlay(Capsule().stroke(Color.accentColor.opacity(0.30), lineWidth: 0.5))
         }
-        .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Sort findings by \(sort.displayName.lowercased())")
         .accessibilityIdentifier("findings-sort-picker")
     }
 
@@ -411,39 +423,47 @@ struct FindingsPanel: View {
     }
 
     private func exemplarRow(entry: FindingEntry, groupColor: Color) -> some View {
-        Button {
-            jump(to: entry.annotation)
-        } label: {
-            HStack(alignment: .center, spacing: 8) {
-                Circle()
-                    .fill(groupColor)
-                    .frame(width: 6, height: 6)
-                Text(entry.annotation.displayLabel)
-                    .font(.caption.weight(.semibold))
-                if let conf = entry.annotation.confidence {
-                    Text("· conf \(String(format: "%.2f", conf))")
+        // Disposition buttons must be SIBLINGS of the row's jump button
+        // (not children of it) so XCUI can address each disposition-*-<id>
+        // element independently. Nesting them inside the outer Button's
+        // label collapses the entire subtree into one hit target.
+        HStack(alignment: .center, spacing: 8) {
+            Button {
+                jump(to: entry.annotation)
+            } label: {
+                HStack(alignment: .center, spacing: 8) {
+                    Circle()
+                        .fill(groupColor)
+                        .frame(width: 6, height: 6)
+                    Text(entry.annotation.displayLabel)
+                        .font(.caption.weight(.semibold))
+                    if let conf = entry.annotation.confidence {
+                        Text("· conf \(String(format: "%.2f", conf))")
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.tertiary)
+                    }
+                    Spacer(minLength: 4)
+                    if let departureLabel = entry.departureLabel {
+                        Text(departureLabel)
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(Color.orange)
+                    }
+                    Text(formatTime(entry.annotation.sampleIndex))
                         .font(.caption2.monospaced())
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                 }
-                Spacer(minLength: 4)
-                if let departureLabel = entry.departureLabel {
-                    Text(departureLabel)
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(Color.orange)
-                }
-                Text(formatTime(entry.annotation.sampleIndex))
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.secondary)
-                if isEditing {
-                    dispositionButtons(for: entry.annotation)
-                }
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("finding-row-\(entry.annotation.category)")
+
+            if isEditing {
+                dispositionButtons(for: entry.annotation)
+            }
         }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("finding-row-\(entry.annotation.category)")
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
         .opacity(dispositionStore.record(for: entry.annotation.id)?.state == .dismissed ? 0.5 : 1.0)
     }
 
@@ -496,13 +516,27 @@ struct FindingsPanel: View {
 
     private func dispositionButtons(for annotation: Annotation) -> some View {
         HStack(spacing: 3) {
-            Button {
-                dispositionStore.confirm(annotation.id, kind: .unclassified)
+            // Confirm uses a Menu so the analyst can narrow the call
+            // to VT / VF / unsure. Matches the pre-redesign contract
+            // the disposition XCUI tests exercise.
+            Menu {
+                Button("Confirm as VT") {
+                    dispositionStore.confirm(annotation.id, kind: .vt)
+                }
+                Button("Confirm as VF") {
+                    dispositionStore.confirm(annotation.id, kind: .vf)
+                }
+                Button("Confirm (unsure)") {
+                    dispositionStore.confirm(annotation.id, kind: nil)
+                }
             } label: {
                 Image(systemName: "checkmark.circle")
                     .foregroundStyle(.green)
             }
-            .buttonStyle(.plain)
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Confirm this finding")
             .accessibilityIdentifier("disposition-confirm-\(annotation.id.uuidString)")
 
             Button {
@@ -512,6 +546,7 @@ struct FindingsPanel: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
+            .help("Dismiss this finding as a false positive")
             .accessibilityIdentifier("disposition-dismiss-\(annotation.id.uuidString)")
 
             if dispositionStore.record(for: annotation.id) != nil {
@@ -522,6 +557,7 @@ struct FindingsPanel: View {
                         .foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)
+                .help("Mark as unreviewed")
                 .accessibilityIdentifier("disposition-reset-\(annotation.id.uuidString)")
             }
         }

@@ -189,6 +189,11 @@ struct OverviewMap: View {
                 laneRow(lane)
             }
         }
+        // `.contain` keeps the per-lane `density-lane-<category>`
+        // identifiers reachable — without it, this container's
+        // identifier collapses the whole subtree and the test's
+        // `density-lane-VT` wait times out.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("overview-map-lanes")
     }
 
