@@ -180,6 +180,110 @@ final class SnapshotTests: XCTestCase {
         assertSnapshot(of: render(view, size: CGSize(width: 360, height: 60)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 
+    // MARK: - VariabilityLane
+
+    func testVariabilityLane_empty() {
+        // Empty sample list must render the "no metric samples" placeholder,
+        // not a chart of zeros — proves the branch renders and the caption
+        // still shows the metric header.
+        let view = VariabilityLane(
+            samples: [],
+            timeRangeSeconds: 0...300,
+            metricLabel: "RMSSD",
+            unit: "ms",
+            windowCaption: "5-min window"
+        )
+        .frame(width: 520)
+        .padding()
+        .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 552, height: 120)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
+    func testVariabilityLane_allEligible() {
+        // A monotonically-drifting RMSSD trajectory, all eligible, so it
+        // renders as a single line. Time range 0-300s and 30 samples spaced
+        // 10s apart cover the whole domain uniformly.
+        let samples: [VariabilityLaneSample] = (0..<30).map { i in
+            let t = Double(i) * 10.0
+            let v = 40.0 + 30.0 * sin(Double(i) * 0.4)
+            return VariabilityLaneSample(
+                windowStartSeconds: t - 150,
+                windowEndSeconds: t + 150,
+                value: v,
+                isEligible: true
+            )
+        }
+        let view = VariabilityLane(
+            samples: samples,
+            timeRangeSeconds: 0...300,
+            metricLabel: "RMSSD",
+            unit: "ms",
+            windowCaption: "5-min window"
+        )
+        .frame(width: 520)
+        .padding()
+        .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 552, height: 120)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
+    func testVariabilityLane_withHoverHighlight() {
+        // Same 30-sample sinusoid as the all-eligible case but with an
+        // externalHoverTimeSeconds pinned in the middle. Baseline
+        // captures the RuleMark + emphasized point + value readout in
+        // the caption.
+        let samples: [VariabilityLaneSample] = (0..<30).map { i in
+            let t = Double(i) * 10.0
+            let v = 40.0 + 30.0 * sin(Double(i) * 0.4)
+            return VariabilityLaneSample(
+                windowStartSeconds: t - 150,
+                windowEndSeconds: t + 150,
+                value: v,
+                isEligible: true
+            )
+        }
+        let view = VariabilityLane(
+            samples: samples,
+            timeRangeSeconds: 0...300,
+            metricLabel: "RMSSD",
+            unit: "ms",
+            windowCaption: "5-min window · 30 s step",
+            externalHoverTimeSeconds: 150,
+            selectedPreset: .fiveMinute,
+            onLaneHover: nil,
+            onPickWindowPreset: { _ in }
+        )
+        .frame(width: 520)
+        .padding()
+        .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 552, height: 120)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
+    func testVariabilityLane_mixedEligibleIneligible() {
+        // Mixed sequence: two eligible runs separated by a bad-quality
+        // window. The line must break at the ineligible sample and the
+        // ineligible point renders dimmed.
+        let samples: [VariabilityLaneSample] = [
+            .init(windowStartSeconds:   0, windowEndSeconds:  60, value: 42, isEligible: true),
+            .init(windowStartSeconds:  30, windowEndSeconds:  90, value: 48, isEligible: true),
+            .init(windowStartSeconds:  60, windowEndSeconds: 120, value: 55, isEligible: true),
+            .init(windowStartSeconds:  90, windowEndSeconds: 150, value: .nan, isEligible: false),
+            .init(windowStartSeconds: 120, windowEndSeconds: 180, value: 62, isEligible: true),
+            .init(windowStartSeconds: 150, windowEndSeconds: 210, value: 58, isEligible: true),
+            .init(windowStartSeconds: 180, windowEndSeconds: 240, value: 51, isEligible: true),
+        ]
+        let view = VariabilityLane(
+            samples: samples,
+            timeRangeSeconds: 0...240,
+            metricLabel: "RMSSD",
+            unit: "ms",
+            windowCaption: "1-min window · 30 s step"
+        )
+        .frame(width: 520)
+        .padding()
+        .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 552, height: 120)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
     // MARK: - ECGMetricsView / ECGMetricsLockedView
     //
     // Gated on `canImport(MurmurMetrics)` so the file still compiles

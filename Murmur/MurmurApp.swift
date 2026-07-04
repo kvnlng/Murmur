@@ -40,6 +40,12 @@ struct MurmurApp: App {
         WindowGroup {
             ContentView()
                 .frame(minWidth: 1100, minHeight: 720)
+                // Invisible orchestrator: watches CurrentRecordingContext +
+                // PurchaseStore, computes rolling HRV samples via MurmurMetrics,
+                // and publishes to VariabilityLaneContext for BedsideView to
+                // render. Lives here because the App target is the only place
+                // that imports both MurmurMetrics and MurmurCore.
+                .background(VariabilityLaneOrchestrator())
         }
         .defaultSize(width: 1320, height: 880)
         .commands {

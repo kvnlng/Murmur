@@ -44,6 +44,12 @@ struct BedsideView: View {
     /// once IAP frameworks land in RELEASE, the toolbar item gates on
     /// "any producer registered" instead of the DEBUG flag.
     @State private var showProducersPanel: Bool = false
+    /// Rolling HRV samples for the variability lane. Written by the
+    /// App target's orchestrator (which owns MurmurMetrics + the
+    /// entitlement gate); we render the lane only when non-empty.
+    /// Empty covers all "no lane" cases — no recording, no entitlement,
+    /// too few beats — so BedsideView has no policy of its own.
+    @State private var laneContext = VariabilityLaneContext.shared
 
     static let initialDurationSeconds: Double = 10
 
@@ -593,6 +599,7 @@ struct BedsideView: View {
                         // so reusing the same SwiftUI identity would leave the
                         // viewer showing stale data after the chip-bar tap.
                         .id(channel.id)
+                        variabilityLaneStrip
                         trendStrip
                         alarmStrip
                         stateStrip
@@ -621,6 +628,7 @@ struct BedsideView: View {
                             sizing: .strip
                         )
                     }
+                    variabilityLaneStrip
                     trendStrip
                     alarmStrip
                     stateStrip
@@ -629,6 +637,47 @@ struct BedsideView: View {
                 .padding(16)
             }
         }
+    }
+
+    /// Rolling HRV lane rendered directly beneath the ECG panels,
+    /// sharing the exact same time axis via `viewport`. Hidden when
+    /// no samples are available — the App-target orchestrator publishes
+    /// the empty set when there's no entitlement, no recording, or too
+    /// few beats. Feature scope + build order come from
+    /// `project_variability_lane_design.md`.
+    @ViewBuilder
+    private var variabilityLaneStrip: some View {
+        if !laneContext.samples.isEmpty {
+            VariabilityLane(
+                samples: laneContext.samples,
+                timeRangeSeconds: viewportTimeRange,
+                metricLabel: laneContext.metricLabel,
+                unit: laneContext.unit,
+                windowCaption: laneContext.windowCaption,
+                // Read hover state so the lane highlights coordinate
+                // with ECG-side hovers when that direction lands.
+                externalHoverTimeSeconds: laneContext.hoveredSource == .ecg
+                    ? laneContext.hoveredTimeSeconds
+                    : nil,
+                selectedPreset: laneContext.windowPreset,
+                onLaneHover: { time in
+                    laneContext.setHover(time: time, from: .lane)
+                },
+                onPickWindowPreset: { preset in
+                    laneContext.windowPreset = preset
+                }
+            )
+        }
+    }
+
+    /// Viewport time range in absolute seconds — passed to the
+    /// variability lane so its x-axis stays locked to the ECG canvas.
+    private var viewportTimeRange: ClosedRange<Double> {
+        let sr = viewport.sampleRate
+        guard sr > 0 else { return 0...1 }
+        let start = Double(viewport.startSample) / sr
+        let end = Double(viewport.endSample) / sr
+        return start...max(start + 0.001, end)
     }
 
     /// Sparkline panel for the continuous-valued vital trend channels.
@@ -1018,6 +1067,14 @@ private struct ChannelPanel: View {
     /// finding under the cursor.
     @State private var hoverIsActive: Bool = false
 
+    /// Bidirectional hover coordination with the variability lane. The
+    /// canvas publishes its own hover time (source .ecg) so the lane
+    /// highlights the corresponding sample, and reads back the lane's
+    /// hover (source .lane) so it can draw a translucent band over
+    /// the beats that produced the hovered metric — the "window-on-
+    /// signal" signature interaction from the variability-lane spec.
+    @State private var laneContext = VariabilityLaneContext.shared
+
 
     private static let yMin: Double = -5
     private static let yMax: Double =  5
@@ -1124,6 +1181,16 @@ private struct ChannelPanel: View {
                     hoverCrosshair(in: liveSize)
                 }
 
+                // Lane-hover → ECG band overlay. The "highlight the beats
+                // in THAT window" half of the window-on-signal linkage:
+                // when the analyst hovers the variability lane below,
+                // draw a translucent band over the beats whose RRs
+                // populate the hovered window. Only renders when the
+                // hover source is the lane — the ECG's own hover uses
+                // the crosshair above instead.
+                laneWindowBand(in: liveSize)
+                    .allowsHitTesting(false)
+
                 if let hovered = hoveredAnnotation {
                     AnnotationTooltip(annotation: hovered, sampleRate: channel.sampleRate)
                         .frame(maxWidth: 260, alignment: .leading)
@@ -1150,16 +1217,67 @@ private struct ChannelPanel: View {
             hoverLocation = location
             hoverIsActive = true
             hoveredAnnotation = hitTest(at: location, in: canvasSize)
+            // Publish the hovered time to the shared variability-lane
+            // context so the lane can highlight the sample whose
+            // window contains this instant. `setHover` guards against
+            // stale hover-exits from other surfaces clobbering us.
+            laneContext.setHover(
+                time: cursorTimeSeconds(at: location, in: canvasSize),
+                from: .ecg
+            )
         } else {
             hoverIsActive = false
             hoveredAnnotation = nil
+            laneContext.setHover(time: nil, from: .ecg)
         }
+    }
+
+    /// Absolute time (seconds from recording start) at the given
+    /// canvas-local point, using the same viewport math the
+    /// `hoverCrosshair` overlay uses.
+    private func cursorTimeSeconds(at location: CGPoint, in canvasSize: CGSize) -> Double {
+        let cursorX = max(0, min(canvasSize.width, location.x))
+        let span = max(1, viewport.endSample - viewport.startSample)
+        let sample = viewport.startSample + Int64(Double(span) * Double(cursorX / canvasSize.width))
+        return Double(sample) / channel.sampleRate
     }
 
     /// 1-px vertical line at the cursor with a floating time label at the
     /// top edge. Receives the canvas size from the enclosing GeometryReader
     /// so the Rectangle can be sized explicitly to the canvas height
     /// (without an explicit height it collapses to ~12 pt and vanishes).
+    /// Translucent band over the ECG covering the RR-window of the
+    /// variability lane's hovered sample. Renders only when the hover
+    /// source is the lane and the window intersects the current
+    /// viewport — otherwise emits an `EmptyView`.
+    @ViewBuilder
+    private func laneWindowBand(in canvasSize: CGSize) -> some View {
+        if laneContext.hoveredSource == .lane,
+           let t = laneContext.hoveredTimeSeconds,
+           let sample = laneContext.sample(atTimeSeconds: t),
+           canvasSize.width > 0,
+           channel.sampleRate > 0 {
+            let sr = channel.sampleRate
+            let startSec = Double(viewport.startSample) / sr
+            let endSec = Double(viewport.endSample) / sr
+            let spanSec = max(0.0001, endSec - startSec)
+            // Clip the band to the visible viewport before computing
+            // pixel coords — a window that starts before the visible
+            // range must still render its visible half.
+            let bandStart = max(startSec, sample.windowStartSeconds)
+            let bandEnd = min(endSec, sample.windowEndSeconds)
+            if bandEnd > bandStart {
+                let x1 = CGFloat((bandStart - startSec) / spanSec) * canvasSize.width
+                let x2 = CGFloat((bandEnd - startSec) / spanSec) * canvasSize.width
+                Rectangle()
+                    .fill(Color.accentColor.opacity(0.15))
+                    .frame(width: max(1, x2 - x1), height: canvasSize.height)
+                    .offset(x: x1)
+                    .accessibilityIdentifier("lane-window-band")
+            }
+        }
+    }
+
     @ViewBuilder
     private func hoverCrosshair(in canvasSize: CGSize) -> some View {
         let cursorX = max(0, min(canvasSize.width, hoverLocation.x))

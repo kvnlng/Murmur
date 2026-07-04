@@ -1,10 +1,18 @@
 # Murmur — Roadmap
 
-A macOS SwiftUI app for analyst review of clinical findings produced upstream
-by a cluster of analysis machines (VF/VT onset, AFib, PVCs, disease vectors).
-The PhysioNet WFDB record (`.hea` + `.dat`) is the *context* the analyst
-needs to interpret each finding; the findings themselves are the primary
-data surface.
+A macOS SwiftUI app for a cardiologist/researcher investigating a large,
+suspect physiologic recording — hours to days of high-frequency signal
+they open precisely because they have high suspicion it contains
+irregularities they want to understand. Murmur supports that
+investigation: load large waveforms, learn the patient's own "normal,"
+surface and navigate deviations from it, and mark up findings toward
+observation and publication. NOT a bedside monitor; NOT an autonomous
+diagnostic system — the analyst adjudicates; the tool measures, proposes,
+and supports.
+
+The PhysioNet WFDB record (`.hea` + `.dat`) is the substrate. Findings —
+whether upstream-producer output or analyst-authored — are the primary
+data surface; the waveform is the context that gives each finding meaning.
 
 ## Current state (updated 2026-06-29)
 
@@ -485,8 +493,12 @@ in App Store review.
   new findings is where research labor concentrates and where
   labs/PIs will pay.
 - **ECG Metrics IAP (paid)** — Standard ECG analytic measures over
-  any recording: HRV (RMSSD, SDNN, pNN50), RR-interval statistics,
-  interval measurements, frequency-domain HRV. Pure Swift
+  any recording, presented as TIME-RESOLVED rolling trajectories
+  aligned under the waveform, not single whole-recording numbers
+  (direction pivot 2026-07-03 — supersedes the shipped recording-wide
+  summary approach; see planning design specs). Default rolling RMSSD
+  over a 5-min window; RR-interval statistics; interval measurements
+  (PR/QRS/QT/QTc, Fridericia default); frequency-domain HRV. Pure Swift
   (Accelerate / vDSP where it helps). Deterministic, reviewable, no
   regulatory exposure — surfaces engineered measurements, not
   diagnoses. Ships first per stagger-risk.
@@ -512,10 +524,10 @@ in App Store review.
 
 - Annotation Authoring → non-consumable one-time purchase.
 - ECG Metrics → non-consumable one-time purchase.
-- VT Detection → annual auto-renewing subscription, because users
-  are paying for the *ongoing* model improvement pipeline, not a
-  frozen artifact. Alternative: lifetime non-consumable at a higher
-  price point for buyers who want it.
+- VT Detection → **lifetime non-consumable one-time purchase**
+  (reversed 2026-07-03 from the earlier annual-subscription lean;
+  buyer-fit rationale and price points tracked privately in planning
+  memory). Annual subscription demoted to the alternative.
 - Possible bundle SKU later once usage data informs the decision.
 
 ### Layering
@@ -586,8 +598,8 @@ validates the StoreKit wiring before higher-risk IAPs follow.
 - [ ] Product IDs registered in App Store Connect:
       `com.kevinlong.murmur.metrics` (non-consumable),
       `com.kevinlong.murmur.annotationauthoring` (non-consumable),
-      `com.kevinlong.murmur.vtdetection` (subscription or
-      non-consumable, TBD).
+      `com.kevinlong.murmur.vtdetection` (non-consumable;
+      subscription demoted 2026-07-03).
 - [x] Restore Purchases UI surface (Apple-mandated).
 - [x] ECG Metrics pipeline ported to Swift inside `MurmurMetrics`
       framework — `ECGMetricsService.compute(fromRRIntervalsMs:)`
@@ -614,6 +626,155 @@ buildable/testable in code is done. First TestFlight distribution
 kicked off 2026-07-01 to gather tester feedback on the ECG Metrics
 UX; the paid path shows the locked variant until IAP registration
 lands (Buy will error with `productNotLoaded` — expected).
+
+**Direction pivot 2026-07-03: time-resolved trajectories.** The shipped
+`ECGMetricsReport` recording-wide-summary approach is SUPERSEDED. A
+single "overall" number collapses a non-stationary signal into one
+point estimate — the same failure mode the user's own waveform-vs-EHR
+work documents for ventilator parameters, and the reason the ventilation
+Silver layer computes on 1-minute grids. ECG Metrics is being reframed
+as TIME-RESOLVED rolling trajectories aligned under the waveform (see
+"Phase 1 extensions" below). The app is pre-users (solo tester), so the
+pivot supersedes rather than augments — no regression cost. The
+currently-shipped summary UI stays as historical record until the
+rolling lane subsumes it; all new metric development is against the
+rolling-lane spec.
+
+### Phase 1 extensions — time-resolved measurement layer
+
+Three linked additions to the ECG Metrics IAP, all reading the same
+per-recording fiducial store. Consumption of these measurements stays
+free in the viewer; computing them is the ECG Metrics IAP; authoring a
+range/finding on top of them is the Annotation IAP. Engineered
+measurement throughout — no RUO badges (RUO language stays reserved for
+ML inference output in the VT module).
+
+**Variability lane (rolling HRV under the waveform)**
+
+- [ ] One configurable metric lane rendered directly BENEATH the ECG,
+      sharing the same time axis (pan / zoom / scrub locked). Native-
+      viewer-only capability — no static HRV tool in the PhysioNet
+      catalog can do this shared-axis trajectory view.
+- [ ] Default rolling **RMSSD** over a 5-min window (Task Force 1996
+      short-term HRV standard) — least window-length-sensitive of the
+      time-domain measures, tracks parasympathetic tone. Alternates in
+      the same lane: pNN50, mean-RR / HR.
+- [ ] **SDNN is NOT offered as a rolling line** — sliding SDNN conflates
+      real variation with window length. SDNN available only as a
+      whole-segment summary, labelled as such.
+- [ ] Window-length presets 1 / 5 / 10 min + custom; step control
+      (default 30 s) for overlap/smoothness. Window length is a
+      first-class, visible, DOCUMENTED parameter — echoed in the
+      caption "Copy citation" emits. Metrics from different window
+      lengths are not comparable — UI must not invite naive
+      cross-window comparison.
+- [ ] Window-on-signal linkage (signature interaction): hover the lane
+      → translucent band highlights the beats in that window on the ECG
+      above; hover the ECG → the window's metric value pops on the
+      lane. The metric is never divorced from the beats that produced
+      it.
+- [ ] RR-artifact quality floor: windows failing the floor render
+      dimmed / hatched, NOT silently plotted as physiological spikes
+      (same instinct as the `ecg_artifact_ratio` shading pattern).
+- [ ] Range-drag on the lane → an annotation carrying metric + window +
+      values ("HRV drop, 03:11–03:20") — reproducible, citable, into
+      the observation→publication path. Authoring routes through the
+      Annotation IAP.
+
+**Interval markings & delineation (on-waveform P/QRS/T + intervals)**
+
+Anchored on a per-patient **normal template** (median morphology +
+interval baselines built from high-confidence normal complexes). The
+analyst reads everything as deviation from THIS patient's own normal —
+not against a population cutoff.
+
+- [ ] Delineation pass populates a per-recording fiducial store; the
+      SAME store feeds the variability lane (as an RR series) and the
+      interval trend lanes below. **One pass, three views.**
+- [ ] Per-patient normal template drives three things: caliper defaults
+      (readouts show deltas vs patient normal, not just absolutes), a
+      ghost-overlay of the abnormal complex on the faint normal
+      template, and deviation-ranked navigation between beats (RR /
+      QRS-width / morphology distance).
+- [ ] Zoom level-of-detail markings — zoomed out: R-tick + per-beat
+      class color only; zoomed in: full P / QRS-on/off / T / ST
+      fiducials progressively appear. NEVER dense-mark every beat —
+      that buries the signal.
+- [ ] Focus-beat calipers — hover a beat → floating readout (PR, QRS,
+      QT, QTc + deltas vs template); click → pin interval brackets on
+      that beat. Full morphology annotation lives on the focused beat.
+- [ ] Toggleable layers (P / QRS / T / ST / intervals) so a QT study
+      and a conduction study each show only what's relevant.
+- [ ] **QTc formula is a parameter, not a number.** User-set,
+      DOCUMENTED, echoed in caption + citation. Default **Fridericia**;
+      Bazett / Framingham / Hodges available. Metrics under different
+      formulas are NOT comparable — do not let the UI invite naive
+      cross-formula comparison.
+- [ ] Fiducials are confidence-flagged and **EDITABLE** (T-offset
+      especially — detectors are tuned on normal sinus and wobble on
+      the ectopic / paced / near-VT beats that matter). Nudging a
+      fiducial recomputes the interval; the correction is a finding
+      (authoring = Annotation IAP). Visible honesty beats false
+      precision.
+- [ ] **Architecture guardrail:** dense per-beat fiducials/intervals
+      are a MEASUREMENT layer, NOT findings — do NOT write a P/QRS/T
+      marker per beat into `annotations.json`. Only notable events
+      become findings. Beat-class labels route through the existing
+      `DispositionStore` / `confirmedKind` model, or a separate
+      candidate producer (ML candidate producer would be RUO-badged;
+      geometry is not).
+- [ ] Compute in MurmurCore (pure Swift, Accelerate/vDSP); the geometry
+      emits unlabeled deviation + confidence.
+
+**Interval trend lanes (QTc-over-time, third view of the fiducial store)**
+
+Trend an interval metric over the WHOLE recording, reusing the
+variability-lane mechanism. Named use case: catching **drug-induced QT
+prolongation across hours**.
+
+- [ ] One lane beneath the ECG, shared time axis, default zoom = whole
+      recording (the ECG above renders as a compressed amplitude
+      envelope until the analyst zooms in). Pan / zoom / scrub locked
+      to the waveform, same as the variability lane.
+- [ ] Default trend: **QTc (Fridericia) with 2-min bins**. PR
+      (AV-block progression) and QRS-width follow as
+      switchable/stackable trends — not day-one clutter.
+- [ ] **Median + IQR ribbon**, NOT a single smoothed line — per-beat
+      QTc is noisy exactly where T-offset delineation wobbles; SHOW the
+      spread instead of hiding it. `Show` control: median-only /
+      median+IQR / per-beat scatter at high zoom.
+- [ ] Baseline band from the patient-normal template ("patient normal
+      · 418–438 ms (template)"). Drift is read as departure from this
+      band — unifies all three views on the one anchor.
+- [ ] Quality dimming: bins whose fiducial confidence fails (T-offset
+      is the fragile one for QTc) render dimmed/hatched — never plotted
+      as confident values.
+- [ ] **Threshold lines are USER-SET guides — the app NEVER ships
+      built-in clinical cutoffs.** A hardcoded "500 ms = Long QT" would
+      be a diagnostic assertion. Analyst places a labeled guide
+      ("guide · 500 ms (user-set)"); the app never asserts a verdict.
+      This is the load-bearing RUO call for this lane.
+- [ ] Event overlay: analyst annotations (drug admin, dose change,
+      etc.) drop as vertical markers on the shared axis so the drift
+      is read against WHAT CHANGED. Events are analyst-authored, not
+      app-asserted clinical events, not EHR imports.
+- [ ] **Drill-down (unifying interaction):** hover a trend point →
+      highlight the contributing beats on the ECG above; **click →
+      open that beat in the Intervals (markings) view** with full
+      fiducials + calipers. Trend lane = hours-scale map; markings
+      view = beat-scale detail. Generalizes the window-on-signal hover
+      from the variability lane into navigation.
+- [ ] Bin length is a visible, DOCUMENTED control — different-bin
+      trends are NOT comparable. Caption echoes formula + bin +
+      template-N-beats; "Copy citation" emits it.
+
+**Build order across the three:** shared-axis variability lane first
+(RMSSD + 5-min defaults, then window-on-signal hover, then quality
+floor, then finding authoring) → delineation + per-patient normal
+template → focus-beat calipers → template ghost-overlay → deviation-
+ranked navigation → interval trend lanes (median+IQR, baseline band,
+quality dimming, event overlay/guides, click-through, authoring). Do
+not start trend lanes before the template and fiducial store exist.
 
 ### Phase 2 — Annotation Authoring IAP
 
@@ -648,6 +809,32 @@ RUO framing before submitting.
       sliding-window inference over a `Channel`, output aligned to
       recording time. Conforms to `FindingProducer`. Same gate
       pattern as ECG Metrics and Annotation.
+- [ ] **Operating point — recall-biased, user-adjustable, documented.**
+      The SE-ResLSTM paper's tau = 0.85 is precision-tuned for
+      autonomous / bedside use with no human reviewer; at that point
+      the reported F1 is ~0.65 and real events are left on the table.
+      Murmur is human-in-the-loop review-triage: dismissing a false
+      positive is one keystroke, a missed true event is invisible and
+      uncorrectable. Default operating point moves DOWN the
+      precision-recall curve; expose the threshold as a visible,
+      documented, user-adjustable parameter — feeds the citation moat
+      (researchers cite the model version AND the operating point they
+      reviewed at). Do NOT inherit the paper's literal as a silent
+      default; pick deliberately and document the choice.
+- [ ] **Framing — "candidates," not "detections."** Output copy
+      throughout ("candidate events for review", "N candidates in
+      window") — correct for the recall-triage UX AND for RUO
+      discipline from a second angle.
+- [ ] **Two-pass whole-recording normalization sets the min-spec.**
+      Inference-time normalization uses whole-recording global
+      mu / sigma, forcing a two-pass design: pass 1 scans the full
+      recording for statistics; pass 2 windows and infers. Nothing
+      shows until pass 1 completes. For the multi-hour recordings
+      Murmur targets, the real constraint is RAM + streaming I/O, not
+      GPU (the 2.97M-param model is trivial for the Neural Engine).
+      Stream, don't load-all; "high-end Mac" in the system requirements
+      means memory / throughput headroom for large recordings, not
+      neural compute.
 - [ ] Findings produced by the model surface in the existing
       `FindingsPanel` with `source = "murmur.vtdetect"` so the
       disposition workflow applies uniformly.
