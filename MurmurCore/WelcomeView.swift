@@ -104,7 +104,7 @@ struct WelcomeView: View {
                 Text("Murmur")
                     .font(.system(size: 38, weight: .semibold, design: .rounded))
             }
-            Text("WFDB ECG viewer for analyst review of clinical findings.")
+            Text("A native-Mac scope for physiologic recordings — read them beat-by-beat or across hours.")
                 .font(.title3)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -119,17 +119,17 @@ struct WelcomeView: View {
             bullet(
                 icon: "folder",
                 title: "Open a WFDB record",
-                detail: "Pick a folder of .hea + .dat files — formats 16 and 212 ingest out of the box."
+                detail: "Pick a folder of .hea + .dat files — formats 16 and 212 ingest out of the box. PhysioNet records open unmodified."
+            )
+            bullet(
+                icon: "arrow.up.left.and.down.right.magnifyingglass",
+                title: "Zoom from hours to a single beat",
+                detail: "The multi-scale spine keeps the trace, review queue, and metric lanes in sync as you move between broad patterns and beat-scale detail."
             )
             bullet(
                 icon: "list.bullet.clipboard",
-                title: "Review findings in context",
-                detail: "Overlay your analysis cluster's annotations on the trace, filtered by category and confidence."
-            )
-            bullet(
-                icon: "rectangle.expand.diagonal",
-                title: "Scrub a Metal canvas",
-                detail: "Pan, zoom, and time-lock every lead on a pyramid-backed canvas that stays smooth at any duration."
+                title: "Read findings against this patient's normal",
+                detail: "Imported or producer-generated annotations sort by departure from the record's own baseline, not against a population figure."
             )
         }
     }
@@ -218,17 +218,24 @@ struct WelcomeView: View {
     // MARK: - Footer
 
     private var physioNetFooter: some View {
-        HStack(spacing: 4) {
-            Text("Need data?")
-                .foregroundStyle(.secondary)
-            // Routed through URLLauncher (not SwiftUI's `Link`) so UI tests
-            // can intercept the open call via --ui-test-record-urls without
-            // launching a browser and losing focus.
-            Button("Browse PhysioNet's MIT-BIH Arrhythmia Database") {
-                URLLauncher.shared.open(URL(string: "https://www.physionet.org/content/mitdb/1.0.0/")!)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                Text("Need data?")
+                    .foregroundStyle(.secondary)
+                // Routed through URLLauncher (not SwiftUI's `Link`) so UI
+                // tests can intercept the open call via --ui-test-record-urls
+                // without launching a browser and losing focus.
+                Button("Browse PhysioNet's MIT-BIH Arrhythmia Database") {
+                    URLLauncher.shared.open(URL(string: "https://www.physionet.org/content/mitdb/1.0.0/")!)
+                }
+                .buttonStyle(.link)
+                .accessibilityIdentifier("welcome-physionet-link")
             }
-            .buttonStyle(.link)
-            .accessibilityIdentifier("welcome-physionet-link")
+            // Positioning: the free viewer is a genuine tool + the open
+            // reproducibility surface. Signals both in one line.
+            Text("Open-source (MIT). Reads any PhysioNet / WFDB recording — including anyone else's published data.")
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .font(.footnote)
     }
