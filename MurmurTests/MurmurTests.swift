@@ -5302,6 +5302,115 @@ struct BeatDelineatorMetamorphicTests {
         }
     }
 
+    /// End-to-end QT-ramp regression through IntervalTrendComputer:
+    /// synthetic ECG with a T-center ramp → delineate → measure
+    /// intervals → build normal template → run the trend computer →
+    /// assert the shipped trend lane's QTc bins recover the drift.
+    ///
+    /// This is the full pipeline the ECG Metrics IAP runs on a real
+    /// recording. A drug-induced QT-prolongation regression at any
+    /// stage of that pipeline — dead T-offset, template with the
+    /// wrong RR, bin aggregation that averages the ramp away — will
+    /// surface here. The memo's "rec_0417 sotalol story as a
+    /// deterministic test" for the trend lane specifically.
+    @Test("IntervalTrendComputer recovers a QT-ramp end-to-end")
+    func trendComputerRecoversQTRamp() {
+        // 120 beats × 800 ms = 96 s. Enough for multiple 10-second
+        // bins with plenty of beats per bin (~12 each) — sits well
+        // above the trend computer's 60 % confidence floor without
+        // needing exotic bin sizes.
+        let beatCount = 120
+        let ecg = SyntheticECG.qtRamp(
+            beatCount: beatCount,
+            tCenterStartMs: 260,
+            tCenterEndMs: 320
+        )
+
+        // Delineate + measure using the same MurmurMetrics pipeline
+        // IntervalMarkingsOrchestrator runs in production.
+        let fiducials = BeatDelineator.delineate(
+            samples: ecg.samples,
+            sampleRate: ecg.sampleRate,
+            rPeaks: ecg.rPeaks
+        )
+        let readouts = IntervalMeasurement.measureAll(store: fiducials)
+        let template = NormalTemplateBuilder.build(
+            from: readouts,
+            qtcFormula: .fridericia
+        )
+
+        // Zip fiducials + readouts into MarkingsBeat records, mirroring
+        // the orchestrator's converter. Only the fields IntervalTrend-
+        // Computer's `.qtc` metric needs (qtcMs) are load-bearing —
+        // the rest are filled for round-trip consistency.
+        let beats: [MarkingsBeat] = zip(fiducials.beats, readouts).map { (bf, ro) in
+            MarkingsBeat(
+                rPeakSampleIndex: bf.rPeakSampleIndex,
+                rPeakConfidence: bf.rPeakConfidence,
+                pOnset: bf.pOnset.map    { MarkingsFiducial(kind: .pOnset,    sampleIndex: $0.sampleIndex, confidence: $0.confidence) },
+                pOffset: bf.pOffset.map  { MarkingsFiducial(kind: .pOffset,   sampleIndex: $0.sampleIndex, confidence: $0.confidence) },
+                qrsOnset: bf.qrsOnset.map { MarkingsFiducial(kind: .qrsOnset, sampleIndex: $0.sampleIndex, confidence: $0.confidence) },
+                qrsOffset: bf.qrsOffset.map { MarkingsFiducial(kind: .qrsOffset, sampleIndex: $0.sampleIndex, confidence: $0.confidence) },
+                tOnset: bf.tOnset.map    { MarkingsFiducial(kind: .tOnset,    sampleIndex: $0.sampleIndex, confidence: $0.confidence) },
+                tOffset: bf.tOffset.map  { MarkingsFiducial(kind: .tOffset,   sampleIndex: $0.sampleIndex, confidence: $0.confidence) },
+                prMs: ro.prMs,
+                qrsMs: ro.qrsMs,
+                qtMs: ro.qtMs,
+                qtcMs: ro.qtcMs(formula: .fridericia),
+                precedingRRMs: ro.precedingRRMs
+            )
+        }
+
+        let coreTemplate: MarkingsTemplate? = template.sampleCount > 0
+            ? MarkingsTemplate(
+                sampleCount: template.sampleCount,
+                medianPRMs: template.medianPRMs,
+                iqrPRMs: template.iqrPRMs,
+                medianQRSMs: template.medianQRSMs,
+                iqrQRSMs: template.iqrQRSMs,
+                medianQTMs: template.medianQTMs,
+                iqrQTMs: template.iqrQTMs,
+                qtcFormulaName: template.qtcFormula.displayName,
+                medianQTcMs: template.medianQTcMs,
+                iqrQTcMs: template.iqrQTcMs
+            )
+            : nil
+
+        // Lower confidenceFloor to 0.0 — synthetic Gaussian T-waves
+        // don't score high enough on the tangent method's confidence
+        // heuristic to clear the production 0.60 floor, but the bin
+        // math itself is the same. We're testing pipeline mechanics
+        // (drift recovery), not production confidence tuning.
+        let trend = IntervalTrendComputer.compute(
+            beats: beats,
+            template: coreTemplate,
+            sampleRate: ecg.sampleRate,
+            metric: .qtc,
+            binSeconds: 10,
+            templateBeatCount: coreTemplate?.sampleCount,
+            qtcFormulaName: "Fridericia",
+            confidenceFloor: 0.0
+        )
+
+        // Bins can still be non-eligible if `values` was empty (no
+        // qtcMs on any beat in the bin). Filter to bins that actually
+        // computed a median.
+        let binsWithMedian = trend.bins.filter { !$0.median.isNaN }
+        #expect(binsWithMedian.count >= 4,
+                "Should recover several bins with a computed median across the 96 s recording (got \(binsWithMedian.count))")
+
+        // Loose lower bound on the recovered drift. Constructed drift
+        // is 60 ms; asserting > 25 ms leaves a wide margin for
+        // delineator quirks + bin-median compression while still
+        // catching a trend lane that failed to see the ramp at all
+        // (drift of ~0 would mean the trend computer is broken).
+        if let first = binsWithMedian.first?.median, let last = binsWithMedian.last?.median {
+            let recoveredDriftMs = last - first
+            #expect(recoveredDriftMs > 25.0,
+                    "IntervalTrendComputer QTc should drift up across a QT-ramp record (observed: \(recoveredDriftMs) ms)")
+        }
+    }
+
     /// QT-ramp injection: the T-wave center drifts up by 60 ms over
     /// the recording (a drug-induced QT-prolongation shape — the
     /// memo's "rec_0417 sotalol story as a deterministic test").
