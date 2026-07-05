@@ -233,4 +233,39 @@ final class MurmurUINavigationTests: XCTestCase {
         XCTAssertTrue(button.waitForExistence(timeout: 5),
                       "Toolbar should expose an 'export-snapshot' button")
     }
+
+    // MARK: - Persistent-stage layout (Phase 0 of the viewer redesign)
+
+    /// The trace + docked inspector + overview map all render inside a
+    /// single accessible `pinned-stage` container in focus mode. Guards
+    /// the layout skeleton the later redesign phases mount into: if any
+    /// of these four identifiers stops resolving under `pinned-stage`,
+    /// the persistent-stage promise is broken. Focus mode is the
+    /// default; the `--ui-test-sample` fixture carries no fiducial
+    /// store, so `docked-beat-inspector-empty` is the correct assertion
+    /// (the populated variant lights up once a per-patient template
+    /// exists — Phase 3).
+    @MainActor
+    func testPersistentStageHousesTraceInspectorAndOverview() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-sample"]
+        app.launch()
+
+        let stage = app.descendants(matching: .any).matching(identifier: "pinned-stage").firstMatch
+        XCTAssertTrue(stage.waitForExistence(timeout: 5),
+                      "pinned-stage container should host the focus-mode layout")
+
+        let panel = app.descendants(matching: .any).matching(identifier: "channel-panel-I").firstMatch
+        XCTAssertTrue(panel.waitForExistence(timeout: 3),
+                      "Trace panel should render inside the pinned stage")
+
+        let inspector = app.descendants(matching: .any)
+            .matching(identifier: "docked-beat-inspector-empty").firstMatch
+        XCTAssertTrue(inspector.waitForExistence(timeout: 3),
+                      "Docked inspector empty state should sit beside the trace with no beat focused")
+
+        let overview = app.descendants(matching: .any).matching(identifier: "overview-map").firstMatch
+        XCTAssertTrue(overview.waitForExistence(timeout: 3),
+                      "Merged overview map should render inside the pinned stage")
+    }
 }

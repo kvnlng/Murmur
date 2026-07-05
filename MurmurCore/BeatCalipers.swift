@@ -110,24 +110,19 @@ struct BeatCalipers: View {
     private func deltaLabel(_ delta: Double?) -> some View {
         if let d = delta {
             let sign = d >= 0 ? "+" : "−"
+            // Neutral ink for every departure magnitude. App-computed
+            // deviation from patient-normal is a measurement, not a
+            // verdict — caution hues would encode a clinical call the
+            // app is not allowed to make (RUO / mockup-review B-RUO,
+            // ratified 2026-07-05). Sign + magnitude carry the signal.
             Text("\(sign)\(String(format: "%.1f", abs(d))) ms")
                 .font(.caption2.monospacedDigit())
-                .foregroundStyle(deltaColor(d))
+                .foregroundStyle(.primary)
         } else {
             Text("—")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
-    }
-
-    private func deltaColor(_ d: Double) -> Color {
-        // Neutral for small deltas (< 10 ms); warmer for positive
-        // (prolongation), cooler for negative. Never asserts a
-        // clinical verdict — just a visual cue.
-        let mag = abs(d)
-        if mag < 10 { return .secondary }
-        if mag < 30 { return .yellow }
-        return d > 0 ? .orange : .cyan
     }
 
     // MARK: - Helpers
