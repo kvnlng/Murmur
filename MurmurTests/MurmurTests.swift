@@ -5118,6 +5118,28 @@ struct SyntheticECG {
     }
 }
 
+/// Tiny deterministic PRNG (Numerical Recipes MMIX-style LCG). Fixed
+/// seed = reproducible noise on every machine. Not cryptographically
+/// strong and not statistically excellent — sufficient for
+/// metamorphic-gate #4's "fixed seed set, assert range" discipline
+/// (feedback_randomized_test_strategy.md).
+struct SeededLCG {
+    private var state: UInt64
+    init(seed: UInt64) { self.state = seed }
+
+    mutating func next() -> UInt64 {
+        state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+        return state
+    }
+
+    /// Uniform in [0, 1).
+    mutating func nextUnitDouble() -> Double {
+        // Use the top 53 bits (double mantissa precision) so the
+        // divisor is exactly representable.
+        Double(next() >> 11) / Double(1 << 53)
+    }
+}
+
 @Suite("Beat delineator — Tier 2 invariants against Gaussian construction truth")
 struct BeatDelineatorTier2Tests {
 
@@ -5409,6 +5431,77 @@ struct BeatDelineatorMetamorphicTests {
             #expect(recoveredDriftMs > 25.0,
                     "IntervalTrendComputer QTc should drift up across a QT-ramp record (observed: \(recoveredDriftMs) ms)")
         }
+    }
+
+    /// Sub-threshold additive noise: adding low-amplitude
+    /// deterministic noise to a clean sinus signal MUST leave
+    /// fiducial positions within a documented ms range of the
+    /// noise-free reference. The memo's metamorphic-gate #4 —
+    /// statistical rather than exact, so `fixed seed set, assert
+    /// range` is the correct discipline
+    /// (feedback_randomized_test_strategy.md).
+    ///
+    /// Noise amplitude is 0.01 mV — under 1 % of the R-peak
+    /// amplitude in the SyntheticECG generator (R = 1.20), so
+    /// derivative-threshold delineation should shrug it off. Any
+    /// fiducial shift > the documented tolerance means the
+    /// delineator has an unrobust threshold; catches the family of
+    /// bugs where a small SNR change destroys the QRS window.
+    @Test("Sub-threshold noise keeps fiducials within a documented ms range")
+    func subThresholdNoiseKeepsFiducialsInRange() {
+        let base = SyntheticECG.cleanSinus(beatCount: 20)
+        // Fixed-seed LCG so any regression is reproducible on any
+        // machine — Swift's default RandomNumberGenerator is not
+        // deterministic across runs.
+        var rng = SeededLCG(seed: 0x1234_5678_9ABC_DEF0)
+        let noisy: [Float] = base.samples.map { sample in
+            let u = Float(rng.nextUnitDouble()) * 2 - 1  // [-1, +1]
+            return sample + 0.01 * u                     // ±0.01 mV
+        }
+
+        let baseStore = BeatDelineator.delineate(
+            samples: base.samples,
+            sampleRate: base.sampleRate,
+            rPeaks: base.rPeaks
+        )
+        let noisyStore = BeatDelineator.delineate(
+            samples: noisy,
+            sampleRate: base.sampleRate,
+            rPeaks: base.rPeaks
+        )
+
+        // Tolerances chosen to be robust against a single-sample
+        // shift plus one Gaussian sample of drift. Sample @ 360 Hz
+        // = 2.78 ms. QRS boundaries are on a steep derivative so
+        // they're tight; T-offset is the fragile tangent-method
+        // fiducial so it gets more room.
+        let qrsToleranceSamples: Int64 = 3   // ≈ 8.3 ms
+        let pToleranceSamples: Int64   = 12  // ≈ 33 ms
+        let tToleranceSamples: Int64   = 18  // ≈ 50 ms
+
+        #expect(baseStore.beats.count == noisyStore.beats.count)
+        var comparisons = 0
+        for (b, n) in zip(baseStore.beats, noisyStore.beats) {
+            #expect(b.rPeakSampleIndex == n.rPeakSampleIndex)
+            if let bq = b.qrsOnset?.sampleIndex, let nq = n.qrsOnset?.sampleIndex {
+                #expect(abs(bq - nq) <= qrsToleranceSamples,
+                        "qrsOnset shifted by \(abs(bq - nq)) samples under sub-threshold noise")
+                comparisons += 1
+            }
+            if let bo = b.qrsOffset?.sampleIndex, let no = n.qrsOffset?.sampleIndex {
+                #expect(abs(bo - no) <= qrsToleranceSamples,
+                        "qrsOffset shifted by \(abs(bo - no)) samples under sub-threshold noise")
+            }
+            if let bp = b.pOnset?.sampleIndex, let np = n.pOnset?.sampleIndex {
+                #expect(abs(bp - np) <= pToleranceSamples,
+                        "pOnset shifted by \(abs(bp - np)) samples under sub-threshold noise")
+            }
+            if let bt = b.tOffset?.sampleIndex, let nt = n.tOffset?.sampleIndex {
+                #expect(abs(bt - nt) <= tToleranceSamples,
+                        "tOffset shifted by \(abs(bt - nt)) samples under sub-threshold noise")
+            }
+        }
+        #expect(comparisons > 0, "At least some fiducials should be comparable across the pair")
     }
 
     /// QT-ramp injection: the T-wave center drifts up by 60 ms over
