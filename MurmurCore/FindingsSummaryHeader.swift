@@ -44,30 +44,42 @@ struct FindingsSummaryHeader: View {
     }
 
     private var content: some View {
-        // Identifier lives on the inner HStack, not the ScrollView.
-        // XCUI on macOS resolves button hit-points through the outer
-        // container with the accessibility identifier — a ScrollView
-        // there produces "Unable to find hit point for ScrollView"
-        // when the test clicks `summary-chip-<category>`.
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                totalChip
-                Divider().frame(height: 18)
-                ForEach(summary.rollups) { rollup in
-                    SummaryChip(
-                        rollup: rollup,
-                        fraction: summary.fractionOfRecording(rollup),
-                        sampleRate: summary.sampleRate,
-                        isOn: isCategoryActive(rollup.category),
-                        action: { toggle(rollup.category) }
-                    )
-                }
+        // `ViewThatFits` picks the plain HStack when the row of chips
+        // fits the available width, and falls back to the horizontal
+        // ScrollView only when it doesn't. This matters for XCUI on
+        // macOS Tahoe: the ScrollView wrapper interferes with hit-
+        // testing on the inner `summary-chip-<category>` Buttons
+        // (Build 54 hit "Unable to find hit point for ScrollView"
+        // even after moving the identifier off the ScrollView). For
+        // the fixture sizes typical tests use, the HStack fits and
+        // XCUI can click the chips cleanly; real recordings with
+        // more categories still get the scrollable fallback.
+        ViewThatFits(in: .horizontal) {
+            chipRow
+            ScrollView(.horizontal, showsIndicators: false) {
+                chipRow
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("findings-summary-header")
         }
+    }
+
+    private var chipRow: some View {
+        HStack(spacing: 6) {
+            totalChip
+            Divider().frame(height: 18)
+            ForEach(summary.rollups) { rollup in
+                SummaryChip(
+                    rollup: rollup,
+                    fraction: summary.fractionOfRecording(rollup),
+                    sampleRate: summary.sampleRate,
+                    isOn: isCategoryActive(rollup.category),
+                    action: { toggle(rollup.category) }
+                )
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("findings-summary-header")
     }
 
     private var totalChip: some View {
