@@ -5433,6 +5433,79 @@ struct BeatDelineatorMetamorphicTests {
         }
     }
 
+    /// Sample-rate invariance: the same ECG construction played at
+    /// 360 Hz and 250 Hz MUST produce the same interval durations
+    /// (in ms) — intervals are physical quantities and the
+    /// delineator's output is in samples, so any implicit
+    /// sample-rate assumption (a hardcoded 360, a bin width in
+    /// samples not ms) surfaces as a discrepancy between the two.
+    /// The memo's metamorphic-gate #2. Tolerance: 1 sample at the
+    /// COARSER rate (250 Hz → 4 ms) because that's the smallest
+    /// unit of time the pair can even disagree by.
+    ///
+    /// Native re-generation at each rate exercises the same
+    /// invariant as a proper 360→250 downsample without the
+    /// aliasing complications of a low-quality resampler.
+    @Test("Interval durations are sample-rate invariant across 360/250 Hz")
+    func intervalDurationsAreSampleRateInvariant() {
+        let beatCount = 20
+        let rrMs = 800.0
+        let ecg360 = SyntheticECG.cleanSinus(beatCount: beatCount, rrMs: rrMs, sampleRate: 360)
+        let ecg250 = SyntheticECG.cleanSinus(beatCount: beatCount, rrMs: rrMs, sampleRate: 250)
+
+        let store360 = BeatDelineator.delineate(
+            samples: ecg360.samples,
+            sampleRate: ecg360.sampleRate,
+            rPeaks: ecg360.rPeaks
+        )
+        let store250 = BeatDelineator.delineate(
+            samples: ecg250.samples,
+            sampleRate: ecg250.sampleRate,
+            rPeaks: ecg250.rPeaks
+        )
+
+        // 1 sample at 250 Hz = 4 ms. Give an extra sample of slack
+        // to cover the case where both rates round in opposite
+        // directions at the same true onset.
+        let toleranceMs = 8.0
+
+        func intervalMs(from: Int64?, to: Int64?, sampleRate: Double) -> Double? {
+            guard let from, let to else { return nil }
+            return Double(to - from) / sampleRate * 1000.0
+        }
+
+        #expect(store360.beats.count == store250.beats.count,
+                "Both rates should delineate the same number of beats")
+        var comparisons = 0
+        for (b360, b250) in zip(store360.beats, store250.beats) {
+            // QRS width — the derivative-based, most-invariant one.
+            if let qw360 = intervalMs(from: b360.qrsOnset?.sampleIndex,
+                                      to: b360.qrsOffset?.sampleIndex,
+                                      sampleRate: 360),
+               let qw250 = intervalMs(from: b250.qrsOnset?.sampleIndex,
+                                      to: b250.qrsOffset?.sampleIndex,
+                                      sampleRate: 250) {
+                #expect(abs(qw360 - qw250) <= toleranceMs,
+                        "QRS width diverged by \(abs(qw360 - qw250)) ms across sample rates")
+                comparisons += 1
+            }
+            // QT — the sanity-check across the whole ventricular
+            // depolarization/repolarization window.
+            if let qt360 = intervalMs(from: b360.qrsOnset?.sampleIndex,
+                                      to: b360.tOffset?.sampleIndex,
+                                      sampleRate: 360),
+               let qt250 = intervalMs(from: b250.qrsOnset?.sampleIndex,
+                                      to: b250.tOffset?.sampleIndex,
+                                      sampleRate: 250) {
+                // T-offset is the fragile one; broaden the tolerance
+                // for the QT window to twice the base slack.
+                #expect(abs(qt360 - qt250) <= 2 * toleranceMs,
+                        "QT interval diverged by \(abs(qt360 - qt250)) ms across sample rates")
+            }
+        }
+        #expect(comparisons > 0, "At least one beat should have delineable QRS on/off at both rates")
+    }
+
     /// Sub-threshold additive noise: adding low-amplitude
     /// deterministic noise to a clean sinus signal MUST leave
     /// fiducial positions within a documented ms range of the
