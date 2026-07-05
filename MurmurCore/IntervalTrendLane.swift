@@ -241,7 +241,12 @@ struct IntervalTrendLane: View {
         if let onPick = onPickMetric {
             controlChip(label: metric.displayName, identifier: "interval-trend-lane-metric-picker") {
                 Menu {
-                    ForEach(IntervalTrendMetric.allCases, id: \.self) { option in
+                    // `launchVisible` is the memo-locked exposed set —
+                    // QTc only at launch. Iterating `allCases` here
+                    // would surface PR + QRS-width prematurely per
+                    // project_measurement_layer_gating.md's "expose
+                    // only QTc; PR + QRS-width = Phase 4b" rule.
+                    ForEach(IntervalTrendMetric.launchVisible, id: \.self) { option in
                         Button(option.displayName) { onPick(option) }
                     }
                 } label: {

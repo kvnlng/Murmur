@@ -4563,6 +4563,21 @@ struct IntervalTrendComputerTests {
         #expect(out.bins[0].startSeconds == 0)
         #expect(out.bins[1].startSeconds == 120)
     }
+
+    @Test("launchVisible exposes only QTc")
+    func launchVisibleIsQTcOnly() {
+        // Memo-locked launch-time picker set (measurement-layer gating,
+        // 2026-07-04): the trend lane's picker exposes ONLY .qtc until
+        // PR / QRS-width validate on real recordings (Phase 4b). Any
+        // change here should be an intentional Phase 4b expansion —
+        // this equality check forces the reviewer to make that call
+        // explicit.
+        #expect(IntervalTrendMetric.launchVisible == [.qtc])
+        // allCases must remain complete so the compute pipeline can
+        // still run PR / QRS internally (unit + integration tests
+        // exercise all three metrics).
+        #expect(IntervalTrendMetric.allCases.count == 3)
+    }
 }
 
 // MARK: - Interval trend guide store

@@ -38,6 +38,16 @@ public enum IntervalTrendMetric: String, CaseIterable, Sendable, Codable {
     }
 
     public var unit: String { "ms" }
+
+    /// Metrics exposed in the trend-lane picker at LAUNCH. Per the
+    /// measurement-layer gating decision (project_measurement_layer_gating.md,
+    /// 2026-07-04): the lane is built trend-agnostic and picker
+    /// multi-capable, but only QTc is exposed at launch — PR and
+    /// QRS-width are Phase 4b fast-follow once QTc is validated on
+    /// real recordings. `allCases` stays complete so the compute
+    /// pipeline can still run PR / QRS for internal testing without
+    /// this list gating the enum's expressiveness.
+    public static let launchVisible: [IntervalTrendMetric] = [.qtc]
 }
 
 /// How the lane draws each bin — median-only for a clean read, median
