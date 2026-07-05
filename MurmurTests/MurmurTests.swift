@@ -4690,3 +4690,195 @@ struct FiducialLayerToggleTests {
     }
 }
 
+// MARK: - Tier 1 analytic tests — HRV / rolling metrics
+//
+// Tier 1 of the ECG testing strategy (project_ecg_testing_strategy.md):
+// feed closed-form RR tachograms where the answer is computable to
+// machine precision, assert equality within fp epsilon. Highest
+// bug-yield per hour, no generator required. Extends the randomized-
+// testing memo — every case here is a constructed exact oracle, not a
+// statistical bound.
+//
+// Gated on `canImport(MurmurMetrics)` since the compute lives in the
+// paid framework. The public API surface (ECGMetricsService,
+// RollingMetricComputer) is fair game to test from here — the compute
+// itself carries its own internal tests inside MurmurMetrics.
+
+#if canImport(MurmurMetrics)
+
+import MurmurMetrics
+
+@Suite("HRV analytic tests — whole-recording ECGMetricsReport")
+struct HRVAnalyticTests {
+
+    /// Successive differences are all zero → RMSSD is exactly zero.
+    /// pNN50, SDNN also zero. The floor case that catches sign / off-
+    /// by-one bugs in the successive-difference loop.
+    @Test("Constant RR intervals — every variability metric is zero")
+    func constantRR() throws {
+        let intervals: [Double] = Array(repeating: 800.0, count: 300)
+        let report = try #require(ECGMetricsService.compute(fromRRIntervalsMs: intervals))
+        #expect(report.rmssdMs == 0.0)
+        #expect(report.sdnnMs == 0.0)
+        #expect(report.pnn50Percent == 0.0)
+        #expect(report.meanRRMs == 800.0)
+        #expect(report.beatCount == 300)
+    }
+
+    /// Alternating 800 / 850 ms — successive differences ±50 ms with
+    /// magnitude exactly 50. RMSSD = sqrt(sum(diff²)/(N-1)) =
+    /// sqrt((N-1) · 2500 / (N-1)) = 50 ms exactly. pNN50 counts diffs
+    /// STRICTLY greater than 50 — |±50| is not > 50, so pNN50 = 0.
+    /// Guards the strict-vs-nonstrict comparator in the pNN50 branch.
+    @Test("Alternating 800/850 — RMSSD 50 ms exactly, pNN50 zero (strict >50)")
+    func alternatingBoundary() throws {
+        let intervals: [Double] = (0..<300).map { i in i.isMultiple(of: 2) ? 800.0 : 850.0 }
+        let report = try #require(ECGMetricsService.compute(fromRRIntervalsMs: intervals))
+        #expect(abs(report.rmssdMs - 50.0) < 1e-9)
+        #expect(report.pnn50Percent == 0.0)
+        #expect(abs(report.meanRRMs - 825.0) < 1e-9)
+    }
+
+    /// Alternating 800 / 851 — diffs ±51 ms, all strictly > 50 → pNN50
+    /// is 100 %. Pairs with `alternatingBoundary` to pin the pNN50
+    /// comparator on the opposite side of the threshold.
+    @Test("Alternating 800/851 — pNN50 is 100 % (diffs strictly >50)")
+    func alternatingAboveThreshold() throws {
+        let intervals: [Double] = (0..<300).map { i in i.isMultiple(of: 2) ? 800.0 : 851.0 }
+        let report = try #require(ECGMetricsService.compute(fromRRIntervalsMs: intervals))
+        #expect(abs(report.rmssdMs - 51.0) < 1e-9)
+        #expect(abs(report.pnn50Percent - 100.0) < 1e-9)
+    }
+
+    /// [800, 850, 900] repeating. Successive diffs cycle +50, +50,
+    /// −100 → diff² = 2500, 2500, 10000. Over 300 diffs (100 complete
+    /// pattern cycles) the diff-square sum is 100 · 15000 = 1,500,000,
+    /// mean = 5000, RMSSD = √5000 ≈ 70.7107 ms. Uses 301 intervals so
+    /// N-1 = 300 diffs divides the 3-position cycle evenly — anything
+    /// off by one leaves an unbalanced remainder that shifts the
+    /// answer by ~0.1 ms, which this equality would catch.
+    @Test("Three-cycle RR pattern — RMSSD matches closed-form √5000")
+    func threeCyclePattern() throws {
+        // 301 intervals → 300 successive diffs → exactly 100 full
+        // cycles of the [+50, +50, -100] diff pattern.
+        let intervals: [Double] = (0..<301).map { i in
+            switch i % 3 {
+            case 0:  return 800.0
+            case 1:  return 850.0
+            default: return 900.0
+            }
+        }
+        let report = try #require(ECGMetricsService.compute(fromRRIntervalsMs: intervals))
+        let expected = (5000.0).squareRoot()
+        #expect(abs(report.rmssdMs - expected) < 1e-9)
+    }
+}
+
+@Suite("Rolling HRV analytic tests — RollingMetricComputer")
+struct RollingHRVAnalyticTests {
+
+    /// Build an `RRSeries` where the endpoints tick at the RR
+    /// cumulative sum, matching the way the extractor builds one from
+    /// real beat samples. Time origin is arbitrary; the rolling
+    /// computer only cares about relative distances.
+    private func makeSeries(intervalsMs: [Double]) -> RRSeries {
+        var cumulative: Double = 0.0
+        var endTimes: [Double] = []
+        endTimes.reserveCapacity(intervalsMs.count)
+        for rr in intervalsMs {
+            cumulative += rr / 1000.0
+            endTimes.append(cumulative)
+        }
+        return RRSeries(intervalsMs: intervalsMs, endTimesSeconds: endTimes)
+    }
+
+    /// Constant RR everywhere → every eligible window's RMSSD is
+    /// exactly zero. If a window fails eligibility (too few beats),
+    /// `.nan` + `meetsMinimum == false` is the correct emission.
+    @Test("Constant RR — every eligible rolling window has RMSSD == 0")
+    func rollingConstantRR() {
+        // 600 beats at 800 ms → 480 s of data. 60 s windows / 30 s step
+        // yield ~14 windows, each with ~75 beats — well above the 30-beat
+        // floor.
+        let series = makeSeries(intervalsMs: Array(repeating: 800.0, count: 600))
+        let samples = RollingMetricComputer.compute(
+            metric: .rmssd,
+            series: series,
+            windowSeconds: 60,
+            stepSeconds: 30,
+            minimumBeatCount: 30
+        )
+        #expect(!samples.isEmpty)
+        for s in samples where s.meetsMinimum {
+            #expect(s.value == 0.0)
+        }
+    }
+
+    /// Alternating 800 / 850 across all beats → every eligible window
+    /// has diffs of magnitude exactly 50 → RMSSD == 50 ms. Guards
+    /// window-boundary + successive-difference indexing at the same time.
+    @Test("Alternating 800/850 — every eligible rolling window has RMSSD == 50")
+    func rollingAlternating() {
+        let intervals: [Double] = (0..<600).map { i in i.isMultiple(of: 2) ? 800.0 : 850.0 }
+        let series = makeSeries(intervalsMs: intervals)
+        let samples = RollingMetricComputer.compute(
+            metric: .rmssd,
+            series: series,
+            windowSeconds: 60,
+            stepSeconds: 30,
+            minimumBeatCount: 30
+        )
+        #expect(!samples.isEmpty)
+        for s in samples where s.meetsMinimum {
+            #expect(abs(s.value - 50.0) < 1e-9)
+        }
+    }
+
+    /// A series shorter than one window still emits exactly one
+    /// sample (per RollingMetricComputer's guarantee) — but with
+    /// `meetsMinimum == false` when it doesn't clear the caller's
+    /// floor. Guards the "we still emit a sample so the UI can
+    /// dim / hatch it" behaviour the design memo requires.
+    @Test("Under-populated window emits one sample with meetsMinimum == false")
+    func underPopulatedWindow() {
+        // Only 5 beats at 800 ms → 4 s of data → far shorter than 60 s window.
+        let series = makeSeries(intervalsMs: Array(repeating: 800.0, count: 5))
+        let samples = RollingMetricComputer.compute(
+            metric: .rmssd,
+            series: series,
+            windowSeconds: 60,
+            stepSeconds: 30,
+            minimumBeatCount: 30
+        )
+        #expect(samples.count == 1)
+        #expect(samples.first?.meetsMinimum == false)
+        #expect(samples.first?.value.isNaN == true)
+    }
+
+    /// Artifact-mask exceeding the fraction floor MUST flip a window
+    /// to ineligible even when beat count is fine. Guards the
+    /// spec's "windows failing the quality floor render dimmed / hatched,
+    /// NOT silently plotted as physiological spikes" rule.
+    @Test("Artifact fraction > floor fails eligibility despite adequate beat count")
+    func artifactFractionFloor() {
+        let intervals: [Double] = Array(repeating: 800.0, count: 600)
+        let series = makeSeries(intervalsMs: intervals)
+        // Mark 50 % of beats as artifact — well above the 20 % default.
+        let mask: [Bool] = (0..<600).map { $0.isMultiple(of: 2) }
+        let samples = RollingMetricComputer.compute(
+            metric: .rmssd,
+            series: series,
+            windowSeconds: 60,
+            stepSeconds: 30,
+            minimumBeatCount: 30,
+            artifactMask: mask,
+            maxArtifactFraction: 0.20
+        )
+        #expect(!samples.isEmpty)
+        // At 50 % artifact, no window can clear the 20 % floor.
+        #expect(samples.allSatisfy { !$0.meetsMinimum })
+        #expect(samples.allSatisfy { $0.value.isNaN })
+    }
+}
+
+#endif // canImport(MurmurMetrics)
