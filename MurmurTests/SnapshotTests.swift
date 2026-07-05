@@ -370,6 +370,43 @@ final class SnapshotTests: XCTestCase {
         assertSnapshot(of: render(view, size: CGSize(width: 300, height: 200)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 
+    /// Ectopic-beat variant (mockup-review Correction A, ratified
+    /// 2026-07-05): PR / QT / QTc render as "—" with muted-italic
+    /// styling. QRS remains a valid measurement (ectopic beats have a
+    /// measurable QRS width). Also renders the "Ectopic — PR / QT
+    /// undefined" subtitle beneath the header.
+    func testBeatCalipers_ectopicBeat() {
+        // Beat with plausibly-computed PR/QT/QTc that the delineator
+        // would emit even for a PVC — the caliper's job is to REFUSE
+        // to render them as confident numbers.
+        let beat = MarkingsBeat(
+            rPeakSampleIndex: 12500,
+            rPeakConfidence: 1.0,
+            qrsOnset:  MarkingsFiducial(kind: .qrsOnset,  sampleIndex: 12440, confidence: 0.95),
+            qrsOffset: MarkingsFiducial(kind: .qrsOffset, sampleIndex: 12560, confidence: 0.90),
+            prMs: 119.0, qrsMs: 138.0, qtMs: 380.0, qtcMs: 418.0, precedingRRMs: 620.0
+        )
+        let template = MarkingsTemplate(
+            sampleCount: 200,
+            medianPRMs: 148.0, iqrPRMs: 12.0,
+            medianQRSMs: 88.0, iqrQRSMs: 6.0,
+            medianQTMs: 395.0, iqrQTMs: 18.0,
+            qtcFormulaName: "Fridericia",
+            medianQTcMs: 428.0, iqrQTcMs: 16.0
+        )
+        let view = BeatCalipers(
+            beat: beat,
+            sampleRate: 360,
+            template: template,
+            qtcFormula: .fridericia,
+            kind: .ectopic
+        )
+        .frame(width: 250)
+        .padding()
+        .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 300, height: 220)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
     // MARK: - IntervalTrendLane
 
     /// Builds a canonical trend fixture — 15 bins across one hour with

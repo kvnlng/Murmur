@@ -23,6 +23,27 @@
 
 import SwiftUI
 
+/// Classification of the focused beat for interval-readout purposes.
+/// The docked inspector prints confident PR/QT/QTc only on a beat that
+/// has a conducted P wave and a stable morphology — an ectopic (PVC,
+/// paced-with-broad-QRS) beat has no meaningful PR, and its QT is
+/// unstable on a premature beat, so those intervals render as an
+/// explicit undefined state instead of a false confident number.
+/// Mockup-review Correction A, ratified 2026-07-05.
+public enum BeatCaliperKind: Sendable, Equatable {
+    /// No classification available. Every interval row renders as
+    /// usual — the default and the behaviour before this feature
+    /// landed.
+    case unknown
+    /// Beat morphology is consistent with sinus — every interval row
+    /// renders as usual.
+    case normal
+    /// Beat is ectopic (PVC / paced / any premature beat with no
+    /// conducted P). PR is undefined; QT / QTc are unstable. Render
+    /// those three rows as "—" with the low-confidence styling.
+    case ectopic
+}
+
 struct BeatCalipers: View {
 
     /// The beat whose numbers to display.
@@ -39,21 +60,50 @@ struct BeatCalipers: View {
     /// QTc formula in use — echoed into the QTc row's label.
     let qtcFormula: MarkingsQTcFormula
 
+    /// Classification of this beat. `.ectopic` suppresses PR / QT /
+    /// QTc rendering; defaults to `.unknown` (unchanged behaviour) for
+    /// callers that haven't wired classification yet.
+    var kind: BeatCaliperKind = .unknown
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             header
+            if kind == .ectopic {
+                ectopicSubtitle
+            }
             Divider().opacity(0.4)
-            row("PR",   value: beat.prMs, delta: delta(beat.prMs, vs: template?.medianPRMs))
-            row("QRS",  value: beat.qrsMs, delta: delta(beat.qrsMs, vs: template?.medianQRSMs))
-            row("QT",   value: beat.qtMs, delta: delta(beat.qtMs, vs: template?.medianQTMs))
-            row("QTc",  qtcSuffix: qtcFormula.displayName,
-                value: beat.qtcMs, delta: delta(beat.qtcMs, vs: template?.medianQTcMs))
+            row("PR",  value: prValueForRendering, delta: prDeltaForRendering,
+                undefined: kind == .ectopic)
+            row("QRS", value: beat.qrsMs, delta: delta(beat.qrsMs, vs: template?.medianQRSMs))
+            row("QT",  value: qtValueForRendering, delta: qtDeltaForRendering,
+                undefined: kind == .ectopic)
+            row("QTc", qtcSuffix: qtcFormula.displayName,
+                value: qtcValueForRendering, delta: qtcDeltaForRendering,
+                undefined: kind == .ectopic)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
         .accessibilityIdentifier("beat-calipers")
     }
+
+    private var ectopicSubtitle: some View {
+        Text("Ectopic — PR / QT undefined")
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+            .accessibilityIdentifier("beat-calipers-ectopic-subtitle")
+    }
+
+    /// Intervals suppressed on ectopic beats collapse to nil before
+    /// hitting `row(...)` so the renderer prints "—" and skips the
+    /// delta — matching the existing low-confidence style used by
+    /// the T-offset in FiducialOverlay / interval-markings mockup.
+    private var prValueForRendering: Double?  { kind == .ectopic ? nil : beat.prMs }
+    private var qtValueForRendering: Double?  { kind == .ectopic ? nil : beat.qtMs }
+    private var qtcValueForRendering: Double? { kind == .ectopic ? nil : beat.qtcMs }
+    private var prDeltaForRendering: Double?  { kind == .ectopic ? nil : delta(beat.prMs, vs: template?.medianPRMs) }
+    private var qtDeltaForRendering: Double?  { kind == .ectopic ? nil : delta(beat.qtMs, vs: template?.medianQTMs) }
+    private var qtcDeltaForRendering: Double? { kind == .ectopic ? nil : delta(beat.qtcMs, vs: template?.medianQTcMs) }
 
     // MARK: - Header
 
@@ -84,7 +134,8 @@ struct BeatCalipers: View {
     private func row(_ label: String,
                      qtcSuffix: String? = nil,
                      value: Double?,
-                     delta: Double?) -> some View {
+                     delta: Double?,
+                     undefined: Bool = false) -> some View {
         HStack(spacing: 4) {
             HStack(spacing: 3) {
                 Text(label)
@@ -97,9 +148,15 @@ struct BeatCalipers: View {
                 }
             }
             .frame(width: 78, alignment: .leading)
-            Text(msString(value))
+            // Reuses the same "—" glyph as a missing value but styles
+            // the whole row muted + italic when the interval is
+            // explicitly undefined for this beat kind (PR on a PVC,
+            // etc.). Extends the low-confidence T-offset pattern the
+            // fiducial overlay already uses — muted, not caution-hued.
+            Text(undefined ? "—" : msString(value))
                 .font(.caption.monospacedDigit())
-                .foregroundStyle(.primary)
+                .italic(undefined)
+                .foregroundStyle(undefined ? Color.secondary : Color.primary)
                 .frame(width: 62, alignment: .trailing)
             deltaLabel(delta)
                 .frame(width: 62, alignment: .trailing)

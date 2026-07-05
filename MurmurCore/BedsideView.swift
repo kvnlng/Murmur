@@ -581,6 +581,31 @@ struct BedsideView: View {
         markingsContext.focus(beatSampleIndex: sample)
     }
 
+    /// Determine the caliper kind for the focused beat by cross-
+    /// referencing the recording's annotations near the R-peak. An
+    /// annotation whose category is a WFDB ectopic class (V, PVC,
+    /// paced-broad-QRS variants) within a QRS-width tolerance of the
+    /// R-peak classifies the beat as ectopic — the docked inspector
+    /// then renders PR / QT / QTc as undefined per the ratified
+    /// mockup-review Correction A. Reads imported annotations only
+    /// (no arithmetic on measurements — free-viewer scope).
+    private func caliperKind(for beat: MarkingsBeat) -> BeatCaliperKind {
+        // ~100 ms window — wide enough to catch an annotation placed
+        // at either the R-peak or a QRS-onset offset, narrow enough
+        // to not sweep in a neighbouring beat's tag.
+        let toleranceSamples = Int64(markingsContext.sampleRate * 0.1)
+        let center = beat.rPeakSampleIndex
+        let ectopicCategories: Set<String> = ["V", "PVC", "F", "E", "J", "S", "e", "j", "P", "r"]
+        for ann in allAnnotations where ann.kind == .point {
+            guard abs(ann.sampleIndex - center) <= toleranceSamples else { continue }
+            let normalized = ann.category.trimmingCharacters(in: .whitespaces).uppercased()
+            if ectopicCategories.contains(normalized) || normalized == "PVC" {
+                return .ectopic
+            }
+        }
+        return .unknown
+    }
+
     /// Action menu for the C / D / X disposition keyboard shortcuts.
     private enum DispositionAction { case confirm, dismiss, reset }
 
@@ -744,7 +769,8 @@ struct BedsideView: View {
                 beat: beat,
                 sampleRate: markingsContext.sampleRate,
                 template: markingsContext.template,
-                qtcFormula: markingsContext.qtcFormula
+                qtcFormula: markingsContext.qtcFormula,
+                kind: caliperKind(for: beat)
             )
             .accessibilityIdentifier("docked-beat-inspector")
         } else {
