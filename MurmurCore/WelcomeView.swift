@@ -48,10 +48,17 @@ struct WelcomeView: View {
                 HStack(alignment: .top) {
                     Spacer(minLength: 24)
                     VStack(spacing: 20) {
-                        card
+                        // When the analyst has recent folders, promote
+                        // them above the marketing card — a returning
+                        // user cares about reopening their work first.
+                        // Also keeps the recents row in the visible
+                        // viewport on smaller windows so XCUI can hit
+                        // it (was landing at y=725 in a 815pt CI
+                        // window with the card first).
                         if !recents.isEmpty {
                             recentsSection
                         }
+                        card
                     }
                     .frame(maxWidth: 560)
                     Spacer(minLength: 24)
