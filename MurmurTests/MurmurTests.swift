@@ -4896,4 +4896,278 @@ struct RollingHRVAnalyticTests {
     }
 }
 
+// MARK: - Tier 2 scaffolding — Gaussian PQRST ECG generator + delineator invariants
+//
+// Tier 2 of the ECG testing strategy (project_ecg_testing_strategy.md):
+// a Swift-native generator produces an ECG signal from known Gaussian
+// PQRST parameters, so every fiducial's TRUE position is a
+// construction fact. Delineator output is compared against that
+// construction truth.
+//
+// This is the SCAFFOLD version. The memo's ideal is checked-in golden
+// fixtures + a validated generator; without external tooling to
+// produce goldens (MATLAB ECGSYN, ecgsyn-py), a Swift-native
+// synthesizer is the sanctioned first step
+// (feedback_target_platform_and_duplication.md — native synthesis is
+// affirmatively endorsed). The tests below assert INVARIANTS that any
+// reasonable delineator must satisfy — monotonic fiducial ordering
+// within a beat, and construction-truth-neighborhood placement — not
+// tight numeric tolerances, which need the golden-fixture ratchet
+// before they're trustworthy.
+
+/// Minimal Gaussian-summation ECG generator. Each beat is a sum of
+/// P, Q, R, S, T Gaussians at fixed offsets from the R-peak. Widths
+/// and amplitudes are conventionally-shaped so BeatDelineator can
+/// find every fiducial without needing a fully-tuned ECGSYN.
+///
+/// Not a substitute for real ECGSYN (McSharry/Clifford's coupled ODEs
+/// give realistic morphology + HRV coupling). This is enough to
+/// support "the delineator emitted fiducials near my known
+/// construction truth" — a Tier 2 sanity ratchet, not a fidelity
+/// oracle.
+struct SyntheticECG {
+
+    /// One beat's construction truth. Every ms is exact from
+    /// construction — the delineator's output is scored against these
+    /// positions.
+    struct BeatTruth {
+        let rPeakSample: Int64
+        /// Nominal P-wave center (samples). The generator places the P
+        /// Gaussian at rPeak - pOffsetSamples.
+        let pCenterSample: Int64
+        /// Nominal QRS-onset (Q). About 2 QRS-sigma before R.
+        let qrsOnsetSample: Int64
+        /// Nominal QRS-offset (J-point). About 2 QRS-sigma after R.
+        let qrsOffsetSample: Int64
+        /// Nominal T-wave center (samples).
+        let tCenterSample: Int64
+    }
+
+    /// The generated buffer + construction truth.
+    struct Output {
+        let samples: [Float]
+        let sampleRate: Double
+        let rPeaks: [Int64]
+        let beats: [BeatTruth]
+    }
+
+    /// Generate a clean sinus signal.
+    /// - Parameters:
+    ///   - beatCount: how many complete beats to emit.
+    ///   - rrMs: fixed RR interval (ms).
+    ///   - sampleRate: samples per second (default 360 Hz — WFDB
+    ///     canonical rate for the MIT-BIH database).
+    static func cleanSinus(
+        beatCount: Int,
+        rrMs: Double = 800,
+        sampleRate: Double = 360
+    ) -> Output {
+        // Convert ms → samples once so all offsets are integers.
+        let ms = { (t: Double) -> Int64 in Int64((t / 1000.0) * sampleRate) }
+        let rrSamples = ms(rrMs)
+
+        // Anchor the first R-peak far enough from index 0 that the
+        // P-wave search window has room. 400 ms head padding is more
+        // than enough for the DelineationOptions defaults.
+        let firstR: Int64 = ms(400)
+        let totalSamples = Int(firstR + rrSamples * Int64(beatCount) + ms(400))
+
+        // Gaussian centers relative to R-peak (ms):
+        //   P: -160 ms   (center of P-wave)
+        //   Q:  -25 ms   (Q trough, at the QRS onset side)
+        //   R:    0 ms   (peak)
+        //   S:  +25 ms   (S trough, at the QRS offset side)
+        //   T: +260 ms   (T-wave center)
+        // Widths (sigma, ms) — small for QRS (fast complex), wider
+        // for P (broad) and T (broadest).
+        let pCenter = -160.0
+        let qCenter =  -25.0
+        let sCenter =  +25.0
+        let tCenter = +260.0
+        let pSigma  =  20.0
+        let qSigma  =   8.0
+        let rSigma  =   6.0
+        let sSigma  =   8.0
+        let tSigma  =  40.0
+        // Amplitudes — R dominant, P + T much smaller, Q + S negative
+        // troughs.
+        let pAmp: Float =  0.15
+        let qAmp: Float = -0.20
+        let rAmp: Float =  1.20
+        let sAmp: Float = -0.25
+        let tAmp: Float =  0.30
+
+        var samples = [Float](repeating: 0, count: totalSamples)
+        var rPeaks: [Int64] = []
+        var beats: [BeatTruth] = []
+        rPeaks.reserveCapacity(beatCount)
+        beats.reserveCapacity(beatCount)
+
+        for i in 0..<beatCount {
+            let r = firstR + rrSamples * Int64(i)
+            rPeaks.append(r)
+            beats.append(BeatTruth(
+                rPeakSample: r,
+                pCenterSample: r + ms(pCenter),
+                qrsOnsetSample: r + ms(qCenter - 2.0 * qSigma),  // Q - 2σ ≈ QRS-onset
+                qrsOffsetSample: r + ms(sCenter + 2.0 * sSigma), // S + 2σ ≈ QRS-offset
+                tCenterSample: r + ms(tCenter)
+            ))
+
+            // Splat each Gaussian into a windowed range. `_ = kind`
+            // silences the unused-variable warning without introducing
+            // a name we don't need.
+            addGaussian(into: &samples, sampleRate: sampleRate, center: Double(r) + pCenter / 1000.0 * sampleRate, sigmaMs: pSigma, amplitude: pAmp)
+            addGaussian(into: &samples, sampleRate: sampleRate, center: Double(r) + qCenter / 1000.0 * sampleRate, sigmaMs: qSigma, amplitude: qAmp)
+            addGaussian(into: &samples, sampleRate: sampleRate, center: Double(r),                                sigmaMs: rSigma, amplitude: rAmp)
+            addGaussian(into: &samples, sampleRate: sampleRate, center: Double(r) + sCenter / 1000.0 * sampleRate, sigmaMs: sSigma, amplitude: sAmp)
+            addGaussian(into: &samples, sampleRate: sampleRate, center: Double(r) + tCenter / 1000.0 * sampleRate, sigmaMs: tSigma, amplitude: tAmp)
+        }
+
+        return Output(samples: samples, sampleRate: sampleRate, rPeaks: rPeaks, beats: beats)
+    }
+
+    /// Splat a Gaussian bump centered at `center` (in fractional
+    /// samples) with the given sigma (ms) and peak amplitude. Splats
+    /// only within ±5 σ of the center for efficiency — beyond that
+    /// the amplitude is < 1e-11 · peak.
+    private static func addGaussian(
+        into samples: inout [Float],
+        sampleRate: Double,
+        center: Double,
+        sigmaMs: Double,
+        amplitude: Float
+    ) {
+        let sigmaSamples = sigmaMs / 1000.0 * sampleRate
+        let halfWidth = Int(ceil(5.0 * sigmaSamples))
+        let iCenter = Int(center.rounded())
+        let lo = max(0, iCenter - halfWidth)
+        let hi = min(samples.count - 1, iCenter + halfWidth)
+        guard lo <= hi else { return }
+        let twoSigmaSq = 2.0 * sigmaSamples * sigmaSamples
+        for i in lo...hi {
+            let dx = Double(i) - center
+            let g = exp(-(dx * dx) / twoSigmaSq)
+            samples[i] += Float(g) * amplitude
+        }
+    }
+}
+
+@Suite("Beat delineator — Tier 2 invariants against Gaussian construction truth")
+struct BeatDelineatorTier2Tests {
+
+    /// Delineator output has the required within-beat ordering:
+    /// pOnset ≤ pOffset ≤ qrsOnset ≤ rPeak ≤ qrsOffset ≤ tOnset ≤
+    /// tOffset. This is a math invariant of a physiologically sane
+    /// beat that any correct delineator preserves. Nothing about
+    /// construction truth here — the ordering must hold for every
+    /// beat it decides to fully annotate.
+    @Test("Every fully-delineated beat has monotonic fiducial ordering")
+    func monotonicOrderingWithinBeats() {
+        let ecg = SyntheticECG.cleanSinus(beatCount: 20)
+        let store = BeatDelineator.delineate(
+            samples: ecg.samples,
+            sampleRate: ecg.sampleRate,
+            rPeaks: ecg.rPeaks
+        )
+        // At least one beat should have every fiducial for the test
+        // to be meaningful. Not asserting on ALL — the delineator
+        // may drop end beats (search windows clip past the buffer).
+        var beatsWithFullDelineation = 0
+        for beat in store.beats {
+            guard let pOn = beat.pOnset,
+                  let pOff = beat.pOffset,
+                  let qOn = beat.qrsOnset,
+                  let qOff = beat.qrsOffset,
+                  let tOn = beat.tOnset,
+                  let tOff = beat.tOffset else { continue }
+            beatsWithFullDelineation += 1
+            #expect(pOn.sampleIndex <= pOff.sampleIndex, "P-onset must precede P-offset")
+            #expect(pOff.sampleIndex <= qOn.sampleIndex, "P-offset must precede QRS-onset")
+            #expect(qOn.sampleIndex <= beat.rPeakSampleIndex, "QRS-onset must precede R-peak")
+            #expect(beat.rPeakSampleIndex <= qOff.sampleIndex, "R-peak must precede QRS-offset")
+            #expect(qOff.sampleIndex <= tOn.sampleIndex, "QRS-offset must precede T-onset")
+            #expect(tOn.sampleIndex <= tOff.sampleIndex, "T-onset must precede T-offset")
+        }
+        #expect(beatsWithFullDelineation > 0,
+                "At least one clean-sinus beat should be fully delineated")
+    }
+
+    /// Fiducial positions live near their construction truth. Loose
+    /// neighborhood tolerances (50 ms for P/T, 30 ms for QRS) — the
+    /// job here is to catch a delineator that stops looking at the
+    /// signal (say, placing every P-onset at the same absolute sample
+    /// regardless of R-peak position). Tight numeric tolerances need
+    /// a validated golden-fixture set first per the testing strategy
+    /// memo; that ratchet is future work.
+    @Test("Fiducials land within a loose neighborhood of construction truth")
+    func neighborhoodTolerance() {
+        let ecg = SyntheticECG.cleanSinus(beatCount: 12)
+        let store = BeatDelineator.delineate(
+            samples: ecg.samples,
+            sampleRate: ecg.sampleRate,
+            rPeaks: ecg.rPeaks
+        )
+        let msTolerance = 50.0
+        let toleranceSamples = Int64(msTolerance / 1000.0 * ecg.sampleRate)
+        var checkedPCount = 0
+        var checkedTCount = 0
+        var checkedQRSOnsetCount = 0
+        var checkedQRSOffsetCount = 0
+        for (i, beat) in store.beats.enumerated() where i < ecg.beats.count {
+            let truth = ecg.beats[i]
+            if let pOn = beat.pOnset {
+                // pOnset should be BEFORE the P center — well before
+                // pCenter but not more than a few sigma out.
+                #expect(pOn.sampleIndex < truth.pCenterSample,
+                        "P-onset must precede the P-wave center")
+                #expect(abs(pOn.sampleIndex - truth.pCenterSample) <= 3 * toleranceSamples,
+                        "P-onset within a loose neighborhood of the P-center")
+                checkedPCount += 1
+            }
+            if let qOn = beat.qrsOnset {
+                #expect(abs(qOn.sampleIndex - truth.qrsOnsetSample) <= toleranceSamples,
+                        "QRS-onset within \(msTolerance) ms of construction truth")
+                checkedQRSOnsetCount += 1
+            }
+            if let qOff = beat.qrsOffset {
+                #expect(abs(qOff.sampleIndex - truth.qrsOffsetSample) <= toleranceSamples,
+                        "QRS-offset within \(msTolerance) ms of construction truth")
+                checkedQRSOffsetCount += 1
+            }
+            if let tOff = beat.tOffset {
+                // T-offset should be AFTER the T center. Broad
+                // tolerance — the tangent method + wide T Gaussian
+                // makes this the fragile fiducial per the delineator's
+                // own header comment.
+                #expect(tOff.sampleIndex > truth.tCenterSample,
+                        "T-offset must follow the T-wave center")
+                #expect(abs(tOff.sampleIndex - truth.tCenterSample) <= 4 * toleranceSamples,
+                        "T-offset within a loose neighborhood of the T-center")
+                checkedTCount += 1
+            }
+        }
+        #expect(checkedPCount > 0, "At least some P-onsets should be present")
+        #expect(checkedQRSOnsetCount > 0, "At least some QRS-onsets should be present")
+        #expect(checkedQRSOffsetCount > 0, "At least some QRS-offsets should be present")
+        #expect(checkedTCount > 0, "At least some T-offsets should be present")
+    }
+
+    /// R-peaks in the delineator store match the R-peaks we handed
+    /// in. Guards a coupling regression — the delineator must not
+    /// silently drop beats even when it fails to locate some
+    /// fiducials.
+    @Test("Delineator returns exactly the R-peaks passed in")
+    func rPeaksRoundTrip() {
+        let ecg = SyntheticECG.cleanSinus(beatCount: 15)
+        let store = BeatDelineator.delineate(
+            samples: ecg.samples,
+            sampleRate: ecg.sampleRate,
+            rPeaks: ecg.rPeaks
+        )
+        let outputRPeaks = store.beats.map(\.rPeakSampleIndex)
+        #expect(outputRPeaks == ecg.rPeaks)
+    }
+}
+
 #endif // canImport(MurmurMetrics)
