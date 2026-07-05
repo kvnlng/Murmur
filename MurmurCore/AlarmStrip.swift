@@ -74,8 +74,6 @@ struct AlarmStrip: View {
                 .frame(width: Self.labelWidth, alignment: .leading)
             laneBody(for: channel)
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("alarm-lane-\(channel.name)")
     }
 
     private func laneBody(for channel: Channel) -> some View {
@@ -97,6 +95,12 @@ struct AlarmStrip: View {
             }
         }
         .frame(height: Self.laneHeight)
+        // Identifier lives on the tap-eligible lane body, not on the
+        // wrapping row that also contains the channel-name label —
+        // otherwise XCUI's center-click lands on the label and the
+        // onTapGesture never fires (feedback_xcui_id_on_interactive_surface).
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("alarm-lane-\(channel.name)")
     }
 
     private func bar(for range: ClosedRange<Int64>, channel: Channel, in size: CGSize) -> some View {
