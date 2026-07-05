@@ -344,6 +344,12 @@ struct WaveformClippingOverlay: View {
 /// from the current samples-per-pixel times an approximate label width.
 /// Range annotations always render unmerged because their own extents
 /// already convey position.
+///
+/// Clusters (count > 1) render as capsule badges with the category
+/// color as the fill and the count as a monospaced suffix; single-
+/// annotation clusters render as plain colored text. The distinct
+/// badge treatment makes the "hit-counter" visual obvious at low zoom
+/// where many identical-category points collapse into one glyph.
 struct WaveformAnnotationOverlay: View {
     let annotations: [Annotation]   // already filtered to viewport
     let startSample: Int64
@@ -351,8 +357,9 @@ struct WaveformAnnotationOverlay: View {
 
     /// Approximate label width in points. Any two same-category points
     /// closer than this on screen would visually overlap, so we cluster
-    /// them. 36pt covers "PVC ×99" at caption2 weight.
-    private static let labelPitchPx: CGFloat = 36
+    /// them. 40pt covers a badge "PVC ×99" at caption2 weight with the
+    /// padding the capsule adds.
+    private static let labelPitchPx: CGFloat = 40
 
     var body: some View {
         GeometryReader { geo in
@@ -374,12 +381,37 @@ struct WaveformAnnotationOverlay: View {
                     }
                 }()
                 let frac = Double(anchorSample - startSample) / Double(span)
-                Text(cluster.displayLabel)
-                    .font(.caption2.monospaced().weight(.semibold))
-                    .foregroundStyle(CategoryPalette.swiftUIColor(for: cluster.category))
-                    .position(x: CGFloat(frac) * canvasWidth, y: 8)
+                clusterLabel(cluster: cluster)
+                    .position(x: CGFloat(frac) * canvasWidth, y: 10)
             }
         }
         .allowsHitTesting(false)
+    }
+
+    @ViewBuilder
+    private func clusterLabel(cluster: ClusteredAnnotation) -> some View {
+        let color = CategoryPalette.swiftUIColor(for: cluster.category)
+        if cluster.count > 1 {
+            HStack(spacing: 3) {
+                Text(cluster.representative.displayLabel)
+                    .font(.caption2.monospaced().weight(.semibold))
+                    .foregroundStyle(.white)
+                Text("×\(cluster.count)")
+                    .font(.caption2.monospacedDigit().weight(.bold))
+                    .foregroundStyle(.white.opacity(0.85))
+            }
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(
+                Capsule().fill(color.opacity(0.85))
+            )
+            .overlay(
+                Capsule().stroke(color, lineWidth: 0.5)
+            )
+        } else {
+            Text(cluster.representative.displayLabel)
+                .font(.caption2.monospaced().weight(.semibold))
+                .foregroundStyle(color)
+        }
     }
 }

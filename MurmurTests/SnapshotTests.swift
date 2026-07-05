@@ -94,6 +94,45 @@ final class SnapshotTests: XCTestCase {
         assertSnapshot(of: render(view, size: size), as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 
+    // MARK: - WaveformAnnotationOverlay (cluster hit-counter badges)
+
+    func testWaveformAnnotationOverlay_lowZoomClusterBadge() {
+        // 12 PVCs bunched at the start of a 60-second viewport at 250 Hz
+        // (0.5 to 2.9 s in 0.2 s steps) — at ~11 pixels-per-second the
+        // labels collide and the cluster collapses to one hit-counter
+        // badge. A lone VT tag stays as unbadged text.
+        var annotations: [Annotation] = []
+        for i in 0..<12 {
+            annotations.append(
+                Annotation(
+                    kind: .point,
+                    sampleIndex: Int64(125 + i * 50),
+                    category: "PVC",
+                    source: "demo"
+                )
+            )
+        }
+        annotations.append(
+            Annotation(
+                kind: .point,
+                sampleIndex: 12_000,
+                category: "VT",
+                source: "demo"
+            )
+        )
+        let view = WaveformAnnotationOverlay(
+            annotations: annotations,
+            startSample: 0,
+            endSample: 15_000
+        )
+        .frame(width: 660, height: 40)
+        .background(Color.white)
+        assertSnapshot(
+            of: render(view, size: CGSize(width: 660, height: 40)),
+            as: .image(precision: 0.98, perceptualPrecision: 0.96)
+        )
+    }
+
     // MARK: - WaveformTimeAxis
 
     func testTimeAxis_defaultTenSecondViewport() {
