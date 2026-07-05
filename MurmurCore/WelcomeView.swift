@@ -314,6 +314,11 @@ private struct RecentFolderRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            // Identifier lives on the tap-eligible Button, not on the
+            // wrapping HStack — otherwise XCUI center-clicks the outer
+            // element and hit-testing lands off the interactive
+            // surface (feedback_xcui_id_on_interactive_surface).
+            .accessibilityIdentifier("welcome-recent-\(entry.displayName)")
 
             if let onRemove {
                 Button(action: onRemove) {
@@ -323,11 +328,11 @@ private struct RecentFolderRow: View {
                 .buttonStyle(.plain)
                 .help("Forget this folder")
                 .accessibilityLabel("Forget \(entry.displayName)")
+                .accessibilityIdentifier("welcome-recent-remove-\(entry.displayName)")
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .accessibilityIdentifier("welcome-recent-\(entry.displayName)")
     }
 }
 

@@ -147,17 +147,6 @@ struct BedsideView: View {
         filteredAnnotations.filter { $0.matchesChannel(channel.name) }
     }
 
-    /// Unfiltered rollup for the summary chip row — chips show total counts
-    /// across the recording regardless of the active filter, so the user
-    /// always sees "47 PVCs" instead of "8 of 47 shown."
-    private var unfilteredSummary: AnnotationSummary {
-        AnnotationSummary.build(
-            from: allAnnotations,
-            recordingDurationSamples: recording.channels.first?.sampleCount,
-            sampleRate: recording.channels.first?.sampleRate ?? 250
-        )
-    }
-
     private var focusedChannel: Channel? {
         guard case .focus(let id) = layoutMode else { return nil }
         return ecgChannels.first { $0.id == id }
@@ -639,7 +628,6 @@ struct BedsideView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     summaryHeader
-                    findingsOverview
                     ForEach(ecgChannels) { channel in
                         ChannelPanel(
                             channel: channel,
@@ -674,7 +662,6 @@ struct BedsideView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     summaryHeader
-                    findingsOverview
                     variabilityLaneStrip
                     intervalTrendLaneStrip
                     trendStrip
@@ -1047,25 +1034,12 @@ struct BedsideView: View {
         }
     }
 
-    /// Summary chip row shown in the scrolling context under the pinned
-    /// stage. The density lanes that used to accompany this row merged
-    /// into the pinned overview map — see `OverviewMap`. Phase D will
-    /// relocate this chip row into the review-queue rail as the triage
-    /// filter surface.
-    @ViewBuilder
-    private var findingsOverview: some View {
-        if !recording.annotations.isEmpty {
-            FindingsSummaryHeader(
-                summary: unfilteredSummary,
-                filter: $filter,
-                dispositionTally: dispositionStore.tally(for: recording.annotations)
-            )
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(.thinMaterial)
-            )
-        }
-    }
+    // findingsOverview retired 2026-07-05: category-filter + tally
+    // functionality is now consolidated in the review-queue rail's
+    // triage tally + category menu (project_findings_review_queue_design).
+    // Removing the redundant chip row from the scrolling context also
+    // eliminates the CI-window-height flake where the chip landed
+    // below the visible fold and XCUI reported "not hittable".
 
     private var summaryHeader: some View {
         HStack(alignment: .top, spacing: 16) {

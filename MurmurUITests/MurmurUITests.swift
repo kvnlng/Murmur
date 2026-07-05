@@ -384,32 +384,29 @@ final class MurmurUITests: XCTestCase {
 
     @MainActor
     func testClickingSummaryChipFiltersFindings() throws {
-        // Guards: summary-chip → FindingFilter → findings panel binding.
-        // Synthetic fixture has 2 VT findings + 1 VF finding. Default
-        // unfiltered state shows all 3 finding-row entries. Click the VT
-        // chip → only VT shows (VF row disappears).
+        // Guards: review-queue category-menu → FindingFilter → re-render.
+        // Retired the old `summary-chip-*` chip row 2026-07-05; the
+        // rail's picker does the same job in a location that's always
+        // visible (dodges the CI-window-height flake).
         let app = XCUIApplication()
-        app.launchArguments += [
-            "--ui-test-sample",
-            "--ui-test-expand-all-findings-groups"
-        ]
+        app.launchArguments += ["--ui-test-sample", "--ui-test-expand-all-findings-groups"]
         app.launch()
 
         let vfRow = app.buttons.matching(identifier: "finding-row-VF").firstMatch
-        XCTAssertTrue(vfRow.waitForExistence(timeout: 5),
-                      "VF row should be visible before any filter is applied")
+        XCTAssertTrue(vfRow.waitForExistence(timeout: 5))
 
-        let vtChip = app.buttons.matching(identifier: "summary-chip-VT").firstMatch
-        XCTAssertTrue(vtChip.waitForExistence(timeout: 3))
-        vtChip.click()
+        let picker = app.descendants(matching: .any)
+            .matching(identifier: "findings-category-picker").firstMatch
+        XCTAssertTrue(picker.waitForExistence(timeout: 3))
+        picker.click()
+        let vtItem = app.menuItems.matching(identifier: "findings-category-filter-VT").firstMatch
+        XCTAssertTrue(vtItem.waitForExistence(timeout: 3))
+        vtItem.click()
 
-        XCTAssertTrue(waitForElementToDisappear(vfRow, timeout: 2),
-                      "After narrowing the filter to VT only, the VF row should disappear")
-
-        // VT rows remain visible.
+        XCTAssertTrue(MurmurUITests.waitForElementToDisappear(vfRow, timeout: 3),
+                      "VF row should disappear after narrowing to VT")
         let vtRow = app.buttons.matching(identifier: "finding-row-VT").firstMatch
-        XCTAssertTrue(vtRow.exists,
-                      "VT row should remain visible after the VT-only filter")
+        XCTAssertTrue(vtRow.exists, "VT row should remain visible")
     }
 
     // MARK: - Tier 5b: recents

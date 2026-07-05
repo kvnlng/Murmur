@@ -214,18 +214,21 @@ struct FindingsPanel: View {
             } label: {
                 Label("All categories", systemImage: filter.categories.isEmpty ? "checkmark" : "")
             }
+            .accessibilityIdentifier("findings-category-filter-all")
             ForEach(availableCategories, id: \.self) { cat in
                 Button {
                     toggleCategory(cat)
                 } label: {
                     Label(humanLabel(for: cat), systemImage: filter.categories.contains(cat) ? "checkmark" : "")
                 }
+                .accessibilityIdentifier("findings-category-filter-\(cat)")
             }
         } label: {
             chipLabel(key: "Category", value: filter.categories.isEmpty ? "all" : "\(filter.categories.count)")
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
+        .accessibilityIdentifier("findings-category-picker")
     }
 
     private var confidenceMenu: some View {
