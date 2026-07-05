@@ -5027,6 +5027,71 @@ struct SyntheticECG {
         return Output(samples: samples, sampleRate: sampleRate, rPeaks: rPeaks, beats: beats)
     }
 
+    /// QT-ramp variant — the T Gaussian's center drifts linearly from
+    /// `tCenterStartMs` (first beat) to `tCenterEndMs` (last beat).
+    /// Simulates drug-induced QT prolongation over a long recording;
+    /// the memo's "rec_0417 sotalol story as a deterministic test".
+    /// All other Gaussians are held at the clean-sinus positions and
+    /// widths, so any drift the delineator surfaces on T-offset MUST
+    /// come from the ramp — a great regression target for the T-offset
+    /// tracking half of the QT / QTc pipeline.
+    static func qtRamp(
+        beatCount: Int,
+        rrMs: Double = 800,
+        sampleRate: Double = 360,
+        tCenterStartMs: Double = 260,
+        tCenterEndMs: Double = 320
+    ) -> Output {
+        let ms = { (t: Double) -> Int64 in Int64((t / 1000.0) * sampleRate) }
+        let rrSamples = ms(rrMs)
+        let firstR: Int64 = ms(400)
+        let totalSamples = Int(firstR + rrSamples * Int64(beatCount) + ms(400))
+
+        // Same PQS + R positions as cleanSinus. Only T drifts.
+        let pCenter = -160.0
+        let qCenter =  -25.0
+        let sCenter =  +25.0
+        let pSigma  =  20.0
+        let qSigma  =   8.0
+        let rSigma  =   6.0
+        let sSigma  =   8.0
+        let tSigma  =  40.0
+        let pAmp: Float =  0.15
+        let qAmp: Float = -0.20
+        let rAmp: Float =  1.20
+        let sAmp: Float = -0.25
+        let tAmp: Float =  0.30
+
+        var samples = [Float](repeating: 0, count: totalSamples)
+        var rPeaks: [Int64] = []
+        var beats: [BeatTruth] = []
+        rPeaks.reserveCapacity(beatCount)
+        beats.reserveCapacity(beatCount)
+
+        for i in 0..<beatCount {
+            let r = firstR + rrSamples * Int64(i)
+            // Linear ramp from start → end over the recording.
+            // fraction ∈ [0, 1] where 0 = first beat, 1 = last beat.
+            let fraction = beatCount > 1 ? Double(i) / Double(beatCount - 1) : 0
+            let tCenter = tCenterStartMs + (tCenterEndMs - tCenterStartMs) * fraction
+            rPeaks.append(r)
+            beats.append(BeatTruth(
+                rPeakSample: r,
+                pCenterSample: r + ms(pCenter),
+                qrsOnsetSample: r + ms(qCenter - 2.0 * qSigma),
+                qrsOffsetSample: r + ms(sCenter + 2.0 * sSigma),
+                tCenterSample: r + ms(tCenter)
+            ))
+            addGaussian(into: &samples, sampleRate: sampleRate, center: Double(r) + pCenter / 1000.0 * sampleRate, sigmaMs: pSigma, amplitude: pAmp)
+            addGaussian(into: &samples, sampleRate: sampleRate, center: Double(r) + qCenter / 1000.0 * sampleRate, sigmaMs: qSigma, amplitude: qAmp)
+            addGaussian(into: &samples, sampleRate: sampleRate, center: Double(r),                                sigmaMs: rSigma, amplitude: rAmp)
+            addGaussian(into: &samples, sampleRate: sampleRate, center: Double(r) + sCenter / 1000.0 * sampleRate, sigmaMs: sSigma, amplitude: sAmp)
+            addGaussian(into: &samples, sampleRate: sampleRate, center: Double(r) + tCenter / 1000.0 * sampleRate, sigmaMs: tSigma, amplitude: tAmp)
+        }
+
+        return Output(samples: samples, sampleRate: sampleRate, rPeaks: rPeaks, beats: beats)
+    }
+
     /// Splat a Gaussian bump centered at `center` (in fractional
     /// samples) with the given sigma (ms) and peak amplitude. Splats
     /// only within ±5 σ of the center for efficiency — beyond that
@@ -5235,6 +5300,56 @@ struct BeatDelineatorMetamorphicTests {
             #expect(b.qrsOffset?.sampleIndex == s.qrsOffset?.sampleIndex,
                     "qrsOffset must be baseline-invariant (derivative-based)")
         }
+    }
+
+    /// QT-ramp injection: the T-wave center drifts up by 60 ms over
+    /// the recording (a drug-induced QT-prolongation shape — the
+    /// memo's "rec_0417 sotalol story as a deterministic test").
+    /// A correctly-tracking T-offset must reflect the ramp. Loose
+    /// tolerance: last-block T-offset − first-block T-offset > 30 ms
+    /// against a constructed drift of 60 ms leaves >50 % margin for
+    /// the delineator's own T-tangent quirks while still catching a
+    /// dead T-offset that stayed pinned across the recording.
+    @Test("T-offset drift tracks a constructed QT-ramp")
+    func tOffsetTracksQTRamp() {
+        let beatCount = 60
+        let ecg = SyntheticECG.qtRamp(
+            beatCount: beatCount,
+            tCenterStartMs: 260,
+            tCenterEndMs: 320
+        )
+        let store = BeatDelineator.delineate(
+            samples: ecg.samples,
+            sampleRate: ecg.sampleRate,
+            rPeaks: ecg.rPeaks
+        )
+
+        // Convert delineated T-offset positions into "ms relative to
+        // that beat's R-peak" so we can compare the drift without
+        // getting confused by the R-peak's own drift.
+        var relativeTOffsetsMs: [Double] = []
+        relativeTOffsetsMs.reserveCapacity(beatCount)
+        for beat in store.beats {
+            guard let tOff = beat.tOffset else {
+                relativeTOffsetsMs.append(.nan)
+                continue
+            }
+            let deltaSamples = Double(tOff.sampleIndex - beat.rPeakSampleIndex)
+            relativeTOffsetsMs.append(deltaSamples * 1000.0 / ecg.sampleRate)
+        }
+        let firstBlock = Array(relativeTOffsetsMs.prefix(10)).filter { !$0.isNaN }
+        let lastBlock  = Array(relativeTOffsetsMs.suffix(10)).filter { !$0.isNaN }
+        #expect(firstBlock.count >= 5, "First block needs enough delineated T-offsets to be meaningful")
+        #expect(lastBlock.count >= 5, "Last block needs enough delineated T-offsets to be meaningful")
+
+        let firstMean = firstBlock.reduce(0, +) / Double(firstBlock.count)
+        let lastMean  = lastBlock.reduce(0, +) / Double(lastBlock.count)
+        let observedDriftMs = lastMean - firstMean
+
+        // Constructed drift is 60 ms; loose lower bound at 30 ms
+        // catches a T-offset that stays pinned or lags heavily.
+        #expect(observedDriftMs > 30.0,
+                "T-offset drift over the recording should track the 60 ms QT ramp (observed drift: \(observedDriftMs) ms)")
     }
 }
 
