@@ -4927,14 +4927,20 @@ struct RollingHRVAnalyticTests {
 /// oracle.
 struct SyntheticECG {
 
+    /// Sinus vs ectopic (PVC) — governs which fiducial checks a test
+    /// should apply to the beat. Ectopic beats have no atrial P wave,
+    /// so `pCenterSample` is `nil` for them.
+    enum BeatKind: Sendable { case sinus, ectopic }
+
     /// One beat's construction truth. Every ms is exact from
     /// construction — the delineator's output is scored against these
     /// positions.
     struct BeatTruth {
+        let kind: BeatKind
         let rPeakSample: Int64
         /// Nominal P-wave center (samples). The generator places the P
-        /// Gaussian at rPeak - pOffsetSamples.
-        let pCenterSample: Int64
+        /// Gaussian at rPeak - pOffsetSamples. `nil` for ectopic beats.
+        let pCenterSample: Int64?
         /// Nominal QRS-onset (Q). About 2 QRS-sigma before R.
         let qrsOnsetSample: Int64
         /// Nominal QRS-offset (J-point). About 2 QRS-sigma after R.
@@ -5007,6 +5013,7 @@ struct SyntheticECG {
             let r = firstR + rrSamples * Int64(i)
             rPeaks.append(r)
             beats.append(BeatTruth(
+                kind: .sinus,
                 rPeakSample: r,
                 pCenterSample: r + ms(pCenter),
                 qrsOnsetSample: r + ms(qCenter - 2.0 * qSigma),  // Q - 2σ ≈ QRS-onset
@@ -5076,6 +5083,7 @@ struct SyntheticECG {
             let tCenter = tCenterStartMs + (tCenterEndMs - tCenterStartMs) * fraction
             rPeaks.append(r)
             beats.append(BeatTruth(
+                kind: .sinus,
                 rPeakSample: r,
                 pCenterSample: r + ms(pCenter),
                 qrsOnsetSample: r + ms(qCenter - 2.0 * qSigma),
@@ -5087,6 +5095,124 @@ struct SyntheticECG {
             addGaussian(into: &samples, sampleRate: sampleRate, center: Double(r),                                sigmaMs: rSigma, amplitude: rAmp)
             addGaussian(into: &samples, sampleRate: sampleRate, center: Double(r) + sCenter / 1000.0 * sampleRate, sigmaMs: sSigma, amplitude: sAmp)
             addGaussian(into: &samples, sampleRate: sampleRate, center: Double(r) + tCenter / 1000.0 * sampleRate, sigmaMs: tSigma, amplitude: tAmp)
+        }
+
+        return Output(samples: samples, sampleRate: sampleRate, rPeaks: rPeaks, beats: beats)
+    }
+
+    /// Clean sinus with PVCs (ventricular ectopics) inserted after each
+    /// referenced sinus-beat index. Each PVC:
+    ///   - fires at `pvcPrematurityFraction` × RR into the following
+    ///     interval (premature),
+    ///   - has a WIDE QRS well above the 120 ms clinical threshold,
+    ///   - has NO P wave (ventricular origin, atrioventricular
+    ///     dissociation),
+    ///   - has a T-wave discordant with the QRS (opposite polarity), and
+    ///   - is followed by a full compensatory pause so the NEXT sinus
+    ///     beat lands on the original schedule.
+    ///
+    /// The output's `beats` array carries both sinus and ectopic
+    /// entries in chronological order — `BeatTruth.kind` distinguishes
+    /// them. The output's `rPeaks` likewise contains PVC R-peaks so
+    /// the whole mixture can be fed to `BeatDelineator.delineate`
+    /// verbatim. Memo target: Tier 2 PVC pathology sweep
+    /// (project_ecg_testing_strategy.md § "synthetic PVCs" +
+    /// project_mockup_review_pass.md Correction A).
+    static func withPVCs(
+        beatCount: Int,
+        rrMs: Double = 800,
+        sampleRate: Double = 360,
+        pvcAfterSinusBeats: Set<Int>,
+        pvcPrematurityFraction: Double = 0.65,
+        pvcQRSSigmaMs: Double = 15.0
+    ) -> Output {
+        let ms = { (t: Double) -> Int64 in Int64((t / 1000.0) * sampleRate) }
+        let rrSamples = ms(rrMs)
+        let firstR: Int64 = ms(400)
+        // Over-allocate the buffer to cover the trailing pad regardless
+        // of how many PVCs get inserted — each PVC sits inside an
+        // existing RR window so the total duration doesn't grow.
+        let totalSamples = Int(firstR + rrSamples * Int64(beatCount) + ms(400))
+
+        // Sinus morphology — mirrors cleanSinus so PVC contrast stays
+        // apples-to-apples with the sinus reference used elsewhere.
+        let pCenter = -160.0
+        let qCenter =  -25.0
+        let sCenter =  +25.0
+        let tCenter = +260.0
+        let pSigma  =  20.0
+        let qSigma  =   8.0
+        let rSigma  =   6.0
+        let sSigma  =   8.0
+        let tSigma  =  40.0
+        let pAmp: Float =  0.15
+        let qAmp: Float = -0.20
+        let rAmp: Float =  1.20
+        let sAmp: Float = -0.25
+        let tAmp: Float =  0.30
+
+        // PVC morphology — wide QRS around a taller R, no P, discordant
+        // (opposite-polarity) T. Q/S troughs at ±50 ms with sigma
+        // pvcQRSSigmaMs → boundaries at Q - 2σ / S + 2σ. Default
+        // pvcQRSSigmaMs = 15 ms gives ±80 ms boundaries → 160 ms wide,
+        // squarely in the PVC clinical range (120–200 ms).
+        let pvcQCenter = -50.0
+        let pvcSCenter = +50.0
+        let pvcTCenter = +320.0
+        let pvcTSigma  =  45.0
+        let pvcQAmp: Float = -0.30
+        let pvcRAmp: Float =  1.50
+        let pvcSAmp: Float = -0.35
+        let pvcTAmp: Float = -0.40
+
+        var samples = [Float](repeating: 0, count: totalSamples)
+        var rPeaks: [Int64] = []
+        var beats: [BeatTruth] = []
+        let pvcCapacity = pvcAfterSinusBeats.count
+        rPeaks.reserveCapacity(beatCount + pvcCapacity)
+        beats.reserveCapacity(beatCount + pvcCapacity)
+
+        for i in 0..<beatCount {
+            let r = firstR + rrSamples * Int64(i)
+            rPeaks.append(r)
+            beats.append(BeatTruth(
+                kind: .sinus,
+                rPeakSample: r,
+                pCenterSample: r + ms(pCenter),
+                qrsOnsetSample: r + ms(qCenter - 2.0 * qSigma),
+                qrsOffsetSample: r + ms(sCenter + 2.0 * sSigma),
+                tCenterSample: r + ms(tCenter)
+            ))
+            addGaussian(into: &samples, sampleRate: sampleRate, center: Double(r) + pCenter / 1000.0 * sampleRate, sigmaMs: pSigma, amplitude: pAmp)
+            addGaussian(into: &samples, sampleRate: sampleRate, center: Double(r) + qCenter / 1000.0 * sampleRate, sigmaMs: qSigma, amplitude: qAmp)
+            addGaussian(into: &samples, sampleRate: sampleRate, center: Double(r),                                sigmaMs: rSigma, amplitude: rAmp)
+            addGaussian(into: &samples, sampleRate: sampleRate, center: Double(r) + sCenter / 1000.0 * sampleRate, sigmaMs: sSigma, amplitude: sAmp)
+            addGaussian(into: &samples, sampleRate: sampleRate, center: Double(r) + tCenter / 1000.0 * sampleRate, sigmaMs: tSigma, amplitude: tAmp)
+
+            // Insert a PVC in the interval AFTER this sinus beat when
+            // requested. Skip when there's no next sinus beat to
+            // return to (would fall off the tail pad).
+            if pvcAfterSinusBeats.contains(i), i + 1 < beatCount {
+                let pvcR = r + Int64(Double(rrSamples) * pvcPrematurityFraction)
+                rPeaks.append(pvcR)
+                beats.append(BeatTruth(
+                    kind: .ectopic,
+                    rPeakSample: pvcR,
+                    pCenterSample: nil,
+                    qrsOnsetSample: pvcR + ms(pvcQCenter - 2.0 * pvcQRSSigmaMs),
+                    qrsOffsetSample: pvcR + ms(pvcSCenter + 2.0 * pvcQRSSigmaMs),
+                    tCenterSample: pvcR + ms(pvcTCenter)
+                ))
+                // NO P Gaussian — PVCs are ventricular in origin. The
+                // R Gaussian is MUCH wider than sinus (3× σ) so the
+                // delineator's derivative-threshold algorithm sees a
+                // slow ramp and reports QRS-onset / QRS-offset further
+                // out — the pipeline signature of a wide-QRS beat.
+                addGaussian(into: &samples, sampleRate: sampleRate, center: Double(pvcR) + pvcQCenter / 1000.0 * sampleRate, sigmaMs: pvcQRSSigmaMs, amplitude: pvcQAmp)
+                addGaussian(into: &samples, sampleRate: sampleRate, center: Double(pvcR),                                    sigmaMs: rSigma * 3.0, amplitude: pvcRAmp)
+                addGaussian(into: &samples, sampleRate: sampleRate, center: Double(pvcR) + pvcSCenter / 1000.0 * sampleRate, sigmaMs: pvcQRSSigmaMs, amplitude: pvcSAmp)
+                addGaussian(into: &samples, sampleRate: sampleRate, center: Double(pvcR) + pvcTCenter / 1000.0 * sampleRate, sigmaMs: pvcTSigma, amplitude: pvcTAmp)
+            }
         }
 
         return Output(samples: samples, sampleRate: sampleRate, rPeaks: rPeaks, beats: beats)
@@ -5203,12 +5329,15 @@ struct BeatDelineatorTier2Tests {
         var checkedQRSOffsetCount = 0
         for (i, beat) in store.beats.enumerated() where i < ecg.beats.count {
             let truth = ecg.beats[i]
-            if let pOn = beat.pOnset {
+            if let pOn = beat.pOnset, let pCenter = truth.pCenterSample {
                 // pOnset should be BEFORE the P center — well before
-                // pCenter but not more than a few sigma out.
-                #expect(pOn.sampleIndex < truth.pCenterSample,
+                // pCenter but not more than a few sigma out. Skipped
+                // for ectopic beats (pCenterSample == nil), where the
+                // delineator's pOnset behavior is documented separately
+                // in the PVC pathology suite.
+                #expect(pOn.sampleIndex < pCenter,
                         "P-onset must precede the P-wave center")
-                #expect(abs(pOn.sampleIndex - truth.pCenterSample) <= 3 * toleranceSamples,
+                #expect(abs(pOn.sampleIndex - pCenter) <= 3 * toleranceSamples,
                         "P-onset within a loose neighborhood of the P-center")
                 checkedPCount += 1
             }
@@ -5625,6 +5754,237 @@ struct BeatDelineatorMetamorphicTests {
         // catches a T-offset that stays pinned or lags heavily.
         #expect(observedDriftMs > 30.0,
                 "T-offset drift over the recording should track the 60 ms QT ramp (observed drift: \(observedDriftMs) ms)")
+    }
+}
+
+/// Tier 2 PVC pathology sweep — the memo's third injected-pathology
+/// regression alongside QT-ramp and sub-threshold noise. Feeds the
+/// delineator a clean-sinus rhythm with wide-QRS, P-suppressed
+/// ventricular ectopics inserted at known positions, then verifies:
+///
+///   (A) the delineator recovers the PVC's wide QRS,
+///   (B) the deviation-navigation ranking surfaces the PVC in the top
+///       tier — closing the loop with the review queue's "rank by
+///       departure" contract, and
+///   (C) the PR interval on the PVC is unreliable at the compute
+///       layer — either dropped by the delineator (pOnset == nil) OR
+///       wildly off the sinus template median — which is the pipeline
+///       counterpart of mockup-review Correction A's display-layer
+///       "PR / QT / QTc = —" suppression on ectopic beats
+///       (regression for project_mockup_review_pass.md fix A).
+///
+/// The suite is @MainActor because deviation ranking is exposed
+/// through IntervalMarkingsContext, the shared @MainActor / @Observable
+/// store the review queue reads. Testing the actual production path
+/// (rather than replicating the deviation formula in-test) catches
+/// regressions in either the score OR the sort direction.
+@MainActor
+@Suite("Beat delineator — Tier 2 PVC pathology sweep")
+struct BeatDelineatorPVCTests {
+
+    /// Convert one BeatDelineator output into the MarkingsBeat / -Template
+    /// pair the MurmurCore review-queue path consumes. Mirrors the
+    /// orchestrator's converter — kept inline so the test doesn't
+    /// depend on non-public conversion helpers.
+    private func markings(
+        from fiducials: FiducialStore,
+        template t: NormalTemplate,
+        qtc: QTcFormula
+    ) -> (beats: [MarkingsBeat], template: MarkingsTemplate?) {
+        let readouts = IntervalMeasurement.measureAll(store: fiducials)
+        let beats: [MarkingsBeat] = zip(fiducials.beats, readouts).map { (bf, ro) in
+            MarkingsBeat(
+                rPeakSampleIndex: bf.rPeakSampleIndex,
+                rPeakConfidence: bf.rPeakConfidence,
+                pOnset:    bf.pOnset.map    { MarkingsFiducial(kind: .pOnset,    sampleIndex: $0.sampleIndex, confidence: $0.confidence) },
+                pOffset:   bf.pOffset.map   { MarkingsFiducial(kind: .pOffset,   sampleIndex: $0.sampleIndex, confidence: $0.confidence) },
+                qrsOnset:  bf.qrsOnset.map  { MarkingsFiducial(kind: .qrsOnset,  sampleIndex: $0.sampleIndex, confidence: $0.confidence) },
+                qrsOffset: bf.qrsOffset.map { MarkingsFiducial(kind: .qrsOffset, sampleIndex: $0.sampleIndex, confidence: $0.confidence) },
+                tOnset:    bf.tOnset.map    { MarkingsFiducial(kind: .tOnset,    sampleIndex: $0.sampleIndex, confidence: $0.confidence) },
+                tOffset:   bf.tOffset.map   { MarkingsFiducial(kind: .tOffset,   sampleIndex: $0.sampleIndex, confidence: $0.confidence) },
+                prMs: ro.prMs,
+                qrsMs: ro.qrsMs,
+                qtMs: ro.qtMs,
+                qtcMs: ro.qtcMs(formula: qtc),
+                precedingRRMs: ro.precedingRRMs
+            )
+        }
+        let coreTemplate: MarkingsTemplate? = t.sampleCount > 0
+            ? MarkingsTemplate(
+                sampleCount: t.sampleCount,
+                medianPRMs: t.medianPRMs,
+                iqrPRMs: t.iqrPRMs,
+                medianQRSMs: t.medianQRSMs,
+                iqrQRSMs: t.iqrQRSMs,
+                medianQTMs: t.medianQTMs,
+                iqrQTMs: t.iqrQTMs,
+                qtcFormulaName: t.qtcFormula.displayName,
+                medianQTcMs: t.medianQTcMs,
+                iqrQTcMs: t.iqrQTcMs
+            )
+            : nil
+        return (beats, coreTemplate)
+    }
+
+    /// (A) Wide-QRS detection. Synthetic PVCs are constructed with a
+    /// 160 ms QRS complex — well above the 120 ms clinical threshold
+    /// and roughly 2× the sinus construction width (~82 ms). The
+    /// delineator's QRS-onset / QRS-offset pair MUST recover a width
+    /// that lands at least 1.5× the sinus template median, or the
+    /// PVC's morphological signature — the whole basis for ranking it
+    /// as a deviation — has been lost.
+    @Test("PVC beats' delineated QRS is markedly wider than sinus")
+    func pvcQRSIsWiderThanSinus() {
+        let ecg = SyntheticECG.withPVCs(
+            beatCount: 40,
+            pvcAfterSinusBeats: [10, 20, 30]
+        )
+        let store = BeatDelineator.delineate(
+            samples: ecg.samples,
+            sampleRate: ecg.sampleRate,
+            rPeaks: ecg.rPeaks
+        )
+        let readouts = IntervalMeasurement.measureAll(store: store)
+        #expect(readouts.count == ecg.rPeaks.count, "Every constructed R-peak should produce a readout")
+
+        // Split readouts into sinus vs ectopic by matching against the
+        // construction-truth R-peaks (which carry `kind`).
+        let ectopicRPeaks: Set<Int64> = Set(
+            ecg.beats.filter { $0.kind == .ectopic }.map(\.rPeakSample)
+        )
+        let sinusQRS  = readouts.filter { !ectopicRPeaks.contains($0.rPeakSampleIndex) }.compactMap(\.qrsMs)
+        let pvcQRS    = readouts.filter {  ectopicRPeaks.contains($0.rPeakSampleIndex) }.compactMap(\.qrsMs)
+        #expect(pvcQRS.count == ectopicRPeaks.count, "Delineator should measure QRS for every PVC")
+        #expect(sinusQRS.count >= 20, "Sinus reference sample should be substantial")
+
+        let sinusMedian = median(sinusQRS)
+        for pvc in pvcQRS {
+            #expect(pvc > 1.5 * sinusMedian,
+                    "PVC QRS (\(pvc) ms) should be ≥1.5× sinus median (\(sinusMedian) ms)")
+        }
+    }
+
+    /// (B) Deviation-navigation. Piping the delineator's output through
+    /// IntervalMarkingsContext.beatsRankedByDeviation MUST surface the
+    /// constructed PVCs among the highest-ranked beats. Loose bound —
+    /// asserts that every constructed PVC lands within the top decile
+    /// of the ranking (top 4 of 40 for the default fixture). Catches:
+    ///   - a regression where the sort direction flipped,
+    ///   - a regression where deviation ignored qrsMs (a PVC's dominant
+    ///     departure axis when qtcMs is unreliable),
+    ///   - a regression where PVCs got silently dropped from the
+    ///     ranking.
+    @Test("PVCs surface in the top decile of deviation ranking")
+    func pvcRanksHighInDeviationOrder() {
+        let ecg = SyntheticECG.withPVCs(
+            beatCount: 40,
+            pvcAfterSinusBeats: [10, 20, 30]
+        )
+        let store = BeatDelineator.delineate(
+            samples: ecg.samples,
+            sampleRate: ecg.sampleRate,
+            rPeaks: ecg.rPeaks
+        )
+        let template = NormalTemplateBuilder.build(
+            from: IntervalMeasurement.measureAll(store: store),
+            qtcFormula: .fridericia
+        )
+        let (beats, coreTemplate) = markings(from: store, template: template, qtc: .fridericia)
+        try? #require(coreTemplate != nil)
+
+        let context = IntervalMarkingsContext()
+        context.set(beats: beats, sampleRate: ecg.sampleRate, template: coreTemplate)
+
+        let ranked = context.beatsRankedByDeviation
+        #expect(!ranked.isEmpty, "Deviation ranking must return at least the ectopic beats")
+
+        let ectopicRPeaks: Set<Int64> = Set(
+            ecg.beats.filter { $0.kind == .ectopic }.map(\.rPeakSample)
+        )
+        // Top decile of a ~43-beat recording (40 sinus + 3 PVCs) is
+        // the top 4 positions. Every constructed PVC must land there.
+        let topDecile = max(ranked.count / 10, ectopicRPeaks.count)
+        let topRPeaks = Set(ranked.prefix(topDecile).map(\.rPeakSampleIndex))
+        for pvcR in ectopicRPeaks {
+            #expect(topRPeaks.contains(pvcR),
+                    "PVC at R-peak \(pvcR) should land in the top decile of deviation ranking (top \(topDecile)); got top rPeaks \(Array(topRPeaks).sorted())")
+        }
+    }
+
+    /// (C) PR unreliability on PVCs. Mockup-review Correction A ratified
+    /// 2026-07-05: the inspector suppresses PR / QT / QTc on ectopic
+    /// beats. This compute-layer counterpart documents WHY the
+    /// suppression is necessary — the underlying PR value on a PVC is
+    /// not a stable measurement even in a clean synthetic environment.
+    /// Passing condition: for each constructed PVC, EITHER the
+    /// delineator dropped pOnset (prMs == nil — the correct outcome
+    /// once P-confidence is tightened) OR the resulting prMs is far
+    /// from the sinus template median. Failing this test means the
+    /// pipeline is confidently emitting a PR interval on a
+    /// no-P-wave beat, and the inspector's suppression would be
+    /// masking a bug rather than surfacing a limitation.
+    @Test("PVC PR interval is nil or far from sinus template median")
+    func pvcPRIsUnreliable() {
+        let ecg = SyntheticECG.withPVCs(
+            beatCount: 40,
+            pvcAfterSinusBeats: [10, 20, 30]
+        )
+        let store = BeatDelineator.delineate(
+            samples: ecg.samples,
+            sampleRate: ecg.sampleRate,
+            rPeaks: ecg.rPeaks
+        )
+        let readouts = IntervalMeasurement.measureAll(store: store)
+        let template = NormalTemplateBuilder.build(from: readouts, qtcFormula: .fridericia)
+        let templatePR = template.medianPRMs
+        try? #require(templatePR != nil)
+        guard let templatePR else { return }
+
+        // Match delineator beats to construction truth by R-peak.
+        let ectopicRPeaks: Set<Int64> = Set(
+            ecg.beats.filter { $0.kind == .ectopic }.map(\.rPeakSample)
+        )
+        let pvcReadouts = readouts.filter { ectopicRPeaks.contains($0.rPeakSampleIndex) }
+        #expect(pvcReadouts.count == ectopicRPeaks.count, "Every PVC must produce a readout")
+
+        // "Far from template" bar. The sinus template's PR IQR from
+        // this generator is a few ms — every sinus beat is identical
+        // by construction — so 25 ms is many multiples of IQR out.
+        // The bar is set to catch the actual regression this test
+        // exists for: a delineator that reports a PR on a PVC
+        // essentially identical to the sinus mean, which would make
+        // the display-layer suppression a mask over a bug rather than
+        // a documented limitation. Empirically the v1 delineator
+        // finds a phantom P on the preceding beat's T-wave, which
+        // produces a PR ~40 ms away from the template — enough to be
+        // recognisably wrong, not enough to be recognisably
+        // ectopic. That's exactly the ambiguity that motivates the
+        // display-layer suppression, and 25 ms sits inside that
+        // margin.
+        let farBar: Double = 25.0
+        for readout in pvcReadouts {
+            if let pr = readout.prMs {
+                #expect(abs(pr - templatePR) > farBar,
+                        """
+                        PVC PR (\(pr) ms) is close to sinus template median (\(templatePR) ms) — \
+                        the pipeline is emitting a confident PR on a no-P-wave beat, which would \
+                        defeat the display-layer suppression
+                        """)
+            }
+            // nil is the preferred outcome — nothing to assert.
+        }
+    }
+
+    /// Median helper. Uses a copy-sort because the test's argument
+    /// list is small enough for O(n log n) not to matter, and it's
+    /// obvious what's happening.
+    private func median(_ xs: [Double]) -> Double {
+        guard !xs.isEmpty else { return .nan }
+        let sorted = xs.sorted()
+        let n = sorted.count
+        return n.isMultiple(of: 2)
+            ? (sorted[n / 2 - 1] + sorted[n / 2]) / 2
+            : sorted[n / 2]
     }
 }
 
