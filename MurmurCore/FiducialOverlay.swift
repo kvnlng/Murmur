@@ -46,6 +46,11 @@ struct FiducialOverlay: View {
     /// calipers panel, or nil when nothing is focused.
     let focusedRPeakSampleIndex: Int64?
 
+    /// Layers the analyst has enabled. R-peak marks always render;
+    /// P / QRS / T marks only render when their layer is in this
+    /// set AND the current detail level permits them.
+    let enabledLayers: Set<MarkingsFiducialLayer>
+
     /// Canvas dimensions passed from the enclosing `GeometryReader`.
     let canvasSize: CGSize
 
@@ -67,21 +72,28 @@ struct FiducialOverlay: View {
 
     @ViewBuilder
     private func beatMarks(for beat: MarkingsBeat) -> some View {
-        // R-tick at every LOD.
+        // R-tick at every LOD. R marks always render — they anchor
+        // beat identity and never get toggled off.
         rTick(atSample: beat.rPeakSampleIndex, focused: beat.rPeakSampleIndex == focusedRPeakSampleIndex)
 
-        // QRS boundaries at .qrsOnly and higher.
-        if detailLevel != .rTicksOnly {
+        // QRS boundaries at .qrsOnly and higher, gated by layer toggle.
+        if detailLevel != .rTicksOnly, enabledLayers.contains(.qrs) {
             if let q = beat.qrsOnset { boundaryTick(fiducial: q, colorStyle: .qrs) }
             if let s = beat.qrsOffset { boundaryTick(fiducial: s, colorStyle: .qrs) }
         }
 
-        // Full fiducials at .fullFiducials only.
+        // P / T fiducials at .fullFiducials, each gated by its own
+        // layer toggle so an analyst on a QT study can hide P and
+        // vice versa without changing the zoom.
         if detailLevel == .fullFiducials {
-            if let p = beat.pOnset  { boundaryTick(fiducial: p, colorStyle: .p) }
-            if let p = beat.pOffset { boundaryTick(fiducial: p, colorStyle: .p) }
-            if let t = beat.tOnset  { boundaryTick(fiducial: t, colorStyle: .t) }
-            if let t = beat.tOffset { boundaryTick(fiducial: t, colorStyle: .t) }
+            if enabledLayers.contains(.p) {
+                if let p = beat.pOnset  { boundaryTick(fiducial: p, colorStyle: .p) }
+                if let p = beat.pOffset { boundaryTick(fiducial: p, colorStyle: .p) }
+            }
+            if enabledLayers.contains(.t) {
+                if let t = beat.tOnset  { boundaryTick(fiducial: t, colorStyle: .t) }
+                if let t = beat.tOffset { boundaryTick(fiducial: t, colorStyle: .t) }
+            }
         }
     }
 

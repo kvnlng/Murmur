@@ -736,8 +736,21 @@ struct BedsideView: View {
     /// The focus-beat caliper docked beside the trace. Renders when
     /// a beat is focused; otherwise a placeholder holds the layout
     /// width so the trace doesn't reflow when focus changes.
-    @ViewBuilder
+    /// Underneath both variants: a compact "Layers" menu chip when
+    /// the fiducial store has beats — lets the analyst show/hide
+    /// P / QRS / T fiducials for QT vs. conduction studies.
     private var dockedBeatInspector: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            dockedBeatCard
+            if !markingsContext.beats.isEmpty {
+                fiducialLayersChip
+            }
+        }
+        .frame(width: 220, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private var dockedBeatCard: some View {
         if let focusIdx = markingsContext.focusedBeatSampleIndex,
            let beat = markingsContext.beats.first(where: { $0.rPeakSampleIndex == focusIdx }) {
             BeatCalipers(
@@ -746,7 +759,6 @@ struct BedsideView: View {
                 template: markingsContext.template,
                 qtcFormula: markingsContext.qtcFormula
             )
-            .frame(width: 220, alignment: .topLeading)
             .accessibilityIdentifier("docked-beat-inspector")
         } else {
             VStack(alignment: .leading, spacing: 4) {
@@ -759,9 +771,61 @@ struct BedsideView: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .frame(width: 220, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
             .accessibilityIdentifier("docked-beat-inspector-empty")
+        }
+    }
+
+    /// Menu chip that toggles P / QRS / T fiducial overlays. R marks
+    /// are non-toggleable (they anchor every beat's identity).
+    private var fiducialLayersChip: some View {
+        Menu {
+            ForEach(MarkingsFiducialLayer.allCases, id: \.self) { layer in
+                Button {
+                    toggleFiducialLayer(layer)
+                } label: {
+                    Label(
+                        layer.displayName,
+                        systemImage: markingsContext.enabledLayers.contains(layer) ? "checkmark" : ""
+                    )
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "square.stack.3d.up.badge.a")
+                    .font(.caption2)
+                Text("Layers · \(enabledLayersSummary)")
+                    .font(.caption2)
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(Color.secondary.opacity(0.10)))
+            .overlay(Capsule().stroke(Color.secondary.opacity(0.25), lineWidth: 0.5))
+        }
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Show or hide P / QRS / T fiducial overlays")
+        .accessibilityIdentifier("fiducial-layers-picker")
+    }
+
+    private var enabledLayersSummary: String {
+        // Preserve canonical P·QRS·T order for the readout so a
+        // conduction-study analyst can visually confirm the set at a
+        // glance (e.g. "P·QRS" means T is hidden).
+        let ordered: [MarkingsFiducialLayer] = [.p, .qrs, .t]
+        let active = ordered.filter { markingsContext.enabledLayers.contains($0) }
+        if active.isEmpty { return "R only" }
+        if active.count == ordered.count { return "all" }
+        return active.map(\.displayName).joined(separator: "·")
+    }
+
+    private func toggleFiducialLayer(_ layer: MarkingsFiducialLayer) {
+        if markingsContext.enabledLayers.contains(layer) {
+            markingsContext.enabledLayers.remove(layer)
+        } else {
+            markingsContext.enabledLayers.insert(layer)
         }
     }
 
@@ -1431,6 +1495,7 @@ private struct ChannelPanel: View {
                     sampleRate: markingsContext.sampleRate,
                     detailLevel: MarkingsDetailLevel.level(forViewportSeconds: viewport.durationSeconds),
                     focusedRPeakSampleIndex: markingsContext.focusedBeatSampleIndex,
+                    enabledLayers: markingsContext.enabledLayers,
                     canvasSize: liveSize
                 )
 

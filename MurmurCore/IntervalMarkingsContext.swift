@@ -41,6 +41,25 @@ public enum MarkingsFiducialKind: String, Sendable, CaseIterable, Codable {
     case tOffset
 }
 
+/// User-toggleable layer groups for the on-beat fiducial overlay.
+/// Per the interval-markings design spec: "Toggleable layers (P /
+/// QRS / T / ST) so a QT study and a conduction study each show
+/// only what's relevant." R-peak marks are non-toggleable (they
+/// anchor every beat's identity).
+public enum MarkingsFiducialLayer: String, Sendable, CaseIterable, Codable {
+    case p
+    case qrs
+    case t
+
+    public var displayName: String {
+        switch self {
+        case .p:   return "P"
+        case .qrs: return "QRS"
+        case .t:   return "T"
+        }
+    }
+}
+
 /// A single fiducial: which landmark, where in the recording, how
 /// confident.
 public struct MarkingsFiducial: Sendable, Equatable, Codable, Hashable {
@@ -226,6 +245,16 @@ public final class IntervalMarkingsContext {
         }
     }
 
+    /// Analyst-toggleable overlay layers. Default: every layer on.
+    /// Persisted so a QT-study configuration (P off, QRS off, T on)
+    /// survives across launches.
+    public var enabledLayers: Set<MarkingsFiducialLayer> {
+        didSet {
+            let raw = enabledLayers.map(\.rawValue).sorted()
+            UserDefaults.standard.set(raw, forKey: Keys.enabledLayers)
+        }
+    }
+
     /// Currently focused beat — the one the calipers panel is pinned
     /// on, or the one under the cursor when nothing is pinned. `nil`
     /// when nothing is under focus.
@@ -254,6 +283,12 @@ public final class IntervalMarkingsContext {
     public init() {
         let raw = UserDefaults.standard.string(forKey: Keys.qtcFormula)
         self.qtcFormula = raw.flatMap(MarkingsQTcFormula.init(rawValue:)) ?? .fridericia
+        let persistedLayers = UserDefaults.standard.stringArray(forKey: Keys.enabledLayers)
+        if let persistedLayers, !persistedLayers.isEmpty {
+            self.enabledLayers = Set(persistedLayers.compactMap(MarkingsFiducialLayer.init(rawValue:)))
+        } else {
+            self.enabledLayers = Set(MarkingsFiducialLayer.allCases)
+        }
     }
 
     // MARK: - Writes (orchestrator)
@@ -386,6 +421,7 @@ public final class IntervalMarkingsContext {
 
     private enum Keys {
         static let qtcFormula = "murmur.intervalMarkings.qtcFormula"
+        static let enabledLayers = "murmur.intervalMarkings.enabledLayers"
     }
 }
 

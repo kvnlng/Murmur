@@ -4638,3 +4638,55 @@ struct IntervalTrendGuideStoreTests {
     }
 }
 
+// MARK: - Fiducial layer toggle model
+
+@MainActor
+@Suite("Fiducial layer toggle")
+struct FiducialLayerToggleTests {
+
+    /// Isolated defaults suite so the context's UserDefaults key
+    /// doesn't leak between tests or into the live app defaults.
+    private func makeIsolatedContext() -> IntervalMarkingsContext {
+        // The context reads/writes `UserDefaults.standard` directly.
+        // Clear the relevant key before each test so the initializer
+        // starts from a clean slate. Restore isn't needed because
+        // subsequent tests overwrite it.
+        UserDefaults.standard.removeObject(forKey: "murmur.intervalMarkings.enabledLayers")
+        return IntervalMarkingsContext()
+    }
+
+    @Test("Every layer defaults to enabled on first launch")
+    func defaultsAllOn() {
+        let ctx = makeIsolatedContext()
+        #expect(ctx.enabledLayers == Set(MarkingsFiducialLayer.allCases))
+    }
+
+    @Test("Toggling off a layer persists to UserDefaults")
+    func toggleOffPersists() {
+        let ctx = makeIsolatedContext()
+        ctx.enabledLayers.remove(.p)
+        let raw = UserDefaults.standard.stringArray(forKey: "murmur.intervalMarkings.enabledLayers") ?? []
+        #expect(!raw.contains("p"))
+        #expect(raw.contains("qrs"))
+        #expect(raw.contains("t"))
+    }
+
+    @Test("Re-init after removal reads the persisted subset")
+    func persistedSubsetReloads() {
+        do {
+            let ctx = makeIsolatedContext()
+            ctx.enabledLayers = [.qrs]  // QT study wants QRS on, P + T off
+        }
+        // Fresh context reads from the same UserDefaults key.
+        let reloaded = IntervalMarkingsContext()
+        #expect(reloaded.enabledLayers == [.qrs])
+    }
+
+    @Test("MarkingsFiducialLayer.displayName is short + human-legible")
+    func displayNames() {
+        #expect(MarkingsFiducialLayer.p.displayName == "P")
+        #expect(MarkingsFiducialLayer.qrs.displayName == "QRS")
+        #expect(MarkingsFiducialLayer.t.displayName == "T")
+    }
+}
+
