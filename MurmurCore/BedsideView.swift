@@ -650,6 +650,13 @@ struct BedsideView: View {
                 )
             }
         case .strips:
+            // Strips mode is the ratified exception to the persistent-
+            // stage rule (project_layout_persistent_stage.md,
+            // 2026-07-05). The pin is a focus-mode ergonomic; strips
+            // mode's ergonomic is multi-lead visual alignment across
+            // the whole stack, which pinning would actively fight.
+            // Fully-scrolling is the correct UX here. Don't retrofit
+            // the pinned stage onto this branch.
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     summaryHeader
