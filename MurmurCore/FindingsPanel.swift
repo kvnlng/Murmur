@@ -21,11 +21,16 @@ import SwiftUI
 
 // MARK: - Sort model
 
-/// Sort order for the review queue. Default is `.departure` — the
-/// analyst's triage question is "how does this beat depart from THIS
-/// patient's normal?", not "when did it happen?". Time / category /
-/// confidence remain available for the rare cases those help.
+/// Sort order for the review queue. Free-tier default is `.structural`
+/// — non-normal classes surfaced above the collapsed normal mass,
+/// ordered by frequency. `.departure` is the ECG Metrics unlock: it
+/// ranks by how far each beat departs from the per-patient normal
+/// template, which requires the paid measurement layer. Free-tier
+/// callers may still pick `.departure`; without an owned template it
+/// degrades to the structural ordering (no arithmetic ever runs in
+/// MurmurCore — the sort just has nothing to sort by).
 public enum FindingSort: String, CaseIterable, Identifiable {
+    case structural
     case departure
     case time
     case confidence
@@ -35,6 +40,7 @@ public enum FindingSort: String, CaseIterable, Identifiable {
 
     public var displayName: String {
         switch self {
+        case .structural: return "By kind"
         case .departure:  return "Departure ↓"
         case .time:       return "Time"
         case .confidence: return "Confidence"
@@ -77,7 +83,7 @@ struct FindingsPanel: View {
     let dispositionStore: DispositionStore
     let isEditing: Bool
 
-    @State private var sort: FindingSort = .departure
+    @State private var sort: FindingSort = .structural
     @State private var expandedGroups: Set<String> = []
     @State private var showNormals: Bool = false
 
@@ -86,11 +92,23 @@ struct FindingsPanel: View {
     /// context = no departure ranking (falls back to count-descending).
     @State private var markingsContext = IntervalMarkingsContext.shared
 
+    /// Entitlement state — read live so a purchase completing while
+    /// the panel is open flips the departure sort's locked chrome off
+    /// without a relaunch.
+    @State private var purchaseStore = PurchaseStore.shared
+
+    /// True when the paid measurement layer can actually rank by
+    /// departure. Ownership alone isn't enough — a per-patient template
+    /// must exist, which requires beats + delineation to have finished.
+    private var departureSortAvailable: Bool {
+        purchaseStore.owns(.ecgMetrics) && markingsContext.template != nil
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
             Divider()
-            if !rhythmContextLines.isEmpty {
+            if !headerContextLines.isEmpty || !atrRhythmTokens.isEmpty {
                 rhythmContextBanner
                 Divider()
             }
@@ -135,6 +153,7 @@ struct FindingsPanel: View {
             }
             triageTally
             filterChips
+            departureUnlockSeam
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -145,8 +164,13 @@ struct FindingsPanel: View {
     }
 
     private var triageTally: some View {
+        // "To review" uses `.blue` — disposition state gets its own
+        // token per the ratified 2026-07-05 amber de-confliction.
+        // Amber (`.orange`) is now reserved for analyst-marked
+        // findings; painting an unreviewed count amber would collide
+        // with that meaning.
         HStack(spacing: 6) {
-            tallyChip(count: tally.unreviewed, label: "To review", color: .orange)
+            tallyChip(count: tally.unreviewed, label: "To review", color: .blue)
             tallyChip(count: tally.confirmed, label: "Confirmed", color: .green)
             tallyChip(count: tally.dismissed, label: "Dismissed", color: .secondary)
         }
@@ -185,14 +209,17 @@ struct FindingsPanel: View {
                 Button {
                     sort = mode
                 } label: {
-                    Label(mode.displayName, systemImage: sort == mode ? "checkmark" : "")
+                    Label(
+                        sortMenuTitle(mode),
+                        systemImage: sortCheckmark(mode)
+                    )
                 }
             }
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "arrow.up.arrow.down")
                     .font(.caption2)
-                Text("Sort: \(sort.displayName)")
+                Text("Sort: \(effectiveSort.displayName)")
                     .font(.caption)
             }
             .foregroundStyle(Color.accentColor)
@@ -203,8 +230,46 @@ struct FindingsPanel: View {
         }
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Sort findings by \(sort.displayName.lowercased())")
+        .help("Sort findings by \(effectiveSort.displayName.lowercased())")
         .accessibilityIdentifier("findings-sort-picker")
+    }
+
+    /// Menu item title — appends "(ECG Metrics)" to `.departure` when
+    /// the measurement layer can't back it, so the paid seam reads as
+    /// what it is (a locked capability, not a mystery inert option).
+    private func sortMenuTitle(_ mode: FindingSort) -> String {
+        if mode == .departure && !departureSortAvailable {
+            return "\(mode.displayName) — ECG Metrics"
+        }
+        return mode.displayName
+    }
+
+    /// Checkmark logic keys off `effectiveSort` so the picker's tick
+    /// stays truthful about what's actually being applied — otherwise
+    /// selecting `.departure` when locked would show a checkmark next
+    /// to `.departure` while the queue still renders structurally.
+    private func sortCheckmark(_ mode: FindingSort) -> String {
+        return effectiveSort == mode ? "checkmark" : ""
+    }
+
+    /// Small caption under the sort chip that names the paid unlock
+    /// when the analyst is looking at the free-tier structural view.
+    /// Hidden once ECG Metrics is owned AND a template exists — at
+    /// that point the departure sort is a first-class picker option
+    /// and the seam is no longer needed.
+    @ViewBuilder
+    private var departureUnlockSeam: some View {
+        if !departureSortAvailable {
+            HStack(spacing: 4) {
+                Image(systemName: "lock.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                Text("Rank by departure from this patient's normal — ECG Metrics")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            .accessibilityIdentifier("departure-sort-unlock-seam")
+        }
     }
 
     private var categoryMenu: some View {
@@ -285,27 +350,68 @@ struct FindingsPanel: View {
 
     // MARK: - Rhythm-context banner
 
-    private var rhythmContextLines: [String] {
+    /// Header-derived context lines — meds / patient notes / clinical
+    /// annotations from the `.hea` file. These come from the recording
+    /// header, NOT the annotation stream, so they get their own line
+    /// per the ratified mockup review G provenance split (2026-07-05).
+    private var headerContextLines: [String] {
         headerComments
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
     }
 
+    /// Rhythm-change categories present in the recording's annotation
+    /// stream (typically `.atr`) — the second half of the ratified
+    /// provenance split. Renders as a compact list of unique rhythm
+    /// tokens ("AFIB", "VT", "…") so the analyst can see at a glance
+    /// which rhythms the annotator flagged over the recording.
+    private var atrRhythmTokens: [String] {
+        let rhythmCategories: Set<String> = [
+            "+", "AFIB", "AFL", "SVTA", "SBR", "BII", "BI", "NOD", "VT", "VF", "VFL"
+        ]
+        var seen = Set<String>()
+        var ordered: [String] = []
+        for ann in annotations {
+            let normalized = ann.category.trimmingCharacters(in: .whitespaces).uppercased()
+            guard rhythmCategories.contains(normalized) else { continue }
+            // Rhythm-change markers (WFDB `+`) don't render on their
+            // own — they mark a boundary but carry the next rhythm in
+            // their note. Skip the raw `+` tag; the specific rhythm
+            // annotations carry the useful signal.
+            guard normalized != "+" else { continue }
+            if seen.insert(normalized).inserted {
+                ordered.append(humanLabel(for: ann.category))
+            }
+        }
+        return ordered
+    }
+
     private var rhythmContextBanner: some View {
         HStack(alignment: .top, spacing: 8) {
-            Text("🫀")
+            // SF Symbol replaces the earlier emoji — reads as a
+            // Mac-native research instrument to the analyst audience
+            // (mockup review H, ratified 2026-07-05).
+            Image(systemName: "waveform.path.ecg")
                 .font(.body)
+                .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text("Rhythm context")
                     .font(.caption.weight(.semibold))
-                Text(rhythmContextLines.joined(separator: " · "))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-                Text("from the recording's `.hea` header — analyst-editable in Notes")
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.tertiary)
+                if !atrRhythmTokens.isEmpty {
+                    provenanceLine(
+                        label: "Rhythms",
+                        detail: atrRhythmTokens.joined(separator: " · "),
+                        source: "from `.atr` rhythm markers"
+                    )
+                }
+                if !headerContextLines.isEmpty {
+                    provenanceLine(
+                        label: "Clinical notes",
+                        detail: headerContextLines.joined(separator: " · "),
+                        source: "from `.hea` header — analyst-editable in Notes"
+                    )
+                }
             }
             Spacer(minLength: 0)
         }
@@ -315,6 +421,23 @@ struct FindingsPanel: View {
         .background(Color.secondary.opacity(0.04))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("rhythm-context-banner")
+    }
+
+    private func provenanceLine(label: String, detail: String, source: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(label)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.primary)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            Text(source)
+                .font(.caption2.monospaced())
+                .foregroundStyle(.tertiary)
+        }
     }
 
     // MARK: - Queue list
@@ -441,15 +564,20 @@ struct FindingsPanel: View {
                     Text(entry.annotation.displayLabel)
                         .font(.caption.weight(.semibold))
                     if let conf = entry.annotation.confidence {
-                        Text("· conf \(String(format: "%.2f", conf))")
+                        Text("· \(confidenceLabel(for: entry.annotation, value: conf))")
                             .font(.caption2.monospaced())
                             .foregroundStyle(.tertiary)
                     }
                     Spacer(minLength: 4)
                     if let departureLabel = entry.departureLabel {
+                        // Neutral ink per the ratified 2026-07-05 B-RUO
+                        // rule — an app-computed departure magnitude in
+                        // a caution hue reads as a verdict the RUO
+                        // framing does not permit. Sign + magnitude
+                        // carry the direction.
                         Text(departureLabel)
                             .font(.caption2.monospaced())
-                            .foregroundStyle(Color.orange)
+                            .foregroundStyle(.primary)
                     }
                     Text(formatTime(entry.annotation.sampleIndex))
                         .font(.caption2.monospaced())
@@ -468,6 +596,22 @@ struct FindingsPanel: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
         .opacity(dispositionStore.record(for: entry.annotation.id)?.state == .dismissed ? 0.5 : 1.0)
+    }
+
+    /// Label for the numeric confidence value shown on exemplar rows.
+    /// A `wfdb.atr`-sourced annotation carries expert ground truth, so
+    /// the number is the fiducial store's morphology-cluster-assignment
+    /// confidence — labelled as such rather than the bare "conf" which
+    /// read as uncertainty about the reference annotation itself
+    /// (mockup review F, 2026-07-05). Producer-sourced findings keep
+    /// the "conf" label — that IS the producer's own confidence.
+    private func confidenceLabel(for ann: Annotation, value: Double) -> String {
+        let formatted = String(format: "%.2f", value)
+        let source = ann.source.lowercased()
+        if source.contains("wfdb.atr") || source.contains("wfdb-atr") {
+            return "cluster match \(formatted)"
+        }
+        return "conf \(formatted)"
     }
 
     private func toggleGroup(_ id: String) {
@@ -597,7 +741,10 @@ struct FindingsPanel: View {
             )
         }
         return groups.sorted { lhs, rhs in
-            switch sort {
+            switch effectiveSort {
+            case .structural:
+                if lhs.count != rhs.count { return lhs.count > rhs.count }
+                return lhs.category < rhs.category
             case .departure:
                 if lhs.aggregateDeparture != rhs.aggregateDeparture {
                     return lhs.aggregateDeparture > rhs.aggregateDeparture
@@ -619,8 +766,22 @@ struct FindingsPanel: View {
         }
     }
 
+    /// Resolved sort — collapses `.departure` to `.structural` when the
+    /// measurement layer can't back it (no ownership or no template
+    /// yet). No arithmetic runs in MurmurCore; the sort just has no
+    /// scores to sort by, so falling back keeps the queue coherent.
+    private var effectiveSort: FindingSort {
+        if sort == .departure && !departureSortAvailable { return .structural }
+        return sort
+    }
+
     private func sortedEntries(_ entries: [FindingEntry]) -> [FindingEntry] {
-        switch sort {
+        switch effectiveSort {
+        case .structural:
+            // Within a group, structural sort presents by time — the
+            // group itself is the "kind" axis. Time keeps navigation
+            // predictable across scrolls.
+            return entries.sorted { $0.annotation.sampleIndex < $1.annotation.sampleIndex }
         case .departure:
             return entries.sorted { (lhs, rhs) in
                 (lhs.departure ?? 0) > (rhs.departure ?? 0)

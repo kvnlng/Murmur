@@ -268,4 +268,39 @@ final class MurmurUINavigationTests: XCTestCase {
         XCTAssertTrue(overview.waitForExistence(timeout: 3),
                       "Merged overview map should render inside the pinned stage")
     }
+
+    // MARK: - Review queue Phase 1 free-tier defaults
+
+    /// Free-tier default sort is `.structural` — non-normal categories
+    /// surfaced above the collapsed normal mass by frequency. The
+    /// synthetic fixture does not own ECG Metrics and carries no
+    /// fiducial template, so the LockedView seam ("Rank by departure
+    /// from this patient's normal — ECG Metrics") should also be
+    /// visible. Guards the ratified measurement-layer gating rule.
+    ///
+    /// The seam element is the load-bearing assertion. When
+    /// `PurchaseStore.owns(.ecgMetrics) && markingsContext.template
+    /// != nil` becomes true the seam disappears — its very existence
+    /// is a signal that the measurement layer is gated. We deliberately
+    /// don't assert the sort picker's visible label because macOS
+    /// surfaces Menu-in-inspector labels inconsistently to the XCUI
+    /// accessibility tree.
+    @MainActor
+    func testFreeTierDepartureUnlockSeamIsVisible() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-sample"]
+        app.launch()
+
+        // Sort picker existence proves the review queue rendered; the
+        // seam existence proves the paid gate is on and honestly signalled.
+        let sortPicker = app.descendants(matching: .any)
+            .matching(identifier: "findings-sort-picker").firstMatch
+        XCTAssertTrue(sortPicker.waitForExistence(timeout: 5),
+                      "Findings sort picker should render on the review queue")
+
+        let seam = app.descendants(matching: .any)
+            .matching(identifier: "departure-sort-unlock-seam").firstMatch
+        XCTAssertTrue(seam.waitForExistence(timeout: 3),
+                      "Departure-sort unlock seam should be visible without ECG Metrics")
+    }
 }
