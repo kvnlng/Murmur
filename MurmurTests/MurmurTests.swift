@@ -5170,4 +5170,72 @@ struct BeatDelineatorTier2Tests {
     }
 }
 
+@Suite("Beat delineator — Tier 2 metamorphic invariants")
+struct BeatDelineatorMetamorphicTests {
+
+    /// Amplitude scaling: multiplying every sample by k > 0 changes
+    /// amplitude-based numbers but MUST NOT change any time-based
+    /// fiducial. A derivative-threshold approach is scale-equivariant
+    /// modulo a threshold shift; a correctly-tuned relative threshold
+    /// is scale-invariant. Any deviation here means a hidden absolute
+    /// threshold or ADC-value dependency has crept in.
+    /// Memo: metamorphic-gate #1 (project_ecg_testing_strategy.md).
+    @Test("Amplitude scaling by 2x leaves every fiducial position unchanged")
+    func amplitudeScalingLeavesFiducialsUnchanged() {
+        let base = SyntheticECG.cleanSinus(beatCount: 20)
+        let scaled: [Float] = base.samples.map { $0 * 2.0 }
+        let baseStore = BeatDelineator.delineate(
+            samples: base.samples,
+            sampleRate: base.sampleRate,
+            rPeaks: base.rPeaks
+        )
+        let scaledStore = BeatDelineator.delineate(
+            samples: scaled,
+            sampleRate: base.sampleRate,
+            rPeaks: base.rPeaks
+        )
+        #expect(baseStore.beats.count == scaledStore.beats.count)
+        for (b, s) in zip(baseStore.beats, scaledStore.beats) {
+            #expect(b.rPeakSampleIndex == s.rPeakSampleIndex)
+            #expect(b.pOnset?.sampleIndex    == s.pOnset?.sampleIndex,    "pOnset must be scale-invariant")
+            #expect(b.pOffset?.sampleIndex   == s.pOffset?.sampleIndex,   "pOffset must be scale-invariant")
+            #expect(b.qrsOnset?.sampleIndex  == s.qrsOnset?.sampleIndex,  "qrsOnset must be scale-invariant")
+            #expect(b.qrsOffset?.sampleIndex == s.qrsOffset?.sampleIndex, "qrsOffset must be scale-invariant")
+            #expect(b.tOnset?.sampleIndex    == s.tOnset?.sampleIndex,    "tOnset must be scale-invariant")
+            #expect(b.tOffset?.sampleIndex   == s.tOffset?.sampleIndex,   "tOffset must be scale-invariant")
+        }
+    }
+
+    /// Baseline offset (slow drift or DC offset): adding a constant k
+    /// to every sample MUST NOT move QRS-onset or QRS-offset. QRS
+    /// boundaries derive from the signal's derivative, which is
+    /// invariant to a constant. A shift here means a hidden
+    /// absolute-threshold in the QRS window has crept in — exactly
+    /// the family of bugs the memo's "1651 s" note names.
+    /// Memo: metamorphic-gate #3.
+    @Test("Baseline offset by +0.5 leaves QRS boundaries unchanged")
+    func baselineOffsetLeavesQRSUnchanged() {
+        let base = SyntheticECG.cleanSinus(beatCount: 20)
+        let shifted: [Float] = base.samples.map { $0 + 0.5 }
+        let baseStore = BeatDelineator.delineate(
+            samples: base.samples,
+            sampleRate: base.sampleRate,
+            rPeaks: base.rPeaks
+        )
+        let shiftedStore = BeatDelineator.delineate(
+            samples: shifted,
+            sampleRate: base.sampleRate,
+            rPeaks: base.rPeaks
+        )
+        #expect(baseStore.beats.count == shiftedStore.beats.count)
+        for (b, s) in zip(baseStore.beats, shiftedStore.beats) {
+            #expect(b.rPeakSampleIndex == s.rPeakSampleIndex)
+            #expect(b.qrsOnset?.sampleIndex  == s.qrsOnset?.sampleIndex,
+                    "qrsOnset must be baseline-invariant (derivative-based)")
+            #expect(b.qrsOffset?.sampleIndex == s.qrsOffset?.sampleIndex,
+                    "qrsOffset must be baseline-invariant (derivative-based)")
+        }
+    }
+}
+
 #endif // canImport(MurmurMetrics)
