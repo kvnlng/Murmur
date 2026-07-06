@@ -108,6 +108,16 @@ public struct MarkingsBeat: Sendable, Equatable, Codable, Identifiable {
     /// beat — a censored beat has a KNOWN LOWER BOUND, not just noise.
     public let tOffsetCensored: Bool
 
+    /// Symmetric half-width of the calibrated 95% CI on this beat's QT
+    /// measurement, in ms. Derived from the T-offset risk-score →
+    /// calibration bin lookup (the P95 |err| from
+    /// `MurmurMetrics.CalibrationTable`). Nil when the orchestrator
+    /// hasn't propagated calibrated uncertainty for this beat — the
+    /// focus-beat inspector then falls back to the point estimate
+    /// without a "±X ms" adornment. Populated during the orchestrator's
+    /// v1→v2 delineator swap (separate ticket).
+    public let qtCalibratedHalfWidthMs: Double?
+
     public init(
         rPeakSampleIndex: Int64,
         rPeakConfidence: Double = 1.0,
@@ -122,7 +132,8 @@ public struct MarkingsBeat: Sendable, Equatable, Codable, Identifiable {
         qtMs: Double? = nil,
         qtcMs: Double? = nil,
         precedingRRMs: Double? = nil,
-        tOffsetCensored: Bool = false
+        tOffsetCensored: Bool = false,
+        qtCalibratedHalfWidthMs: Double? = nil
     ) {
         self.rPeakSampleIndex = rPeakSampleIndex
         self.rPeakConfidence = min(1.0, max(0.0, rPeakConfidence))
@@ -138,6 +149,7 @@ public struct MarkingsBeat: Sendable, Equatable, Codable, Identifiable {
         self.qtcMs = qtcMs
         self.precedingRRMs = precedingRRMs
         self.tOffsetCensored = tOffsetCensored
+        self.qtCalibratedHalfWidthMs = qtCalibratedHalfWidthMs
     }
 
     public var id: Int64 { rPeakSampleIndex }

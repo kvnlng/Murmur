@@ -76,15 +76,28 @@ struct BeatCalipers: View {
                 undefined: kind == .ectopic)
             row("QRS", value: beat.qrsMs, delta: delta(beat.qrsMs, vs: template?.medianQRSMs))
             row("QT",  value: qtValueForRendering, delta: qtDeltaForRendering,
-                undefined: kind == .ectopic)
+                undefined: kind == .ectopic,
+                censored: qtIsCensored,
+                halfWidthMs: qtHalfWidthForRendering)
             row("QTc", qtcSuffix: qtcFormula.displayName,
                 value: qtcValueForRendering, delta: qtcDeltaForRendering,
-                undefined: kind == .ectopic)
+                undefined: kind == .ectopic,
+                censored: qtIsCensored,
+                halfWidthMs: qtHalfWidthForRendering)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
         .accessibilityIdentifier("beat-calipers")
+    }
+
+    /// True when the T-offset walk clipped at the search-window ceiling
+    /// — QT / QTc are lower bounds ("≥ X ms"), NOT confident point
+    /// estimates. Ectopic beats already suppress QT/QTc as undefined so
+    /// the censored treatment yields to that.
+    private var qtIsCensored: Bool { beat.tOffsetCensored && kind != .ectopic }
+    private var qtHalfWidthForRendering: Double? {
+        kind == .ectopic ? nil : beat.qtCalibratedHalfWidthMs
     }
 
     private var ectopicSubtitle: some View {
@@ -135,7 +148,9 @@ struct BeatCalipers: View {
                      qtcSuffix: String? = nil,
                      value: Double?,
                      delta: Double?,
-                     undefined: Bool = false) -> some View {
+                     undefined: Bool = false,
+                     censored: Bool = false,
+                     halfWidthMs: Double? = nil) -> some View {
         HStack(spacing: 4) {
             HStack(spacing: 3) {
                 Text(label)
@@ -153,18 +168,31 @@ struct BeatCalipers: View {
             // explicitly undefined for this beat kind (PR on a PVC,
             // etc.). Extends the low-confidence T-offset pattern the
             // fiducial overlay already uses — muted, not caution-hued.
-            Text(undefined ? "—" : msString(value))
+            // Censored (T-offset walk hit the ceiling) renders as
+            // "≥ X ms" — a lower bound, not a point estimate —
+            // per project_qtc_trend_uncertainty_wireup_spec.md.
+            Text(valueDisplay(value: value, undefined: undefined, censored: censored))
                 .font(.caption.monospacedDigit())
                 .italic(undefined)
                 .foregroundStyle(undefined ? Color.secondary : Color.primary)
-                .frame(width: 62, alignment: .trailing)
-            deltaLabel(delta)
-                .frame(width: 62, alignment: .trailing)
+                .frame(width: 76, alignment: .trailing)
+                .accessibilityIdentifier(censored ? "beat-calipers-\(label.lowercased())-censored" : "beat-calipers-\(label.lowercased())")
+            deltaLabel(delta, halfWidthMs: undefined ? nil : halfWidthMs)
+                .frame(width: 78, alignment: .trailing)
         }
     }
 
+    /// The value cell string. Undefined (ectopic) wins over censored —
+    /// PR on a PVC is undefined outright, not a lower bound.
+    private func valueDisplay(value: Double?, undefined: Bool, censored: Bool) -> String {
+        if undefined { return "—" }
+        guard let v = value else { return "—" }
+        if censored { return String(format: "≥ %.1f ms", v) }
+        return String(format: "%.1f ms", v)
+    }
+
     @ViewBuilder
-    private func deltaLabel(_ delta: Double?) -> some View {
+    private func deltaLabel(_ delta: Double?, halfWidthMs: Double? = nil) -> some View {
         if let d = delta {
             let sign = d >= 0 ? "+" : "−"
             // Neutral ink for every departure magnitude. App-computed
@@ -172,9 +200,28 @@ struct BeatCalipers: View {
             // verdict — caution hues would encode a clinical call the
             // app is not allowed to make (RUO / mockup-review B-RUO,
             // ratified 2026-07-05). Sign + magnitude carry the signal.
-            Text("\(sign)\(String(format: "%.1f", abs(d))) ms")
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(.primary)
+            // When the calibrated per-beat CI half-width is available,
+            // the "±X ms" adornment surfaces the measurement uncertainty
+            // per project_qtc_trend_uncertainty_wireup_spec.md.
+            HStack(spacing: 3) {
+                // Unit "ms" is only rendered on the last token in the
+                // row — either the delta itself, or its calibrated
+                // ±half-width. Avoids "+117.0 ms ± 22 ms" wrapping in
+                // the compact panel while keeping units unambiguous.
+                if let hw = halfWidthMs {
+                    Text("\(sign)\(String(format: "%.1f", abs(d)))")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.primary)
+                    Text("±\(String(format: "%.0f", hw)) ms")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                        .accessibilityIdentifier("beat-calipers-ci-halfwidth")
+                } else {
+                    Text("\(sign)\(String(format: "%.1f", abs(d))) ms")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.primary)
+                }
+            }
         } else {
             Text("—")
                 .font(.caption2)
