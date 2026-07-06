@@ -412,20 +412,16 @@ final class SnapshotTests: XCTestCase {
     /// calibrated ± half-width surfaced in the delta column per
     /// project_qtc_trend_uncertainty_wireup_spec.md.
     func testBeatCalipers_censoredWithCalibratedCI() {
-        let beat = MarkingsBeat(
-            rPeakSampleIndex: 12500, rPeakConfidence: 1.0,
-            qrsOnset:  MarkingsFiducial(kind: .qrsOnset,  sampleIndex: 12460, confidence: 0.95),
+        let beat = MarkingsBeat(rPeakSampleIndex: 12500, rPeakConfidence: 1.0,
+            qrsOnset: MarkingsFiducial(kind: .qrsOnset, sampleIndex: 12460, confidence: 0.95),
             qrsOffset: MarkingsFiducial(kind: .qrsOffset, sampleIndex: 12530, confidence: 0.90),
-            tOffset:   MarkingsFiducial(kind: .tOffset,   sampleIndex: 12960, confidence: 0.30),
-            prMs: 155.0, qrsMs: 92.0, qtMs: 500.0, qtcMs: 545.0, precedingRRMs: 820.0,
-            tOffsetCensored: true, qtCalibratedHalfWidthMs: 22
-        )
-        let template = MarkingsTemplate(
-            sampleCount: 200,
+            tOffset: MarkingsFiducial(kind: .tOffset, sampleIndex: 12960, confidence: 0.30),
+            prMs: 155, qrsMs: 92, qtMs: 500, qtcMs: 545, precedingRRMs: 820,
+            tOffsetCensored: true, qtCalibratedHalfWidthMs: 22)
+        let template = MarkingsTemplate(sampleCount: 200,
             medianPRMs: 148, iqrPRMs: 12, medianQRSMs: 88, iqrQRSMs: 6,
             medianQTMs: 395, iqrQTMs: 18,
-            qtcFormulaName: "Fridericia", medianQTcMs: 428, iqrQTcMs: 16
-        )
+            qtcFormulaName: "Fridericia", medianQTcMs: 428, iqrQTcMs: 16)
         let view = BeatCalipers(beat: beat, sampleRate: 360, template: template, qtcFormula: .fridericia)
             .frame(width: 260).padding().background(Color.white)
         assertSnapshot(of: render(view, size: CGSize(width: 310, height: 200)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
@@ -587,6 +583,17 @@ final class SnapshotTests: XCTestCase {
         .frame(width: 520)
         .padding()
         .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 552, height: 180)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
+    /// Range finding — analyst-authored amber overlay + chip. Amber is
+    /// the ONLY layer on the lane that carries the caution accent.
+    func testIntervalTrendLane_rangeFinding() {
+        let findings = [IntervalTrendRangeFinding(startSeconds: 600, endSeconds: 1400, label: "Prolonged QTc")]
+        let view = IntervalTrendLane(timeRangeSeconds: 0...1800, data: makeCanonicalTrendData(),
+                                     metric: .qtc, showMode: .medianAndIQR,
+                                     selectedBinPreset: .twoMinute, rangeFindings: findings)
+            .frame(width: 520).padding().background(Color.white)
         assertSnapshot(of: render(view, size: CGSize(width: 552, height: 180)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 

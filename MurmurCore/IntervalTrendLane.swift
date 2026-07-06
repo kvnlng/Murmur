@@ -49,6 +49,26 @@ public struct IntervalTrendEvent: Sendable, Equatable, Identifiable {
     }
 }
 
+/// Analyst-authored range finding overlaid on the trend lane. Amber
+/// is the RESERVED accent for these — no other layer on the lane
+/// carries the token (ratified B-RUO, project_mockup_review_pass.md).
+/// Sourced from a MurmurCore `Annotation` the reviewer promoted to a
+/// range finding; authoring UX (drag to select on the lane) is a
+/// follow-up wire-up.
+public struct IntervalTrendRangeFinding: Sendable, Equatable, Identifiable {
+    public let id: UUID
+    public let startSeconds: Double
+    public let endSeconds: Double
+    public let label: String
+
+    public init(id: UUID = UUID(), startSeconds: Double, endSeconds: Double, label: String) {
+        self.id = id
+        self.startSeconds = startSeconds
+        self.endSeconds = endSeconds
+        self.label = label
+    }
+}
+
 struct IntervalTrendLane: View {
 
     /// Absolute time range (seconds from recording start) for the
@@ -102,6 +122,12 @@ struct IntervalTrendLane: View {
     /// which annotations count as events.
     let events: [IntervalTrendEvent]
 
+    /// Analyst-authored range findings — the ONLY amber-tinted layer
+    /// on the lane. Renders as a translucent orange overlay + chip
+    /// label. The lane makes no policy about which annotations count
+    /// as findings.
+    let rangeFindings: [IntervalTrendRangeFinding]
+
     /// Add a guide at a user-picked value + label. Non-nil enables the
     /// "+ guide" chip in the caption row.
     let onAddGuide: ((Double, String) -> Void)?
@@ -127,6 +153,7 @@ struct IntervalTrendLane: View {
         selectedBinPreset: IntervalTrendBinPreset,
         guides: [IntervalTrendGuide] = [],
         events: [IntervalTrendEvent] = [],
+        rangeFindings: [IntervalTrendRangeFinding] = [],
         externalHoverTimeSeconds: Double? = nil,
         onLaneHover: ((Double?) -> Void)? = nil,
         onBinClick: ((Double) -> Void)? = nil,
@@ -143,6 +170,7 @@ struct IntervalTrendLane: View {
         self.selectedBinPreset = selectedBinPreset
         self.guides = guides
         self.events = events
+        self.rangeFindings = rangeFindings
         self.externalHoverTimeSeconds = externalHoverTimeSeconds
         self.onLaneHover = onLaneHover
         self.onBinClick = onBinClick
@@ -344,6 +372,35 @@ struct IntervalTrendLane: View {
                         yEnd: .value("baseline-hi", band.upperBound)
                     )
                     .foregroundStyle(Color.primary.opacity(0.08))
+                }
+
+                // Analyst-authored range findings — the ONLY amber
+                // layer on the lane per ratified B-RUO. Rendered
+                // BEHIND events and guides so those still read on top
+                // of the finding's tint. `startSeconds`/`endSeconds`
+                // clamp to the visible x-range via chart scale.
+                ForEach(rangeFindings) { finding in
+                    RectangleMark(
+                        xStart: .value("find-t0", finding.startSeconds),
+                        xEnd: .value("find-t1", finding.endSeconds),
+                        yStart: .value("find-y0", yDomain.lowerBound),
+                        yEnd: .value("find-y1", yDomain.upperBound)
+                    )
+                    .foregroundStyle(Color.orange.opacity(0.15))
+                    .annotation(
+                        position: .top,
+                        alignment: .leading,
+                        spacing: 2,
+                        overflowResolution: .init(x: .fit(to: .plot), y: .fit(to: .plot))
+                    ) {
+                        Text(finding.label)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color.orange.opacity(0.85)))
+                            .accessibilityIdentifier("interval-trend-lane-finding-\(finding.id.uuidString)")
+                    }
                 }
 
                 // Analyst-authored events — vertical markers on the
