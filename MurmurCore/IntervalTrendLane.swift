@@ -410,8 +410,11 @@ struct IntervalTrendLane: View {
                         }
                 }
 
-                // IQR ribbon — one AreaMark per eligible run so the
-                // ribbon never bridges across ineligible / gap bins.
+                // IQR ribbon (wide, ~13% opacity) — how much QT actually
+                // varies beat-to-beat = PHYSIOLOGICAL spread. One
+                // AreaMark per eligible run so the ribbon never bridges
+                // across ineligible / gap bins. Sits OUTSIDE the
+                // measurement band per project_qtc_trend_uncertainty_wireup_spec.md.
                 if showMode == .medianAndIQR {
                     ForEach(eligibleRuns.indices, id: \.self) { idx in
                         let run = eligibleRuns[idx]
@@ -420,11 +423,31 @@ struct IntervalTrendLane: View {
                                 x: .value("t", bin.centerSeconds),
                                 yStart: .value("q1", bin.q1),
                                 yEnd: .value("q3", bin.q3),
-                                series: .value("run", idx)
+                                series: .value("iqr-run", idx)
                             )
-                            .foregroundStyle(Color.accentColor.opacity(0.16))
+                            .foregroundStyle(Color.primary.opacity(0.13))
                             .interpolationMethod(.monotone)
                         }
+                    }
+                }
+
+                // Measurement band (tight, ~30% opacity) — bootstrap CI
+                // on the bin median = MEASUREMENT uncertainty (how well
+                // we know the trend point). Distinct from IQR: denser
+                // + narrower, always drawn regardless of show-mode. This
+                // is the visible surface of the calibrated
+                // per-beat-uncertainty aggregation.
+                ForEach(eligibleRuns.indices, id: \.self) { idx in
+                    let run = eligibleRuns[idx]
+                    ForEach(run) { bin in
+                        AreaMark(
+                            x: .value("t", bin.centerSeconds),
+                            yStart: .value("band-lo", bin.bandLowerMs),
+                            yEnd: .value("band-hi", bin.bandUpperMs),
+                            series: .value("band-run", idx)
+                        )
+                        .foregroundStyle(Color.primary.opacity(0.30))
+                        .interpolationMethod(.monotone)
                     }
                 }
 
@@ -439,22 +462,26 @@ struct IntervalTrendLane: View {
                         )
                         .symbol(.circle)
                         .symbolSize(10)
-                        .foregroundStyle(Color.accentColor.opacity(0.35))
+                        .foregroundStyle(Color.primary.opacity(0.35))
                     }
                 }
 
-                // Median line — always drawn. Chunked into eligible
-                // runs so the line breaks across low-confidence gaps.
+                // Median line — always drawn in NEUTRAL ink per ratified
+                // B-RUO color discipline (project_mockup_review_pass.md):
+                // app-computed departures never render in caution hues,
+                // only analyst-marked findings use amber. Chunked into
+                // eligible runs so the line breaks across low-confidence
+                // gaps.
                 ForEach(eligibleRuns.indices, id: \.self) { idx in
                     let run = eligibleRuns[idx]
                     ForEach(run) { bin in
                         LineMark(
                             x: .value("t", bin.centerSeconds),
                             y: .value("median", bin.median),
-                            series: .value("run", idx)
+                            series: .value("median-run", idx)
                         )
                         .interpolationMethod(.monotone)
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(Color.primary)
                         .lineStyle(StrokeStyle(lineWidth: 1.8, lineJoin: .round))
                     }
                 }
@@ -474,10 +501,11 @@ struct IntervalTrendLane: View {
 
                 // Hover highlight — rule + emphasized point at the
                 // hovered bin's center. Also fires when the ECG is the
-                // hover source.
+                // hover source. Neutral ink for the app-computed hover;
+                // no accent hue on a computed magnitude.
                 if let hover = hoveredBin {
                     RuleMark(x: .value("hover", hover.centerSeconds))
-                        .foregroundStyle(Color.accentColor.opacity(0.45))
+                        .foregroundStyle(Color.primary.opacity(0.45))
                         .lineStyle(StrokeStyle(lineWidth: 1))
                     if hover.median.isFinite {
                         PointMark(
@@ -486,7 +514,7 @@ struct IntervalTrendLane: View {
                         )
                         .symbol(.circle)
                         .symbolSize(60)
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(Color.primary)
                     }
                 }
             }

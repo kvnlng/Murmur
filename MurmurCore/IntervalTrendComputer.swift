@@ -80,6 +80,20 @@ public struct IntervalTrendBin: Sendable, Equatable, Identifiable {
     public let q1: Double
     /// Upper quartile.
     public let q3: Double
+    /// Bootstrap CI on the MEDIAN — MEASUREMENT uncertainty (how well we
+    /// know the trend point), NOT physiological spread. Renders as a
+    /// tight band tucked INSIDE the IQR ribbon. Kept visually distinct
+    /// from the IQR per project_qtc_trend_uncertainty_wireup_spec.md —
+    /// bands 2 and 3 are DIFFERENT quantities, do not merge or draw one
+    /// as the other.
+    public let bandLowerMs: Double
+    public let bandUpperMs: Double
+    /// True when at least one beat in the bin has a right-censored
+    /// T-offset (walk clipped at the physiological search-window
+    /// ceiling — true T-offset is ≥ reported value). Drives the
+    /// "open-top / QT ≥" rendering. Distinct from `!isEligible`, which
+    /// covers low-confidence-but-measured beats.
+    public let hasCensoredBeats: Bool
     /// True when the bin passed the confidence floor. False bins
     /// render dimmed / hatched.
     public let isEligible: Bool
@@ -91,6 +105,32 @@ public struct IntervalTrendBin: Sendable, Equatable, Identifiable {
     /// per-beat scatter show-mode. Ineligible bins carry an empty
     /// array.
     public let perBeatValues: [Double]
+
+    public init(
+        startSeconds: Double,
+        endSeconds: Double,
+        median: Double,
+        q1: Double,
+        q3: Double,
+        bandLowerMs: Double,
+        bandUpperMs: Double,
+        hasCensoredBeats: Bool,
+        isEligible: Bool,
+        beatCount: Int,
+        perBeatValues: [Double]
+    ) {
+        self.startSeconds = startSeconds
+        self.endSeconds = endSeconds
+        self.median = median
+        self.q1 = q1
+        self.q3 = q3
+        self.bandLowerMs = bandLowerMs
+        self.bandUpperMs = bandUpperMs
+        self.hasCensoredBeats = hasCensoredBeats
+        self.isEligible = isEligible
+        self.beatCount = beatCount
+        self.perBeatValues = perBeatValues
+    }
 
     public var id: Double { (startSeconds + endSeconds) / 2 }
 
@@ -224,6 +264,10 @@ public enum IntervalTrendComputer {
                     ? Double(confidenceHits) / Double(totalBeatsInBin)
                     : 0.0
                 let eligible = confidenceFraction >= confidenceFloor
+                // Bootstrap CI on the median — measurement uncertainty,
+                // distinct from IQR (physiological spread). Deterministic
+                // seed derived from bin start so re-renders stay stable.
+                let ci = bootstrapMedianCI(values: values, seed: UInt64(bitPattern: Int64(binStart * 1000)))
                 bins.append(
                     IntervalTrendBin(
                         startSeconds: binStart,
@@ -231,6 +275,14 @@ public enum IntervalTrendComputer {
                         median: stats.median,
                         q1: stats.q1,
                         q3: stats.q3,
+                        bandLowerMs: ci.lower,
+                        bandUpperMs: ci.upper,
+                        // Phase-4 wire-up: populated once MarkingsBeat
+                        // carries the delineator's `tOffsetCensored`
+                        // flag through from MurmurMetrics. Default false
+                        // is safe here — nothing renders open-top until
+                        // this flips true.
+                        hasCensoredBeats: false,
                         isEligible: eligible,
                         beatCount: totalBeatsInBin,
                         perBeatValues: eligible ? values : []
@@ -328,6 +380,60 @@ public enum IntervalTrendComputer {
             return "\(Int(mins))-min"
         }
         return String(format: "%.1f-min", mins)
+    }
+
+    // MARK: - Bootstrap CI on the median
+
+    /// Block-bootstrap 2.5th/97.5th percentile of the median. Mirrors
+    /// `TrendBinAggregator` in MurmurMetrics but stays local so
+    /// MurmurCore doesn't cross the paid-extension import boundary. The
+    /// deterministic seed makes re-renders stable across viewport
+    /// changes; block-resampling (block length 5) preserves the
+    /// short-scale error autocorrelation the aggregator design memo
+    /// calls out.
+    private static func bootstrapMedianCI(values: [Double], seed: UInt64) -> (lower: Double, upper: Double) {
+        let n = values.count
+        guard n >= 3 else {
+            // Too few beats for a bootstrap — collapse to the point
+            // estimate so the band is degenerate (invisible) rather
+            // than misleading.
+            let m = values.sorted()[n / 2]
+            return (m, m)
+        }
+        let iterations = 400          // enough for 2.5/97.5 with ~1 ms noise
+        let blockLen = min(5, n)
+        var rng = SplitMix64(state: seed &+ 0x9E37_79B9_7F4A_7C15)
+        var medians: [Double] = []
+        medians.reserveCapacity(iterations)
+        for _ in 0..<iterations {
+            var sample: [Double] = []
+            sample.reserveCapacity(n)
+            while sample.count < n {
+                let start = Int(rng.next() % UInt64(n))
+                for j in 0..<blockLen where sample.count < n {
+                    sample.append(values[(start + j) % n])
+                }
+            }
+            let sorted = sample.sorted()
+            medians.append(sorted[n / 2])
+        }
+        medians.sort()
+        let loIdx = Int((0.025 * Double(iterations)).rounded(.down))
+        let hiIdx = min(iterations - 1, Int((0.975 * Double(iterations)).rounded(.up)))
+        return (medians[loIdx], medians[hiIdx])
+    }
+
+    /// Small deterministic RNG so the bootstrap is reproducible across
+    /// re-renders + snapshot tests.
+    private struct SplitMix64 {
+        var state: UInt64
+        mutating func next() -> UInt64 {
+            state = state &+ 0x9E37_79B9_7F4A_7C15
+            var z = state
+            z = (z ^ (z &>> 30)) &* 0xBF58_476D_1CE4_E5B9
+            z = (z ^ (z &>> 27)) &* 0x94D0_49BB_1331_11EB
+            return z ^ (z &>> 31)
+        }
     }
 
     // MARK: - Quartiles

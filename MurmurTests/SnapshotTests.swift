@@ -427,12 +427,21 @@ final class SnapshotTests: XCTestCase {
                     return median + jitter
                 }
                 : []
+            let m = eligible ? median : median + 8
+            let q1 = eligible ? median - 6 : median
+            let q3 = eligible ? median + 6 : median
+            // Measurement band: bootstrap CI on the median is a tight
+            // ~2-3 ms window around the point estimate at ~40 beats/bin.
+            let bandHalf: Double = eligible ? 2.5 : 0
             return IntervalTrendBin(
                 startSeconds: start,
                 endSeconds: start + 120,
-                median: eligible ? median : median + 8,
-                q1: eligible ? median - 6 : median,
-                q3: eligible ? median + 6 : median,
+                median: m,
+                q1: q1,
+                q3: q3,
+                bandLowerMs: m - bandHalf,
+                bandUpperMs: m + bandHalf,
+                hasCensoredBeats: false,
                 isEligible: eligible,
                 beatCount: 60,
                 perBeatValues: perBeat
