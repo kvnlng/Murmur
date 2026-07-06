@@ -73,11 +73,20 @@ struct IntervalMarkingsOrchestrator: View {
         // Even a multi-hour recording (~100k beats) is a few hundred
         // milliseconds; we don't want to jitter the canvas while it
         // runs.
+        //
+        // Uses `WaveletBeatDelineator.delineateWithFeatures` (v2, the
+        // frozen tangent primitive validated end-to-end on ECGRDVQ +
+        // QTDB + LUDB per
+        // `project_external_validation_accepted_delineator_close.md`).
+        // The paired `features` array feeds the per-beat uncertainty
+        // pipeline: `tOffsetCensored` drives the "QT ≥ X ms" / open-top
+        // lane render; `tOffsetRiskScore` looks up the calibrated CI
+        // half-width from the built-in T-offset calibration table.
         let computed = await Task.detached(priority: .userInitiated) { () -> (
             beats: [MarkingsBeat],
             template: MarkingsTemplate?
         ) in
-            let store = BeatDelineator.delineate(
+            let (store, features) = WaveletBeatDelineator.delineateWithFeatures(
                 samples: samples,
                 sampleRate: sampleRate,
                 rPeaks: beatSampleIndices
@@ -87,8 +96,11 @@ struct IntervalMarkingsOrchestrator: View {
                 from: readouts,
                 qtcFormula: Self.metricsFormula(from: qtcFormula)
             )
-            let beats = zip(store.beats, readouts).map { (bf, ro) in
-                MarkingsBeat(
+            let calibration = CalibrationTable.builtInTOffset
+            let beats = zip(zip(store.beats, readouts), features).map { pair, feat in
+                let (bf, ro) = pair
+                let ciHalfWidth = calibration.bin(forScore: feat.tOffsetRiskScore)?.p95AbsErr
+                return MarkingsBeat(
                     rPeakSampleIndex: bf.rPeakSampleIndex,
                     rPeakConfidence: bf.rPeakConfidence,
                     pOnset: bf.pOnset.map(Self.coreFiducial(_:)),
@@ -101,7 +113,9 @@ struct IntervalMarkingsOrchestrator: View {
                     qrsMs: ro.qrsMs,
                     qtMs: ro.qtMs,
                     qtcMs: ro.qtcMs(formula: Self.metricsFormula(from: qtcFormula)),
-                    precedingRRMs: ro.precedingRRMs
+                    precedingRRMs: ro.precedingRRMs,
+                    tOffsetCensored: feat.tOffsetCensored,
+                    qtCalibratedHalfWidthMs: ciHalfWidth
                 )
             }
             let coreTemplate: MarkingsTemplate? = template.sampleCount > 0
