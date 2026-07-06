@@ -93,7 +93,53 @@ struct FiducialOverlay: View {
             if enabledLayers.contains(.t) {
                 if let t = beat.tOnset  { boundaryTick(fiducial: t, colorStyle: .t) }
                 if let t = beat.tOffset { boundaryTick(fiducial: t, colorStyle: .t) }
+                // Tangent↔isoelectric bracket (project_qtc_trend_uncertainty_wireup_spec.md
+                // Phase 6): the T-offset fiducial is the tangent-based
+                // POINT estimate; the isoelectric endpoint marks where
+                // the signal actually settles. The visible span between
+                // them is the per-beat T-offset uncertainty bounded by
+                // two independent algorithms. Drawn only at full-zoom
+                // LOD (where fiducial ticks are already visible) and
+                // only when both endpoints are available — an
+                // unavailable upper edge suppresses the bracket rather
+                // than fabricating a substitute.
+                if let tangent = beat.tOffset,
+                   let iso = beat.tOffsetIsoelectricSampleIndex {
+                    tOffsetBracket(tangentSample: tangent.sampleIndex,
+                                   isoelectricSample: iso)
+                }
             }
+        }
+    }
+
+    /// Horizontal bracket connecting the tangent and isoelectric
+    /// T-offset endpoints. Neutral ink (this is app-computed
+    /// measurement uncertainty, not an analyst finding) with small
+    /// vertical caps at each end. Positioned at the same y-band as
+    /// the boundary-tick dots so the bracket reads as an extension of
+    /// the T-offset fiducial.
+    @ViewBuilder
+    private func tOffsetBracket(tangentSample: Int64, isoelectricSample: Int64) -> some View {
+        if let xTan = xPosition(forSample: tangentSample),
+           let xIso = xPosition(forSample: isoelectricSample) {
+            let lo = min(xTan, xIso)
+            let hi = max(xTan, xIso)
+            let width = max(hi - lo, 1)
+            let color = Color.primary.opacity(0.55)
+            // Horizontal span
+            Rectangle()
+                .fill(color)
+                .frame(width: width, height: 1)
+                .offset(x: lo, y: 25)
+            // End caps — 3-pt tall vertical ticks at each endpoint.
+            Rectangle()
+                .fill(color)
+                .frame(width: 1, height: 3)
+                .offset(x: lo - 0.5, y: 24)
+            Rectangle()
+                .fill(color)
+                .frame(width: 1, height: 3)
+                .offset(x: hi - 0.5, y: 24)
         }
     }
 

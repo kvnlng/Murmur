@@ -118,6 +118,17 @@ public struct MarkingsBeat: Sendable, Equatable, Codable, Identifiable {
     /// v1→v2 delineator swap (separate ticket).
     public let qtCalibratedHalfWidthMs: Double?
 
+    /// UPPER edge of the per-beat T-offset uncertainty bracket — the
+    /// signal-domain isoelectric-return sample. Combined with the
+    /// tangent-based `tOffset` (LOWER edge / point estimate), the two
+    /// endpoints define a visible interval on the waveform at
+    /// full-zoom LOD per project_qtc_trend_uncertainty_wireup_spec.md
+    /// Phase 6. Nil when the isoelectric detector abstained
+    /// (sub-noise T) or timed out (broad-T past the search window);
+    /// the render layer suppresses the bracket in that case rather
+    /// than substituting a fabricated upper edge.
+    public let tOffsetIsoelectricSampleIndex: Int64?
+
     public init(
         rPeakSampleIndex: Int64,
         rPeakConfidence: Double = 1.0,
@@ -133,7 +144,8 @@ public struct MarkingsBeat: Sendable, Equatable, Codable, Identifiable {
         qtcMs: Double? = nil,
         precedingRRMs: Double? = nil,
         tOffsetCensored: Bool = false,
-        qtCalibratedHalfWidthMs: Double? = nil
+        qtCalibratedHalfWidthMs: Double? = nil,
+        tOffsetIsoelectricSampleIndex: Int64? = nil
     ) {
         self.rPeakSampleIndex = rPeakSampleIndex
         self.rPeakConfidence = min(1.0, max(0.0, rPeakConfidence))
@@ -150,6 +162,7 @@ public struct MarkingsBeat: Sendable, Equatable, Codable, Identifiable {
         self.precedingRRMs = precedingRRMs
         self.tOffsetCensored = tOffsetCensored
         self.qtCalibratedHalfWidthMs = qtCalibratedHalfWidthMs
+        self.tOffsetIsoelectricSampleIndex = tOffsetIsoelectricSampleIndex
     }
 
     public var id: Int64 { rPeakSampleIndex }

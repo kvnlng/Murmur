@@ -115,7 +115,8 @@ struct IntervalMarkingsOrchestrator: View {
                     qtcMs: ro.qtcMs(formula: Self.metricsFormula(from: qtcFormula)),
                     precedingRRMs: ro.precedingRRMs,
                     tOffsetCensored: feat.tOffsetCensored,
-                    qtCalibratedHalfWidthMs: ciHalfWidth
+                    qtCalibratedHalfWidthMs: ciHalfWidth,
+                    tOffsetIsoelectricSampleIndex: feat.tOffsetIsoelectricSampleIndex
                 )
             }
             let coreTemplate: MarkingsTemplate? = template.sampleCount > 0

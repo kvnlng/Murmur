@@ -54,7 +54,8 @@ final class SnapshotTests: XCTestCase {
     /// layout-aware renderer. Avoids the NSHostingView/AppKit layout dance
     /// that left `GeometryReader`-rooted views (the axes) blank when
     /// snapshotted through cacheDisplay().
-    private func render<V: View>(_ view: V, size: CGSize) -> NSImage {
+    /// Internal so extensions in this file can use it.
+    func render<V: View>(_ view: V, size: CGSize) -> NSImage {
         let renderer = ImageRenderer(content: view.frame(width: size.width, height: size.height))
         renderer.proposedSize = ProposedViewSize(width: size.width, height: size.height)
         renderer.scale = 2.0
@@ -681,6 +682,37 @@ final class SnapshotTests: XCTestCase {
     }
 
     #endif // canImport(MurmurMetrics)
+}
+
+// MARK: - FiducialOverlay snapshots
+//
+// Extension so SwiftLint's `type_body_length` rule stays under the
+// 500-line threshold on the primary class body (extensions are
+// counted separately).
+
+@MainActor
+extension SnapshotTests {
+
+    /// Tangent↔isoelectric bracket render at full-zoom LOD (Phase 6 of
+    /// project_qtc_trend_uncertainty_wireup_spec.md). Visible span
+    /// between the T-offset point mark (tangent, LOWER edge) and the
+    /// isoelectric endpoint (UPPER edge) = per-beat T-offset
+    /// uncertainty bounded by two independent algorithms.
+    func testFiducialOverlay_tOffsetBracket() {
+        let beat = MarkingsBeat(rPeakSampleIndex: 500, rPeakConfidence: 1.0,
+            pOnset: MarkingsFiducial(kind: .pOnset, sampleIndex: 380, confidence: 0.85),
+            pOffset: MarkingsFiducial(kind: .pOffset, sampleIndex: 430, confidence: 0.85),
+            qrsOnset: MarkingsFiducial(kind: .qrsOnset, sampleIndex: 470, confidence: 0.95),
+            qrsOffset: MarkingsFiducial(kind: .qrsOffset, sampleIndex: 540, confidence: 0.90),
+            tOnset: MarkingsFiducial(kind: .tOnset, sampleIndex: 620, confidence: 0.75),
+            tOffset: MarkingsFiducial(kind: .tOffset, sampleIndex: 700, confidence: 0.70),
+            tOffsetIsoelectricSampleIndex: 740)
+        let view = FiducialOverlay(beats: [beat], viewportSampleRange: 300..<900,
+            sampleRate: 250, detailLevel: .fullFiducials, focusedRPeakSampleIndex: 500,
+            enabledLayers: [.p, .qrs, .t], canvasSize: CGSize(width: 520, height: 120))
+            .frame(width: 520, height: 120).padding().background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 552, height: 160)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
 }
 
 #endif // canImport(SnapshotTesting)
