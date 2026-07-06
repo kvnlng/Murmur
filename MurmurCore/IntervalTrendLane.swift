@@ -532,6 +532,54 @@ struct IntervalTrendLane: View {
                 }
             }
             .chartYScale(domain: yDomain)
+            .chartBackground { proxy in
+                // Low-confidence hatch — diagonal stripes across the
+                // full plot height in each ineligible bin's x-range.
+                // Distinct from the (Phase-4) censored open-top
+                // treatment: hatch = "measured but noisy"; open-top =
+                // "true value ≥ reported (walk hit ceiling)".
+                GeometryReader { geo in
+                    let plotRect: CGRect = proxy.plotFrame.map { geo[$0] } ?? .zero
+                    Canvas { ctx, _ in
+                        // `proxy.position(forX:)` returns plot-local
+                        // coordinates. Canvas is sized to `plotRect`
+                        // and offset to `plotRect.origin`, so the
+                        // position values are used directly (no
+                        // subtraction of `plotRect.minX`).
+                        for bin in ineligibleBins {
+                            guard let x0 = proxy.position(forX: bin.startSeconds),
+                                  let x1 = proxy.position(forX: bin.endSeconds) else { continue }
+                            let lo = min(x0, x1)
+                            let hi = max(x0, x1)
+                            let rect = CGRect(x: lo, y: 0, width: hi - lo, height: plotRect.height)
+                            ctx.drawLayer { layer in
+                                layer.clip(to: Path(rect))
+                                // Crosshatch: two sets of parallel
+                                // diagonals at ±45°. Spacing chosen so
+                                // the pattern is legibly present but
+                                // subordinate to the median line.
+                                let spacing: CGFloat = 5
+                                let extent = rect.width + rect.height
+                                var offset: CGFloat = 0
+                                while offset < extent {
+                                    var down = Path()
+                                    down.move(to: CGPoint(x: rect.minX + offset - rect.height, y: 0))
+                                    down.addLine(to: CGPoint(x: rect.minX + offset, y: rect.height))
+                                    layer.stroke(down, with: .color(Color.primary.opacity(0.38)), lineWidth: 0.7)
+                                    var up = Path()
+                                    up.move(to: CGPoint(x: rect.minX + offset - rect.height, y: rect.height))
+                                    up.addLine(to: CGPoint(x: rect.minX + offset, y: 0))
+                                    layer.stroke(up, with: .color(Color.primary.opacity(0.38)), lineWidth: 0.7)
+                                    offset += spacing
+                                }
+                            }
+                        }
+                    }
+                    .frame(width: plotRect.width, height: plotRect.height)
+                    .offset(x: plotRect.minX, y: plotRect.minY)
+                    .allowsHitTesting(false)
+                }
+            }
             .frame(height: Self.laneHeight)
             .background(
                 RoundedRectangle(cornerRadius: 4)
