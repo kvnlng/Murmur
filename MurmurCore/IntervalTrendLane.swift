@@ -378,13 +378,18 @@ struct IntervalTrendLane: View {
                 }
 
                 // Analyst-placed threshold guides — dashed horizontal
-                // lines with a right-anchored label. The "(user-set)"
-                // string on every label makes it impossible to mistake
-                // for a built-in clinical cutoff.
+                // lines with a right-anchored label. Distinct overlay
+                // color (blue) so the guide reads as USER-authored,
+                // NEVER a built-in clinical cutoff — the app never
+                // ships thresholds per
+                // project_interval_trend_lanes_design.md +
+                // project_qtc_trend_uncertainty_wireup_spec.md. The
+                // "(user-set)" string in the label reinforces the
+                // origin at read time.
                 ForEach(guides) { guide in
                     RuleMark(y: .value("guide", guide.valueMs))
-                        .foregroundStyle(Color.secondary.opacity(0.55))
-                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [5, 3]))
+                        .foregroundStyle(Color.blue.opacity(0.65))
+                        .lineStyle(StrokeStyle(lineWidth: 1.2, dash: [5, 3]))
                         .annotation(
                             position: .topTrailing,
                             alignment: .trailing,
@@ -393,14 +398,14 @@ struct IntervalTrendLane: View {
                         ) {
                             Text(guide.label)
                                 .font(.caption2.monospacedDigit())
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Color.blue)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 1)
                                 .background(
                                     Capsule().fill(Color(nsColor: .windowBackgroundColor).opacity(0.9))
                                 )
                                 .overlay(
-                                    Capsule().stroke(Color.secondary.opacity(0.35), lineWidth: 0.5)
+                                    Capsule().stroke(Color.blue.opacity(0.45), lineWidth: 0.5)
                                 )
                                 .contextMenu {
                                     if let remove = onRemoveGuide {
