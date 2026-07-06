@@ -99,6 +99,15 @@ public struct MarkingsBeat: Sendable, Equatable, Codable, Identifiable {
     public let qtcMs: Double?
     public let precedingRRMs: Double?
 
+    /// True when the delineator's T-offset walk clipped at the
+    /// physiological search-window ceiling — true T-offset is ≥ the
+    /// reported value. Drives the "open-top / QT ≥" rendering per
+    /// project_qtc_trend_uncertainty_wireup_spec.md. Default false;
+    /// wired through by the orchestrator when using the wavelet
+    /// delineator's per-beat features. Distinct from a low-confidence
+    /// beat — a censored beat has a KNOWN LOWER BOUND, not just noise.
+    public let tOffsetCensored: Bool
+
     public init(
         rPeakSampleIndex: Int64,
         rPeakConfidence: Double = 1.0,
@@ -112,7 +121,8 @@ public struct MarkingsBeat: Sendable, Equatable, Codable, Identifiable {
         qrsMs: Double? = nil,
         qtMs: Double? = nil,
         qtcMs: Double? = nil,
-        precedingRRMs: Double? = nil
+        precedingRRMs: Double? = nil,
+        tOffsetCensored: Bool = false
     ) {
         self.rPeakSampleIndex = rPeakSampleIndex
         self.rPeakConfidence = min(1.0, max(0.0, rPeakConfidence))
@@ -127,6 +137,7 @@ public struct MarkingsBeat: Sendable, Equatable, Codable, Identifiable {
         self.qtMs = qtMs
         self.qtcMs = qtcMs
         self.precedingRRMs = precedingRRMs
+        self.tOffsetCensored = tOffsetCensored
     }
 
     public var id: Int64 { rPeakSampleIndex }

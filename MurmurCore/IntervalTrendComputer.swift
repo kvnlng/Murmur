@@ -242,6 +242,7 @@ public enum IntervalTrendComputer {
             var values: [Double] = []
             var confidenceHits = 0
             var totalBeatsInBin = 0
+            var censoredHit = false
 
             while beatIdx < beats.count {
                 let beat = beats[beatIdx]
@@ -254,6 +255,11 @@ public enum IntervalTrendComputer {
                 }
                 if hasFragileFiducialsHighConfidence(beat: beat, metric: metric) {
                     confidenceHits += 1
+                }
+                // Only QTc trends against a T-offset; PR / QRS bins
+                // don't carry a censored notion.
+                if metric == .qtc, beat.tOffsetCensored {
+                    censoredHit = true
                 }
                 beatIdx += 1
             }
@@ -277,12 +283,7 @@ public enum IntervalTrendComputer {
                         q3: stats.q3,
                         bandLowerMs: ci.lower,
                         bandUpperMs: ci.upper,
-                        // Phase-4 wire-up: populated once MarkingsBeat
-                        // carries the delineator's `tOffsetCensored`
-                        // flag through from MurmurMetrics. Default false
-                        // is safe here — nothing renders open-top until
-                        // this flips true.
-                        hasCensoredBeats: false,
+                        hasCensoredBeats: censoredHit,
                         isEligible: eligible,
                         beatCount: totalBeatsInBin,
                         perBeatValues: eligible ? values : []

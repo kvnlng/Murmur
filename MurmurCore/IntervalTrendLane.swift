@@ -442,13 +442,24 @@ struct IntervalTrendLane: View {
                 // + narrower, always drawn regardless of show-mode. This
                 // is the visible surface of the calibrated
                 // per-beat-uncertainty aggregation.
+                //
+                // For CENSORED bins (a beat inside hit the T-search-
+                // window ceiling → true T-offset ≥ reported), the band
+                // is drawn open UPWARD: yStart at bandLower, yEnd at
+                // the top of the y-domain — the true measurement is
+                // "≥ bandLower". The up-chevron markers + "QT ≥"
+                // annotation on the top edge (Canvas overlay below)
+                // signal the lower-bound state.
                 ForEach(eligibleRuns.indices, id: \.self) { idx in
                     let run = eligibleRuns[idx]
                     ForEach(run) { bin in
                         AreaMark(
                             x: .value("t", bin.centerSeconds),
                             yStart: .value("band-lo", bin.bandLowerMs),
-                            yEnd: .value("band-hi", bin.bandUpperMs),
+                            yEnd: .value(
+                                "band-hi",
+                                bin.hasCensoredBeats ? yDomain.upperBound : bin.bandUpperMs
+                            ),
                             series: .value("band-run", idx)
                         )
                         .foregroundStyle(Color.primary.opacity(0.30))
@@ -476,7 +487,9 @@ struct IntervalTrendLane: View {
                 // app-computed departures never render in caution hues,
                 // only analyst-marked findings use amber. Chunked into
                 // eligible runs so the line breaks across low-confidence
-                // gaps.
+                // gaps. Censored bins render the median DASHED, marking
+                // "at least this prolonged, possibly more" — the point
+                // estimate isn't a confident value.
                 ForEach(eligibleRuns.indices, id: \.self) { idx in
                     let run = eligibleRuns[idx]
                     ForEach(run) { bin in
@@ -487,7 +500,11 @@ struct IntervalTrendLane: View {
                         )
                         .interpolationMethod(.monotone)
                         .foregroundStyle(Color.primary)
-                        .lineStyle(StrokeStyle(lineWidth: 1.8, lineJoin: .round))
+                        .lineStyle(
+                            bin.hasCensoredBeats
+                                ? StrokeStyle(lineWidth: 1.8, lineJoin: .round, dash: [3, 3])
+                                : StrokeStyle(lineWidth: 1.8, lineJoin: .round)
+                        )
                     }
                 }
 
@@ -502,6 +519,30 @@ struct IntervalTrendLane: View {
                     .symbol(.circle)
                     .symbolSize(18)
                     .foregroundStyle(Color.secondary.opacity(0.35))
+                }
+
+                // Censored-bin up-chevron + "QT ≥" annotation — signals
+                // that the band top is UN-CAPPED (true value goes
+                // upward from the bandLower). One marker per censored
+                // bin sits just below the y-domain top edge so the
+                // pattern reads as "arrows pointing off-chart," which
+                // is the intended visual.
+                ForEach(censoredBins) { bin in
+                    let markerY = yDomain.upperBound
+                        - (yDomain.upperBound - yDomain.lowerBound) * 0.06
+                    PointMark(
+                        x: .value("censored-t", bin.centerSeconds),
+                        y: .value("censored-top", markerY)
+                    )
+                    .symbol(.triangle)
+                    .symbolSize(28)
+                    .foregroundStyle(Color.primary.opacity(0.70))
+                    .annotation(position: .top, spacing: 0) {
+                        Text("QT ≥")
+                            .font(.system(size: 8, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("interval-trend-lane-censored-marker")
+                    }
                 }
 
                 // Hover highlight — rule + emphasized point at the
@@ -655,6 +696,15 @@ struct IntervalTrendLane: View {
 
     private var ineligibleBins: [IntervalTrendBin] {
         data.bins.filter { !$0.isEligible }
+    }
+
+    /// Bins containing at least one T-offset-censored beat. Rendered
+    /// with the "open-top band + dashed median + QT ≥ marker" treatment.
+    /// A bin can be BOTH ineligible AND censored on real data; the
+    /// crosshatch (from `chartBackground`) sits behind and the censored
+    /// treatment layers on top.
+    private var censoredBins: [IntervalTrendBin] {
+        data.bins.filter { $0.hasCensoredBeats && $0.isEligible }
     }
 
     private struct ScatterPoint: Identifiable {

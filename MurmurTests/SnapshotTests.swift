@@ -512,6 +512,60 @@ final class SnapshotTests: XCTestCase {
         assertSnapshot(of: render(view, size: CGSize(width: 552, height: 180)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 
+    /// Renders a censored zone in the middle of the recording — bins
+    /// containing a T-offset-clipped beat get the open-top band +
+    /// up-chevron + "QT ≥" treatment per
+    /// project_qtc_trend_uncertainty_wireup_spec.md. Distinct from the
+    /// low-confidence hatch: censored means "at least this prolonged,"
+    /// low-confidence means "measured but noisy."
+    func testIntervalTrendLane_censoredLowerBound() {
+        let bins: [IntervalTrendBin] = (0..<15).map { i in
+            let start = Double(i) * 120
+            let rise = 40 / (1 + exp(-(Double(i) - 6) / 1.5))
+            let median = 420 + rise
+            // Bins 10-12: T-offset walk clipped at ceiling → true QT
+            // is ≥ the reported bandLower.
+            let censored = (10...12).contains(i)
+            let m = median
+            let q1 = median - 6
+            let q3 = median + 6
+            let perBeat: [Double] = (0..<40).map { j in
+                let jitter = sin(Double(j) * 0.7) * 4
+                return m + jitter
+            }
+            return IntervalTrendBin(
+                startSeconds: start,
+                endSeconds: start + 120,
+                median: m,
+                q1: q1,
+                q3: q3,
+                bandLowerMs: m - 2.5,
+                bandUpperMs: m + 2.5,
+                hasCensoredBeats: censored,
+                isEligible: true,
+                beatCount: 60,
+                perBeatValues: perBeat
+            )
+        }
+        let data = IntervalTrendData(
+            bins: bins,
+            baselineBand: 412...428,
+            baselineMedian: 420,
+            reproCaption: "QTc · Fridericia · 2-min bins · normal template = 214 beats"
+        )
+        let view = IntervalTrendLane(
+            timeRangeSeconds: 0...1800,
+            data: data,
+            metric: .qtc,
+            showMode: .medianAndIQR,
+            selectedBinPreset: .twoMinute
+        )
+        .frame(width: 520)
+        .padding()
+        .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 552, height: 180)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
     func testIntervalTrendLane_emptyState() {
         let data = IntervalTrendData(
             bins: [],
