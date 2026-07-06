@@ -329,8 +329,13 @@ struct IntervalTrendLane: View {
             emptyState
         } else {
             Chart {
-                // Baseline band (template range) — behind everything so
-                // the trend reads AGAINST the patient's normal.
+                // Patient-normal baseline band — faint neutral
+                // horizontal band at the template QT/QTc baseline
+                // (project_qtc_trend_uncertainty_wireup_spec.md): the
+                // trend is read as a DEPARTURE from this. Neutral,
+                // never caution-hued — a departure past the band is
+                // just information at this layer; only the analyst's
+                // authored findings carry the amber accent.
                 if let band = data.baselineBand {
                     RectangleMark(
                         xStart: .value("t0", timeRangeSeconds.lowerBound),
@@ -338,7 +343,7 @@ struct IntervalTrendLane: View {
                         yStart: .value("baseline-lo", band.lowerBound),
                         yEnd: .value("baseline-hi", band.upperBound)
                     )
-                    .foregroundStyle(Color.green.opacity(0.14))
+                    .foregroundStyle(Color.primary.opacity(0.08))
                 }
 
                 // Analyst-authored events — vertical markers on the
