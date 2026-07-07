@@ -163,10 +163,14 @@ struct BeatCalipers: View {
                      censored: Bool = false,
                      halfWidthMs: Double? = nil) -> some View {
         HStack(spacing: 4) {
+            // Column widths sized to fit the widest content that renders
+            // in each column ("QRS"/"QTc" · "≥ 545.0 ms" · "+117.0 ±22 ms")
+            // so the panel's overall footprint fits the docked
+            // inspector's 220pt hard-width budget in the pinned stage.
             Text(label)
                 .font(.caption.monospacedDigit().weight(.medium))
                 .foregroundStyle(.secondary)
-                .frame(width: 78, alignment: .leading)
+                .frame(width: 40, alignment: .leading)
             // Reuses the same "—" glyph as a missing value but styles
             // the whole row muted + italic when the interval is
             // explicitly undefined for this beat kind (PR on a PVC,
@@ -179,7 +183,7 @@ struct BeatCalipers: View {
                 .font(.caption.monospacedDigit())
                 .italic(undefined)
                 .foregroundStyle(undefined ? Color.secondary : Color.primary)
-                .frame(width: 76, alignment: .trailing)
+                .frame(width: 72, alignment: .trailing)
                 .accessibilityIdentifier(censored ? "beat-calipers-\(label.lowercased())-censored" : "beat-calipers-\(label.lowercased())")
             deltaLabel(delta, halfWidthMs: undefined ? nil : halfWidthMs)
                 .frame(width: 78, alignment: .trailing)
