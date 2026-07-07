@@ -2453,6 +2453,91 @@ struct WaveformRendererDrawSceneTests {
     }
 }
 
+// MARK: - Move A regression: full-height rule = focus, not existence
+//
+// project_waveform_zoom_lod_spec.md Move A: the previous "one full-height
+// rule per point annotation" behavior became the visual clutter that made
+// wide-zoom views unreadable. Per-annotation full-height rules are dropped;
+// beat identity moves to the SwiftUI top-rail chips and the focused beat
+// gets a single dedicated locator line. Tests guard those two invariants
+// (empty pointBuckets after annotations; focus locator toggled by
+// setFocusedBeat) so regressions don't silently reintroduce the wall of
+// pink lines.
+
+@Suite(
+    "Move A: focus is the only full-height point rule",
+    .enabled(if: ProcessInfo.processInfo.environment["CI"] == nil)
+)
+@MainActor
+struct WaveformRendererMoveATests {
+
+    @Test("Point annotations no longer become full-height point buckets")
+    func pointAnnotationsDoNotProducePointBuckets() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let renderer = try #require(WaveformRenderer(device: device))
+        renderer.uniforms.startSample = 0
+        renderer.uniforms.endSample = 1_000
+        renderer.uniforms.yMin = -5
+        renderer.uniforms.yMax = 5
+
+        let annotations: [Annotation] = (0..<10).map { i in
+            Annotation(
+                kind: .point,
+                sampleIndex: Int64(100 * i),
+                category: "N",
+                source: "test"
+            )
+        }
+        renderer.setAnnotations(annotations)
+        #expect(renderer.pointBuckets.isEmpty, """
+            Point annotations must NOT produce full-height point buckets after
+            Move A — beat identity lives in the SwiftUI top-rail chips
+            (WaveformAnnotationOverlay). Reintroducing per-annotation
+            full-height rules brings back the wide-zoom pink-wall regression.
+            """)
+    }
+
+    @Test("Range annotations still populate range buckets")
+    func rangeAnnotationsStillProduceRangeBuckets() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let renderer = try #require(WaveformRenderer(device: device))
+        renderer.uniforms.startSample = 0
+        renderer.uniforms.endSample = 1_000
+        renderer.uniforms.yMin = -5
+        renderer.uniforms.yMax = 5
+
+        let range = Annotation(
+            kind: .range,
+            sampleIndex: 200,
+            endSampleIndex: 400,
+            category: "VT",
+            source: "test"
+        )
+        renderer.setAnnotations([range])
+        #expect(!renderer.rangeBuckets.isEmpty,
+                "Range annotations remain full-height translucent quads.")
+    }
+
+    @Test("setFocusedBeat(nil) clears the locator; a sample index installs it")
+    func focusLocatorToggle() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let renderer = try #require(WaveformRenderer(device: device))
+        renderer.uniforms.startSample = 0
+        renderer.uniforms.endSample = 1_000
+        renderer.uniforms.yMin = -5
+        renderer.uniforms.yMax = 5
+
+        renderer.setFocusedBeat(nil)
+        #expect(renderer.focusedSampleIndex == nil)
+
+        renderer.setFocusedBeat(500)
+        #expect(renderer.focusedSampleIndex == 500)
+
+        renderer.setFocusedBeat(nil)
+        #expect(renderer.focusedSampleIndex == nil)
+    }
+}
+
 // MARK: - Waveform time-axis label decimation
 //
 // Regression guards for the App Store Guideline 4 fix: tick labels on the

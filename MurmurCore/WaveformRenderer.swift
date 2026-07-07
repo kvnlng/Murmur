@@ -130,6 +130,18 @@ final class WaveformRenderer: NSObject, MTKViewDelegate {
     var pointBuckets: [AnnotationBucket] = []
     var rangeBuckets: [AnnotationBucket] = []
 
+    /// Focused-beat locator per project_waveform_zoom_lod_spec.md Move A —
+    /// "full-height line = focus, not existence." Reserves the full-height
+    /// vertical rule through the trace for the SELECTED beat only. Every
+    /// other beat's identity lives in the SwiftUI top-rail chips
+    /// (`WaveformAnnotationOverlay`) plus the FiducialOverlay R-tick — a
+    /// full-height line per beat is exactly the clutter this move removes.
+    /// Nil when no beat is focused (placeholder inspector state).
+    private(set) var focusedSampleIndex: Int64?
+    private var focusLocatorBuffer: MTLBuffer?
+    private var focusLocatorBakedYMin: Float = 0
+    private var focusLocatorBakedYMax: Float = 0
+
     /// Identity hash of the last annotation set fed into setAnnotations.
     /// During a sustained pan, the visible-annotation set is usually
     /// unchanged tick-to-tick — same findings, same positions. Skipping
@@ -300,55 +312,37 @@ final class WaveformRenderer: NSObject, MTKViewDelegate {
     }
 
     /// Replaces the annotation buckets from a list of visible annotations.
-    /// Groups by category and kind so each bucket can be drawn with its own
-    /// category color in a single draw call. Caches the input set's
-    /// identity hash and skips the rebuild when called with the same set —
-    /// during a pan, the visible findings rarely change tick-to-tick, so
-    /// the cache hit eliminates per-frame buffer allocations.
+    /// Range annotations become translucent full-height quads (rangeBuckets).
+    /// Per-beat point annotations do NOT become full-height rules — beat
+    /// identity lives in the SwiftUI top-rail chips
+    /// (`WaveformAnnotationOverlay`) per
+    /// project_waveform_zoom_lod_spec.md Move A. The only full-height point
+    /// rule is the focus locator, wired via `setFocusedBeat(_:)`.
+    ///
+    /// Caches the input set's identity hash and skips the rebuild when
+    /// called with the same set — during a pan, the visible findings
+    /// rarely change tick-to-tick, so the cache hit eliminates per-frame
+    /// buffer allocations.
     func setAnnotations(_ visible: [Annotation]) {
         let signature = annotationSignature(visible)
         if signature == lastAnnotationSignature { return }
         lastAnnotationSignature = signature
 
+        // Point annotations are intentionally NOT bucketed here — Move A
+        // (drop full-height rule per beat; keep chips) supersedes the old
+        // per-annotation rendering. pointBuckets stays empty; the focus
+        // locator draws in its place.
+        pointBuckets = []
+
         guard !visible.isEmpty else {
-            pointBuckets = []
             rangeBuckets = []
             return
         }
 
-        // Partition by category and kind.
-        var pointsByCategory: [String: [Int64]] = [:]
         var rangesByCategory: [String: [(Int64, Int64)]] = [:]
-
-        for ann in visible {
-            switch ann.kind {
-            case .point:
-                pointsByCategory[ann.category, default: []].append(ann.sampleIndex)
-            case .range:
-                let endSample = ann.endSampleIndex ?? ann.sampleIndex
-                rangesByCategory[ann.category, default: []].append((ann.sampleIndex, endSample))
-            }
-        }
-
-        // Build point buckets — line list, 2 vertices per annotation.
-        // Point rules render at a constant 0.85 alpha per kind, matching
-        // the overview minimap so the two surfaces read consistently.
-        pointBuckets = pointsByCategory.compactMap { (category, samples) -> AnnotationBucket? in
-            var pts: [SIMD2<Float>] = []
-            pts.reserveCapacity(samples.count * 2)
-            for s in samples {
-                let x = Float(s)
-                pts.append(SIMD2<Float>(x, uniforms.yMin))
-                pts.append(SIMD2<Float>(x, uniforms.yMax))
-            }
-            guard let buf = device.makeBuffer(
-                bytes: pts,
-                length: pts.count * MemoryLayout<SIMD2<Float>>.size,
-                options: .storageModeShared
-            ) else { return nil }
-            var color = CategoryPalette.color(for: category)
-            color.w = 0.85
-            return AnnotationBucket(buffer: buf, count: pts.count, color: color)
+        for ann in visible where ann.kind == .range {
+            let endSample = ann.endSampleIndex ?? ann.sampleIndex
+            rangesByCategory[ann.category, default: []].append((ann.sampleIndex, endSample))
         }
 
         // Build range buckets — one (startSample, endSample) per instance.
@@ -364,6 +358,35 @@ final class WaveformRenderer: NSObject, MTKViewDelegate {
             color.w = 0.45
             return AnnotationBucket(buffer: buf, count: pairs.count, color: color)
         }
+    }
+
+    /// Sets the focused-beat sample index. Rebuilds the focus-locator
+    /// vertex buffer when the sample OR the y-range changed. Nil clears
+    /// the locator (no beat under focus → no full-height rule at all).
+    func setFocusedBeat(_ sampleIndex: Int64?) {
+        let yMin = uniforms.yMin
+        let yMax = uniforms.yMax
+        let unchanged = sampleIndex == focusedSampleIndex
+            && yMin == focusLocatorBakedYMin
+            && yMax == focusLocatorBakedYMax
+        if unchanged { return }
+        focusedSampleIndex = sampleIndex
+        guard let s = sampleIndex else {
+            focusLocatorBuffer = nil
+            return
+        }
+        let xF = Float(s)
+        let pts: [SIMD2<Float>] = [
+            SIMD2<Float>(xF, yMin),
+            SIMD2<Float>(xF, yMax),
+        ]
+        focusLocatorBuffer = device.makeBuffer(
+            bytes: pts,
+            length: pts.count * MemoryLayout<SIMD2<Float>>.size,
+            options: .storageModeShared
+        )
+        focusLocatorBakedYMin = yMin
+        focusLocatorBakedYMax = yMax
     }
 
     // MARK: - Draw
@@ -513,9 +536,23 @@ final class WaveformRenderer: NSObject, MTKViewDelegate {
         }
 
         // 4. Point rules
+        // Per-beat full-height rules were dropped in Move A of
+        // project_waveform_zoom_lod_spec.md; only the focus-locator survives
+        // as a full-height point rule (a "you are here" anchor for the
+        // selected beat). Beat identity for every other beat lives in the
+        // SwiftUI top-rail chips (`WaveformAnnotationOverlay`) plus the
+        // FiducialOverlay R-tick.
         for bucket in pointBuckets {
             drawLines(encoder: encoder, buffer: bucket.buffer, vertexCount: bucket.count,
                       color: bucket.color, uniforms: &u)
+        }
+        if let buf = focusLocatorBuffer {
+            // Neutral dark ink, semi-transparent — reads as a location
+            // cursor, not a computed judgment (mockup-review B-RUO:
+            // app-computed = neutral; amber = analyst findings only).
+            let color = SIMD4<Float>(0.20, 0.20, 0.25, 0.40)
+            drawLines(encoder: encoder, buffer: buf, vertexCount: 2,
+                      color: color, uniforms: &u)
         }
 
         encoder.endEncoding()

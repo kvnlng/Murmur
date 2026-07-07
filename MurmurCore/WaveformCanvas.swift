@@ -45,6 +45,12 @@ struct WaveformCanvas: NSViewRepresentable {
     // Visible annotations only (already filtered by caller).
     let annotations: [Annotation]
 
+    /// Currently-focused beat's R-peak sample index. Drives the
+    /// full-height "focus locator" rule per Move A of
+    /// project_waveform_zoom_lod_spec.md. Nil when no beat is focused —
+    /// no locator line rendered.
+    var focusedBeatSampleIndex: Int64?
+
     /// Display range in mV. Defaults to ±5 (the clinical clipping
     /// reference). Set tighter by the caller when auto-scale is on so
     /// a low-amplitude channel uses the full canvas height. The
@@ -133,6 +139,11 @@ struct WaveformCanvas: NSViewRepresentable {
 
         // Annotations — caller has already pre-filtered to the viewport.
         renderer.setAnnotations(annotations)
+
+        // Focus locator — the single full-height rule that survives
+        // Move A. Sent AFTER uniforms so the buffer is baked with the
+        // current y-range.
+        renderer.setFocusedBeat(focusedBeatSampleIndex)
     }
 
     // MARK: - Coordinator
