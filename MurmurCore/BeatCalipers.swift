@@ -68,6 +68,7 @@ struct BeatCalipers: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             header
+            qtcFormulaSubtitle
             if kind == .ectopic {
                 ectopicSubtitle
             }
@@ -79,8 +80,7 @@ struct BeatCalipers: View {
                 undefined: kind == .ectopic,
                 censored: qtIsCensored,
                 halfWidthMs: qtHalfWidthForRendering)
-            row("QTc", qtcSuffix: qtcFormula.displayName,
-                value: qtcValueForRendering, delta: qtcDeltaForRendering,
+            row("QTc", value: qtcValueForRendering, delta: qtcDeltaForRendering,
                 undefined: kind == .ectopic,
                 censored: qtIsCensored,
                 halfWidthMs: qtHalfWidthForRendering)
@@ -105,6 +105,18 @@ struct BeatCalipers: View {
             .font(.caption2)
             .foregroundStyle(.tertiary)
             .accessibilityIdentifier("beat-calipers-ectopic-subtitle")
+    }
+
+    /// QTc rate-correction formula identifier, rendered once beneath
+    /// the header instead of appended to the QTc row's label. Keeps
+    /// the row's label column narrow enough for the docked inspector's
+    /// fixed width budget (the "(Fridericia)" suffix on the label
+    /// used to overflow it and clip the delta column).
+    private var qtcFormulaSubtitle: some View {
+        Text("QTc: \(qtcFormula.displayName)")
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+            .accessibilityIdentifier("beat-calipers-qtc-formula")
     }
 
     /// Intervals suppressed on ectopic beats collapse to nil before
@@ -145,24 +157,16 @@ struct BeatCalipers: View {
 
     @ViewBuilder
     private func row(_ label: String,
-                     qtcSuffix: String? = nil,
                      value: Double?,
                      delta: Double?,
                      undefined: Bool = false,
                      censored: Bool = false,
                      halfWidthMs: Double? = nil) -> some View {
         HStack(spacing: 4) {
-            HStack(spacing: 3) {
-                Text(label)
-                    .font(.caption.monospacedDigit().weight(.medium))
-                    .foregroundStyle(.secondary)
-                if let s = qtcSuffix {
-                    Text("(\(s))")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            .frame(width: 78, alignment: .leading)
+            Text(label)
+                .font(.caption.monospacedDigit().weight(.medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 78, alignment: .leading)
             // Reuses the same "—" glyph as a missing value but styles
             // the whole row muted + italic when the interval is
             // explicitly undefined for this beat kind (PR on a PVC,
