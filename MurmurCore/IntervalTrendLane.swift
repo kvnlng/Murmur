@@ -136,12 +136,38 @@ struct IntervalTrendLane: View {
     /// context menu on the lane.
     let onRemoveGuide: ((UUID) -> Void)?
 
+    /// Author a range finding at the given time range via drag-to-select.
+    /// Per project_drag_to_author_range_finding_spec.md: click-drag past
+    /// a ~6 pt threshold on the lane body composes a factual coordinate
+    /// label + immutable citation caption and creates a range
+    /// `Annotation`. Nil disables authoring — the lane's tap/hover
+    /// gestures still work.
+    let onAuthorRange: ((_ startSeconds: Double,
+                         _ endSeconds: Double,
+                         _ defaultLabel: String,
+                         _ citationCaption: String) -> Void)?
+
     /// Currently-selected bin-length preset — displayed on the chip.
     let selectedBinPreset: IntervalTrendBinPreset
 
     private static let laneHeight: CGFloat = 84
+    /// Drag threshold to distinguish authoring from a stray tap.
+    /// Set from the spec (project_drag_to_author_range_finding_spec.md).
+    private static let authoringDragThresholdPt: CGFloat = 6
 
     @State private var internalHoverTime: Double?
+    /// Live time-range for an in-progress authoring drag, already
+    /// snapped to bin edges. Nil when no drag is active. Seeded via
+    /// `debugAuthoringMarquee` for snapshot tests that need to render
+    /// the mid-drag state deterministically (SwiftUI can't
+    /// programmatically fire the real DragGesture in a headless
+    /// ImageRenderer).
+    @State private var authoringMarquee: ClosedRange<Double>?
+
+    /// Test-only seed for `authoringMarquee`. Setting this init
+    /// parameter renders the amber marquee in its mid-drag state so
+    /// snapshot fixtures can capture it; production callers omit it.
+    let debugAuthoringMarquee: ClosedRange<Double>?
 
     private var hoverTime: Double? { externalHoverTimeSeconds ?? internalHoverTime }
 
@@ -161,7 +187,9 @@ struct IntervalTrendLane: View {
         onPickBinPreset: ((IntervalTrendBinPreset) -> Void)? = nil,
         onPickShowMode: ((IntervalTrendShowMode) -> Void)? = nil,
         onAddGuide: ((Double, String) -> Void)? = nil,
-        onRemoveGuide: ((UUID) -> Void)? = nil
+        onRemoveGuide: ((UUID) -> Void)? = nil,
+        onAuthorRange: ((Double, Double, String, String) -> Void)? = nil,
+        debugAuthoringMarquee: ClosedRange<Double>? = nil
     ) {
         self.timeRangeSeconds = timeRangeSeconds
         self.data = data
@@ -179,6 +207,9 @@ struct IntervalTrendLane: View {
         self.onPickShowMode = onPickShowMode
         self.onAddGuide = onAddGuide
         self.onRemoveGuide = onRemoveGuide
+        self.onAuthorRange = onAuthorRange
+        self.debugAuthoringMarquee = debugAuthoringMarquee
+        self._authoringMarquee = State(initialValue: debugAuthoringMarquee)
     }
 
     var body: some View {
@@ -372,6 +403,37 @@ struct IntervalTrendLane: View {
                         yEnd: .value("baseline-hi", band.upperBound)
                     )
                     .foregroundStyle(Color.primary.opacity(0.08))
+                }
+
+                // Live authoring marquee — a semi-transparent amber
+                // rectangle over the currently-dragging x-range, full
+                // lane height. Same accent as the released range
+                // findings so the analyst sees they are authoring the
+                // same visual language. Snapped to bin edges by the
+                // gesture handler; degenerate drags (< 1 bin) are
+                // ignored on release.
+                if let marquee = authoringMarquee {
+                    RectangleMark(
+                        xStart: .value("marq-t0", marquee.lowerBound),
+                        xEnd: .value("marq-t1", marquee.upperBound),
+                        yStart: .value("marq-y0", yDomain.lowerBound),
+                        yEnd: .value("marq-y1", yDomain.upperBound)
+                    )
+                    .foregroundStyle(Color.orange.opacity(0.22))
+                    .annotation(
+                        position: .top,
+                        alignment: .leading,
+                        spacing: 2,
+                        overflowResolution: .init(x: .fit(to: .plot), y: .fit(to: .plot))
+                    ) {
+                        Text(marqueeReadout(for: marquee))
+                            .font(.caption2.monospacedDigit().weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color.orange.opacity(0.85)))
+                            .accessibilityIdentifier("interval-trend-lane-authoring-readout")
+                    }
                 }
 
                 // Analyst-authored range findings — the ONLY amber
@@ -715,6 +777,35 @@ struct IntervalTrendLane: View {
                                 onBinClick?(t)
                             }
                         }
+                        // Drag-to-author. The `minimumDistance` gates the
+                        // tap↔drag disambiguation per
+                        // project_drag_to_author_range_finding_spec.md:
+                        // a stray tap (< 6pt movement) still falls through
+                        // to `onTapGesture` above; only a real drag
+                        // enters authoring mode. Only active when the
+                        // caller opted in with `onAuthorRange`.
+                        .gesture(
+                            onAuthorRange == nil
+                                ? nil
+                                : DragGesture(minimumDistance: Self.authoringDragThresholdPt)
+                                    .onChanged { drag in
+                                        let plotOrigin = proxy.plotFrame.map { geo[$0].origin } ?? .zero
+                                        let x0 = min(drag.startLocation.x, drag.location.x) - plotOrigin.x
+                                        let x1 = max(drag.startLocation.x, drag.location.x) - plotOrigin.x
+                                        guard let t0: Double = proxy.value(atX: x0),
+                                              let t1: Double = proxy.value(atX: x1),
+                                              t1 > t0 else { return }
+                                        authoringMarquee = snapAuthoringRange(from: t0, to: t1)
+                                    }
+                                    .onEnded { _ in
+                                        if let range = authoringMarquee, isRangeAuthorable(range) {
+                                            let label = composeAuthoringLabel(range: range)
+                                            let citation = composeAuthoringCitation(range: range)
+                                            onAuthorRange?(range.lowerBound, range.upperBound, label, citation)
+                                        }
+                                        authoringMarquee = nil
+                                    }
+                        )
                 }
             }
             // Repro caption emitted verbatim to the citation menu.
@@ -803,6 +894,94 @@ struct IntervalTrendLane: View {
             }
         }
         return best
+    }
+
+    // MARK: - Drag-to-author range findings
+
+    /// Snap a raw dragged time range to bin edges. The finding really
+    /// covers whole bins (`project_drag_to_author_range_finding_spec.md`)
+    /// — honest AND cleaner than a ragged pixel range. Empty-bins
+    /// case falls back to the raw range so the caller can decide.
+    private func snapAuthoringRange(from t0: Double, to t1: Double) -> ClosedRange<Double> {
+        guard !data.bins.isEmpty else { return t0...t1 }
+        let low = data.bins
+            .min(by: { abs($0.startSeconds - t0) < abs($1.startSeconds - t0) })?
+            .startSeconds ?? t0
+        let high = data.bins
+            .min(by: { abs($0.endSeconds - t1) < abs($1.endSeconds - t1) })?
+            .endSeconds ?? t1
+        let lo = min(low, high)
+        let hi = max(low, high)
+        return lo...hi
+    }
+
+    /// Degenerate-drag test — a range that spans zero bins produces no
+    /// finding (spec: "Degenerate drag (< 1 bin / < 1 beat): ignore").
+    private func isRangeAuthorable(_ range: ClosedRange<Double>) -> Bool {
+        let bins = binsInRange(range)
+        return bins.count >= 1 && range.upperBound > range.lowerBound
+    }
+
+    private func binsInRange(_ range: ClosedRange<Double>) -> [IntervalTrendBin] {
+        data.bins.filter { bin in
+            bin.startSeconds >= range.lowerBound - 0.001 &&
+            bin.endSeconds   <= range.upperBound + 0.001
+        }
+    }
+
+    /// The FACTUAL default label per the spec: coordinates only,
+    /// analyst-editable on release. NEVER an interpretation like
+    /// "prolongation" — that is the analyst's word to type, not the
+    /// app's to assert (RUO ratified color/hedge discipline).
+    /// Example: `QTc 432→≥508 ms · 13:30–16:30`.
+    private func composeAuthoringLabel(range: ClosedRange<Double>) -> String {
+        let bins = binsInRange(range)
+        guard let first = bins.first, let last = bins.last else {
+            return "\(metric.displayName) · \(formatTime(range.lowerBound))–\(formatTime(range.upperBound))"
+        }
+        let startVal = String(format: "%.0f", first.median)
+        let endPrefix = last.hasCensoredBeats ? "≥" : ""
+        let endVal = String(format: "%.0f", last.median)
+        return "\(metric.displayName) \(startVal)→\(endPrefix)\(endVal) ms · \(formatTime(range.lowerBound))–\(formatTime(range.upperBound))"
+    }
+
+    /// IMMUTABLE citation payload — formula + bin + template + span.
+    /// Reused by "Copy citation." Free-text label edits never touch
+    /// this. See project_citation_strategy.md.
+    private func composeAuthoringCitation(range: ClosedRange<Double>) -> String {
+        "\(data.reproCaption) · \(formatTime(range.lowerBound))–\(formatTime(range.upperBound))"
+    }
+
+    /// Live readout composed during the drag. Consumes the snapped
+    /// marquee so bin count + censored-end preview surface BEFORE
+    /// release, not after.
+    private func marqueeReadout(for range: ClosedRange<Double>) -> String {
+        let bins = binsInRange(range)
+        let durationMinutes = Int(((range.upperBound - range.lowerBound) / 60).rounded())
+        guard let first = bins.first, let last = bins.last else {
+            return "\(formatTime(range.lowerBound))–\(formatTime(range.upperBound))"
+        }
+        let startVal = String(format: "%.0f", first.median)
+        let endPrefix = last.hasCensoredBeats ? "≥" : ""
+        let endVal = String(format: "%.0f", last.median)
+        var out = "\(formatTime(range.lowerBound))–\(formatTime(range.upperBound))"
+        out += " · \(metric.displayName) \(startVal)→\(endPrefix)\(endVal) ms"
+        out += " · \(durationMinutes) min · \(bins.count) bins"
+        if last.hasCensoredBeats { out += " · end bin censored" }
+        return out
+    }
+
+    /// Seconds-from-recording-start → "H:MM:SS" or "M:SS" style label.
+    /// Chosen for the range-finding chip (spec's `13:30–16:30`).
+    private func formatTime(_ seconds: Double) -> String {
+        let total = Int(seconds.rounded())
+        let hours = total / 3600
+        let mins = (total % 3600) / 60
+        let secs = total % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, mins, secs)
+        }
+        return String(format: "%d:%02d", mins, secs)
     }
 
     // MARK: - Y-axis math

@@ -433,7 +433,8 @@ final class SnapshotTests: XCTestCase {
     /// Builds a canonical trend fixture — 15 bins across one hour with
     /// a mid-recording low-confidence stretch — that the snapshot tests
     /// below reuse across show modes.
-    private func makeCanonicalTrendData() -> IntervalTrendData {
+    /// Internal so extensions can share the fixture.
+    func makeCanonicalTrendData() -> IntervalTrendData {
         let bins: [IntervalTrendBin] = (0..<15).map { i in
             let start = Double(i) * 120  // 2-min bins
             let rise = 40 / (1 + exp(-(Double(i) - 6) / 1.5))
@@ -692,6 +693,24 @@ final class SnapshotTests: XCTestCase {
 
 @MainActor
 extension SnapshotTests {
+
+    /// Authoring marquee mid-drag — amber semi-transparent rectangle
+    /// spanning the snapped bin range + live readout chip
+    /// (project_drag_to_author_range_finding_spec.md). Seeded via
+    /// `debugAuthoringMarquee` since SwiftUI ImageRenderer can't fire
+    /// the real DragGesture in a headless snapshot pass.
+    func testIntervalTrendLane_authoringMarquee() {
+        // Uses the same fixture as the other lane tests. The marquee
+        // covers t=600..1200 = bins 5..9 = 3 min of QTc rising
+        // through the drug region.
+        let data = makeCanonicalTrendData()
+        let view = IntervalTrendLane(timeRangeSeconds: 0...1800, data: data,
+            metric: .qtc, showMode: .medianAndIQR, selectedBinPreset: .twoMinute,
+            onAuthorRange: { _, _, _, _ in },
+            debugAuthoringMarquee: 600...1200)
+            .frame(width: 520).padding().background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 552, height: 180)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
 
     /// Tangent↔isoelectric bracket render at full-zoom LOD (Phase 6 of
     /// project_qtc_trend_uncertainty_wireup_spec.md). Visible span
