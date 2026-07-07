@@ -211,6 +211,65 @@ final class MurmurUIPerformanceTests: XCTestCase {
     }
 
     @MainActor
+    func testWarmPanBurstSignpostLatency_longRecording() throws {
+        // Long-recording variant of `testWarmPanBurstSignpostLatency`.
+        // Kevin surfaced (2026-07-06) a pan stutter that scales with
+        // TOTAL beat count in the recording: ~163 beats smooth, 1600
+        // beats near-standstill. The default burst test uses a 2-sec
+        // synthetic fixture (~2 beats) which doesn't exercise the
+        // scaling. This variant runs the same burst against a
+        // 1000-second synthetic (~1000 beats) so the signpost
+        // averages reveal per-tick cost as a function of N_beats.
+        //
+        // If UpdateNSView / Sync / RendererDraw stay flat vs the
+        // short-fixture baseline (~87-105 µs), the render path is
+        // NOT the bottleneck — the sluggishness is elsewhere (e.g.,
+        // SwiftUI view-diff cost or MarkingsBeat filter allocation).
+        // If they scale with N, the render path itself is O(N total
+        // beats) somewhere.
+        let measureOptions = XCTMeasureOptions()
+        measureOptions.iterationCount = 3
+        measure(
+            metrics: [
+                XCTOSSignpostMetric(
+                    subsystem: "com.kevinlong.murmur",
+                    category: "PointsOfInterest",
+                    name: "UpdateNSView"
+                ),
+                XCTOSSignpostMetric(
+                    subsystem: "com.kevinlong.murmur",
+                    category: "PointsOfInterest",
+                    name: "Sync"
+                ),
+                XCTOSSignpostMetric(
+                    subsystem: "com.kevinlong.murmur",
+                    category: "PointsOfInterest",
+                    name: "RendererDraw"
+                ),
+            ],
+            options: measureOptions
+        ) {
+            let app = XCUIApplication()
+            app.launchArguments = [
+                "--ui-test-sample",
+                "--ui-test-initial-duration=1000",
+                "--ui-test-pan-burst=10"
+            ]
+            app.launch()
+            let viewportState = app.descendants(matching: .any)
+                .matching(identifier: "ui-test-viewport-state").firstMatch
+            // Wait for the pan burst to land; the exact end range depends
+            // on the initial-viewport-duration constant in BedsideView but
+            // the burst always advances by 10×40=400 samples.
+            let expected = NSPredicate(format: "label CONTAINS 'end='")
+            _ = XCTWaiter.wait(
+                for: [XCTNSPredicateExpectation(predicate: expected, object: viewportState)],
+                timeout: 30
+            )
+        }
+    }
+
+    @MainActor
     func testColdPanFrameSignpostLatency() throws {
         // Diagnostic for the start-of-pan hesitation: reads OSSignposter
         // intervals emitted from WaveformCanvas.updateNSView, the inner

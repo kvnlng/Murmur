@@ -885,22 +885,24 @@ struct BedsideView: View {
     /// the whole recording. Design spec:
     /// `project_interval_trend_lanes_design.md`. Hidden when there are
     /// no beats in the fiducial store (no template + no data to bin).
+    ///
+    /// Wrapped in `IntervalTrendLaneMemoizedStrip` + `.equatable()` so
+    /// SwiftUI skips the O(N_beats) `IntervalTrendComputer.compute`
+    /// on every pan tick — the compute inputs don't depend on viewport
+    /// (the lane spans the whole recording), so a viewport change is
+    /// not a reason to rebuild the trend.
     @ViewBuilder
     private var intervalTrendLaneStrip: some View {
         if !markingsContext.beats.isEmpty {
-            let data = IntervalTrendComputer.compute(
+            IntervalTrendLaneMemoizedStrip(
                 beats: markingsContext.beats,
                 template: markingsContext.template,
                 sampleRate: markingsContext.sampleRate,
                 metric: trendLaneContext.metric,
                 binSeconds: trendLaneContext.binSeconds,
                 templateBeatCount: markingsContext.template?.sampleCount,
-                qtcFormulaName: markingsContext.qtcFormula.displayName
-            )
-            IntervalTrendLane(
-                timeRangeSeconds: recordingTimeRange,
-                data: data,
-                metric: trendLaneContext.metric,
+                qtcFormulaName: markingsContext.qtcFormula.displayName,
+                recordingTimeRange: recordingTimeRange,
                 showMode: trendLaneContext.showMode,
                 selectedBinPreset: trendLaneContext.binPreset,
                 guides: trendGuideStore.guides(for: trendLaneContext.metric),
@@ -934,6 +936,7 @@ struct BedsideView: View {
                     trendGuideStore.remove(guideID)
                 }
             )
+            .equatable()
         }
     }
 
@@ -1924,6 +1927,95 @@ private struct CanvasSizeKey: PreferenceKey {
     static let defaultValue: CGSize = .zero
     static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
         value = nextValue()
+    }
+}
+
+// MARK: - Interval trend lane memoization
+
+/// Wraps `IntervalTrendComputer.compute` + `IntervalTrendLane` so
+/// SwiftUI can `.equatable()`-skip the whole subtree when the parent
+/// body re-runs for reasons unrelated to the trend (the dominant
+/// case being pan/zoom of the ECG viewport). Compute is O(N_beats)
+/// with bootstrap CI on every bin — on a 1600-beat recording it
+/// dominates the per-tick cost of a pan burst.
+///
+/// The equality fingerprint is intentionally lightweight: `beats`
+/// count + endpoint R-peak samples. The delineator writes the entire
+/// beats array atomically per recording; middle mutations don't
+/// happen at runtime, so this fingerprint catches every real change
+/// (new recording / delineator re-run with different config both
+/// change endpoints or count) without paying an O(N) hash per pass.
+/// Closures are excluded — they're rebuilt on every parent body
+/// pass but capture the same latest bindings, so skipping body when
+/// only the closure identity changed is safe.
+private struct IntervalTrendLaneMemoizedStrip: View, Equatable {
+    let beats: [MarkingsBeat]
+    let template: MarkingsTemplate?
+    let sampleRate: Double
+    let metric: IntervalTrendMetric
+    let binSeconds: Double
+    let templateBeatCount: Int?
+    let qtcFormulaName: String
+    let recordingTimeRange: ClosedRange<Double>
+    let showMode: IntervalTrendShowMode
+    let selectedBinPreset: IntervalTrendBinPreset
+    let guides: [IntervalTrendGuide]
+    let events: [IntervalTrendEvent]
+    let externalHoverTimeSeconds: Double?
+    let onLaneHover: (Double?) -> Void
+    let onBinClick: (Double) -> Void
+    let onPickMetric: (IntervalTrendMetric) -> Void
+    let onPickBinPreset: (IntervalTrendBinPreset) -> Void
+    let onPickShowMode: (IntervalTrendShowMode) -> Void
+    let onAddGuide: (Double, String) -> Void
+    let onRemoveGuide: (UUID) -> Void
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        guard lhs.beats.count == rhs.beats.count,
+              lhs.beats.first?.rPeakSampleIndex == rhs.beats.first?.rPeakSampleIndex,
+              lhs.beats.last?.rPeakSampleIndex == rhs.beats.last?.rPeakSampleIndex else {
+            return false
+        }
+        return lhs.templateBeatCount == rhs.templateBeatCount
+            && lhs.sampleRate == rhs.sampleRate
+            && lhs.metric == rhs.metric
+            && lhs.binSeconds == rhs.binSeconds
+            && lhs.qtcFormulaName == rhs.qtcFormulaName
+            && lhs.recordingTimeRange == rhs.recordingTimeRange
+            && lhs.showMode == rhs.showMode
+            && lhs.selectedBinPreset == rhs.selectedBinPreset
+            && lhs.guides == rhs.guides
+            && lhs.events == rhs.events
+            && lhs.externalHoverTimeSeconds == rhs.externalHoverTimeSeconds
+    }
+
+    var body: some View {
+        let data = IntervalTrendComputer.compute(
+            beats: beats,
+            template: template,
+            sampleRate: sampleRate,
+            metric: metric,
+            binSeconds: binSeconds,
+            templateBeatCount: templateBeatCount,
+            qtcFormulaName: qtcFormulaName
+        )
+        IntervalTrendLane(
+            timeRangeSeconds: recordingTimeRange,
+            data: data,
+            metric: metric,
+            showMode: showMode,
+            selectedBinPreset: selectedBinPreset,
+            guides: guides,
+            events: events,
+            externalHoverTimeSeconds: externalHoverTimeSeconds,
+            onLaneHover: onLaneHover,
+            onBinClick: onBinClick,
+            onPickMetric: onPickMetric,
+            onPickBinPreset: onPickBinPreset,
+            onPickShowMode: onPickShowMode,
+            onAddGuide: onAddGuide,
+            onRemoveGuide: onRemoveGuide
+        )
     }
 }
 
