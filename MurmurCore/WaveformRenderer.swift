@@ -128,6 +128,14 @@ final class WaveformRenderer: NSObject, MTKViewDelegate {
     var gridLandmarkBuffer: MTLBuffer?
     var gridLandmarkVertexCount: Int = 0
 
+    /// Scan-tier faint horizontal guides. Per the mockup at
+    /// Planning/design/waveform-zoom-lod.html, Scan drops the pink ECG
+    /// grid entirely BUT keeps 5 evenly-spaced faint horizontal lines
+    /// as a lightweight scale reference. Not rendered at Inspect
+    /// (full grid there) or Context (fully bare background).
+    var scanGuideBuffer: MTLBuffer?
+    var scanGuideVertexCount: Int = 0
+
     /// One bucket per category, rebuilt when the visible-annotation set or its
     /// category breakdown changes. Each bucket renders with its own color.
     struct AnnotationBucket {
@@ -317,6 +325,20 @@ final class WaveformRenderer: NSObject, MTKViewDelegate {
             yRange: (Float(yLo), Float(yHi))
         )
         gridLandmarkVertexCount = (xLandmark.count + yLandmark.count) * 2
+
+        // Scan-tier faint horizontal guides — 5 evenly-spaced lines
+        // across the y-range, matching the mockup's "mid ± 28, ± 56"
+        // pattern at Planning/design/waveform-zoom-lod.html. Not tied
+        // to the ECGGridSpec because at Scan the mV scale is
+        // measurement scaffolding, not a mm-per-mV reading grid.
+        let guideFractions: [Double] = [0.15, 0.35, 0.50, 0.65, 0.85]
+        let guideYs: [Double] = guideFractions.map { yLo + $0 * (yHi - yLo) }
+        scanGuideBuffer = makeLineBuffer(
+            xLines: [], yLines: guideYs,
+            xRange: (uniforms.startSample, uniforms.endSample),
+            yRange: (Float(yLo), Float(yHi))
+        )
+        scanGuideVertexCount = guideYs.count * 2
     }
 
     /// Replaces the annotation buckets from a list of visible annotations.
@@ -485,12 +507,14 @@ final class WaveformRenderer: NSObject, MTKViewDelegate {
         // order so heavier lines win at intersections.
         //
         // Grid rendering is tier-conditional per
-        // project_waveform_zoom_lod_spec.md: the ECG paper grid is the
-        // right measurement scaffold at Inspect (individual beats
-        // resolved) but reads as noise once beats compress. Scan +
-        // Context drop the grid entirely — the mockup calls this the
-        // "ECG paper fades to a faint guide (or off)" behavior.
-        if tier == .inspect {
+        // project_waveform_zoom_lod_spec.md and the mockup at
+        // Planning/design/waveform-zoom-lod.html:
+        //   - Inspect: full pink ECG grid (measurement scaffold).
+        //   - Scan: 5 faint horizontal guides only — a lightweight
+        //     scale reference now that the mV grid isn't the reading.
+        //   - Context: nothing (fully bare background).
+        switch tier {
+        case .inspect:
             if gridMinorVertexCount > 0, let buf = gridMinorBuffer {
                 drawLines(encoder: encoder, buffer: buf, vertexCount: gridMinorVertexCount,
                           color: style.gridMinor, uniforms: &u)
@@ -503,6 +527,16 @@ final class WaveformRenderer: NSObject, MTKViewDelegate {
                 drawLines(encoder: encoder, buffer: buf, vertexCount: gridLandmarkVertexCount,
                           color: style.gridLandmark, uniforms: &u)
             }
+        case .scan:
+            if scanGuideVertexCount > 0, let buf = scanGuideBuffer {
+                // #eef0f4 at ~50% alpha — mirrors the mockup's very
+                // faint slate-gray guide colour.
+                let guideColor = SIMD4<Float>(0.933, 0.941, 0.957, 0.55)
+                drawLines(encoder: encoder, buffer: buf, vertexCount: scanGuideVertexCount,
+                          color: guideColor, uniforms: &u)
+            }
+        case .context:
+            break
         }
 
         // 3. Trace OR envelope, with optional crossfade against the
