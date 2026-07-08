@@ -54,8 +54,27 @@ struct FiducialOverlay: View {
     /// Canvas dimensions passed from the enclosing `GeometryReader`.
     let canvasSize: CGSize
 
+    /// Semantic-zoom tier for the current viewport. The mockup at
+    /// Planning/design/waveform-zoom-lod.html explicitly DROPS
+    /// per-beat fiducial ticks at Scan ("Drops: per-beat chips,
+    /// fiducial ticks, normal-beat marks") and at Context (rail is
+    /// landmarks + focus locator only). At those tiers the per-beat
+    /// R-ticks + boundary marks this overlay draws became the residual
+    /// "blue marker per beat" Kevin saw on wide-zoom recordings —
+    /// this gate omits them entirely. The Metal focus locator + the
+    /// SwiftUI landmark/flagged rail carry the "which beats matter"
+    /// signal at those tiers. Default `.inspect` preserves existing
+    /// callers/tests that haven't been tier-wired.
+    var tier: WaveformZoomTier = .inspect
+
     var body: some View {
-        if canvasSize.width > 0, sampleRate > 0, !beats.isEmpty {
+        // Fiducial per-beat marks live at Inspect only. Scan + Context
+        // drop them per the ratified spec + Kevin's 2026-07-07 note
+        // (per-beat blue markers should disappear alongside the
+        // caliper marker).
+        if tier != .inspect {
+            EmptyView()
+        } else if canvasSize.width > 0, sampleRate > 0, !beats.isEmpty {
             ZStack(alignment: .topLeading) {
                 ForEach(beats) { beat in
                     beatMarks(for: beat)

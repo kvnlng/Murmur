@@ -1558,7 +1558,8 @@ private struct ChannelPanel: View {
                     detailLevel: MarkingsDetailLevel.level(forViewportSeconds: viewport.durationSeconds),
                     focusedRPeakSampleIndex: markingsContext.focusedBeatSampleIndex,
                     enabledLayers: markingsContext.enabledLayers,
-                    canvasSize: liveSize
+                    canvasSize: liveSize,
+                    tier: resolvedTier
                 )
 
                 if let hovered = hoveredAnnotation {
