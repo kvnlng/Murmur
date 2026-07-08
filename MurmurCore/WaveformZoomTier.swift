@@ -49,15 +49,28 @@ public enum WaveformZoomTier: String, Sendable, Equatable, CaseIterable {
 /// Threshold + hysteresis math for `WaveformZoomTier` selection.
 /// Extracted from any rendering call so it's unit-testable and
 /// deterministic — no rendering state, no view geometry, just numbers.
+///
+/// Thresholds retuned 2026-07-07 after Kevin's real-workflow test: at a
+/// typical Mac canvas (~1000 pt), 20 beats visible resolves to
+/// ~50 pt/beat, and the spec's original 24/20 boundaries left that
+/// zoom in Inspect (pink paper still on) even though the mockup's
+/// rough "≈ 2–17 s window → Inspect" guidance meant it should be
+/// Scan. The spec explicitly sanctions retuning
+/// (project_waveform_zoom_lod_spec.md: "Thresholds below are starting
+/// values … revisable pre-users").
 public enum WaveformZoomTierSelector {
-    /// Enter Inspect at ≥ 24 points/beat.
-    public static let inspectEnter: Double = 24
-    /// Drop out of Inspect only below 20 points/beat (hysteresis band).
-    public static let inspectExit: Double = 20
-    /// Drop into Context at ≤ 6 points/beat.
-    public static let contextEnter: Double = 6
-    /// Leave Context only above 8 points/beat (hysteresis band).
-    public static let contextExit: Double = 8
+    /// Enter Inspect at ≥ 70 points/beat — corresponds to ≲ 14 beats in
+    /// a 1000 pt canvas, i.e. the "few beats, individually readable"
+    /// regime the mockup illustrates.
+    public static let inspectEnter: Double = 70
+    /// Drop out of Inspect only below 60 points/beat (hysteresis band).
+    public static let inspectExit: Double = 60
+    /// Drop into Context at ≤ 8 points/beat — corresponds to ≳ 125
+    /// beats in a 1000 pt canvas, i.e. the "column-occupation smear"
+    /// regime the envelope silhouette answers.
+    public static let contextEnter: Double = 8
+    /// Leave Context only above 12 points/beat (hysteresis band).
+    public static let contextExit: Double = 12
 
     /// Pure function: given the current tier + a fresh `pointsPerBeat`
     /// reading, return the next tier. The hysteresis bands (20–24 and

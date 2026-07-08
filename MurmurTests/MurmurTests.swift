@@ -2551,14 +2551,14 @@ struct WaveformZoomTierSelectorTests {
 
     // MARK: initial()
 
-    @Test("initial() picks Inspect at 24 pts/beat, Scan below 24, Context at 6")
+    @Test("initial() picks Inspect at ≥ 70 pt/beat, Scan below, Context at ≤ 8")
     func initialHardThresholds() {
-        #expect(WaveformZoomTierSelector.initial(pointsPerBeat: 40) == .inspect)
-        #expect(WaveformZoomTierSelector.initial(pointsPerBeat: 24) == .inspect)
-        #expect(WaveformZoomTierSelector.initial(pointsPerBeat: 23) == .scan)
-        #expect(WaveformZoomTierSelector.initial(pointsPerBeat: 10) == .scan)
-        #expect(WaveformZoomTierSelector.initial(pointsPerBeat: 7) == .scan)
-        #expect(WaveformZoomTierSelector.initial(pointsPerBeat: 6) == .context)
+        #expect(WaveformZoomTierSelector.initial(pointsPerBeat: 120) == .inspect)
+        #expect(WaveformZoomTierSelector.initial(pointsPerBeat: 70) == .inspect)
+        #expect(WaveformZoomTierSelector.initial(pointsPerBeat: 65) == .scan)
+        #expect(WaveformZoomTierSelector.initial(pointsPerBeat: 20) == .scan)
+        #expect(WaveformZoomTierSelector.initial(pointsPerBeat: 9) == .scan)
+        #expect(WaveformZoomTierSelector.initial(pointsPerBeat: 8) == .context)
         #expect(WaveformZoomTierSelector.initial(pointsPerBeat: 1) == .context)
     }
 
@@ -2571,29 +2571,29 @@ struct WaveformZoomTierSelectorTests {
 
     // MARK: select() — sticky within hysteresis band
 
-    @Test("From Inspect: stay put until below inspectExit (20)")
+    @Test("From Inspect: stay put until below inspectExit (60)")
     func inspectStaysWithinHysteresis() {
-        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 22, current: .inspect) == .inspect)
-        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 20, current: .inspect) == .inspect)
+        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 65, current: .inspect) == .inspect)
+        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 60, current: .inspect) == .inspect)
         // Just below the exit threshold — drop out to Scan.
-        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 19.99, current: .inspect) == .scan)
+        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 59.99, current: .inspect) == .scan)
     }
 
-    @Test("From Context: stay put until above contextExit (8)")
+    @Test("From Context: stay put until above contextExit (12)")
     func contextStaysWithinHysteresis() {
-        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 7, current: .context) == .context)
-        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 8, current: .context) == .context)
+        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 10, current: .context) == .context)
+        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 12, current: .context) == .context)
         // Just above — leave.
-        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 8.01, current: .context) == .scan)
+        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 12.01, current: .context) == .scan)
     }
 
-    @Test("From Scan: enter Inspect at ≥ 24, enter Context at ≤ 6")
+    @Test("From Scan: enter Inspect at ≥ 70, enter Context at ≤ 8")
     func scanTransitionsUseEnterThresholds() {
-        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 30, current: .scan) == .inspect)
-        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 24, current: .scan) == .inspect)
-        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 23.9, current: .scan) == .scan)
-        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 6.1, current: .scan) == .scan)
-        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 6, current: .scan) == .context)
+        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 100, current: .scan) == .inspect)
+        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 70, current: .scan) == .inspect)
+        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 69.9, current: .scan) == .scan)
+        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 8.1, current: .scan) == .scan)
+        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 8, current: .scan) == .context)
         #expect(WaveformZoomTierSelector.select(pointsPerBeat: 2, current: .scan) == .context)
     }
 
@@ -2607,7 +2607,7 @@ struct WaveformZoomTierSelectorTests {
 
     @Test("Context → Inspect if the reading soars past both bands")
     func contextSkipsScanOnHugeExpand() {
-        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 40, current: .context) == .inspect)
+        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 120, current: .context) == .inspect)
     }
 
     // MARK: select() — non-finite preserves state
