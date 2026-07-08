@@ -2538,6 +2538,102 @@ struct WaveformRendererMoveATests {
     }
 }
 
+// MARK: - Waveform zoom tier selection + hysteresis
+//
+// project_waveform_zoom_lod_spec.md defines three regimes keyed on
+// pointsPerBeat with hysteresis at each boundary so a beat sitting on
+// the edge during a slow zoom doesn't strobe between renderings. These
+// tests pin the transition table so a future refactor can't drift the
+// thresholds without a red suite.
+
+@Suite("WaveformZoomTier selection + hysteresis")
+struct WaveformZoomTierSelectorTests {
+
+    // MARK: initial()
+
+    @Test("initial() picks Inspect at 24 pts/beat, Scan below 24, Context at 6")
+    func initialHardThresholds() {
+        #expect(WaveformZoomTierSelector.initial(pointsPerBeat: 40) == .inspect)
+        #expect(WaveformZoomTierSelector.initial(pointsPerBeat: 24) == .inspect)
+        #expect(WaveformZoomTierSelector.initial(pointsPerBeat: 23) == .scan)
+        #expect(WaveformZoomTierSelector.initial(pointsPerBeat: 10) == .scan)
+        #expect(WaveformZoomTierSelector.initial(pointsPerBeat: 7) == .scan)
+        #expect(WaveformZoomTierSelector.initial(pointsPerBeat: 6) == .context)
+        #expect(WaveformZoomTierSelector.initial(pointsPerBeat: 1) == .context)
+    }
+
+    @Test("initial() with non-finite input defaults to Context (widest overview is safe)")
+    func initialHandlesGarbage() {
+        #expect(WaveformZoomTierSelector.initial(pointsPerBeat: .nan) == .context)
+        #expect(WaveformZoomTierSelector.initial(pointsPerBeat: 0) == .context)
+        #expect(WaveformZoomTierSelector.initial(pointsPerBeat: -5) == .context)
+    }
+
+    // MARK: select() — sticky within hysteresis band
+
+    @Test("From Inspect: stay put until below inspectExit (20)")
+    func inspectStaysWithinHysteresis() {
+        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 22, current: .inspect) == .inspect)
+        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 20, current: .inspect) == .inspect)
+        // Just below the exit threshold — drop out to Scan.
+        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 19.99, current: .inspect) == .scan)
+    }
+
+    @Test("From Context: stay put until above contextExit (8)")
+    func contextStaysWithinHysteresis() {
+        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 7, current: .context) == .context)
+        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 8, current: .context) == .context)
+        // Just above — leave.
+        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 8.01, current: .context) == .scan)
+    }
+
+    @Test("From Scan: enter Inspect at ≥ 24, enter Context at ≤ 6")
+    func scanTransitionsUseEnterThresholds() {
+        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 30, current: .scan) == .inspect)
+        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 24, current: .scan) == .inspect)
+        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 23.9, current: .scan) == .scan)
+        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 6.1, current: .scan) == .scan)
+        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 6, current: .scan) == .context)
+        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 2, current: .scan) == .context)
+    }
+
+    // MARK: select() — big jumps skip through Scan
+
+    @Test("Inspect → Context if the reading collapses past both bands")
+    func inspectSkipsScanOnHugeCollapse() {
+        // e.g., user pinches out from 2s window straight to whole record.
+        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 3, current: .inspect) == .context)
+    }
+
+    @Test("Context → Inspect if the reading soars past both bands")
+    func contextSkipsScanOnHugeExpand() {
+        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 40, current: .context) == .inspect)
+    }
+
+    // MARK: select() — non-finite preserves state
+
+    @Test("Non-finite pointsPerBeat preserves the current tier")
+    func nonFiniteIsStickyOnCurrent() {
+        #expect(WaveformZoomTierSelector.select(pointsPerBeat: .nan, current: .inspect) == .inspect)
+        #expect(WaveformZoomTierSelector.select(pointsPerBeat: 0, current: .scan) == .scan)
+        #expect(WaveformZoomTierSelector.select(pointsPerBeat: -1, current: .context) == .context)
+    }
+
+    // MARK: pointsPerBeat() convenience
+
+    @Test("pointsPerBeat divides plotWidth by beat count")
+    func pointsPerBeatMath() {
+        let p = WaveformZoomTierSelector.pointsPerBeat(plotWidthPoints: 1200, beatsInWindow: 60)
+        #expect(p == 20)
+    }
+
+    @Test("pointsPerBeat returns non-finite for zero beats or width")
+    func pointsPerBeatGuardsDivideByZero() {
+        #expect(WaveformZoomTierSelector.pointsPerBeat(plotWidthPoints: 1200, beatsInWindow: 0).isNaN)
+        #expect(WaveformZoomTierSelector.pointsPerBeat(plotWidthPoints: 0, beatsInWindow: 60).isNaN)
+    }
+}
+
 // MARK: - Waveform time-axis label decimation
 //
 // Regression guards for the App Store Guideline 4 fix: tick labels on the
