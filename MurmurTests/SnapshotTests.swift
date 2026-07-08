@@ -732,6 +732,44 @@ extension SnapshotTests {
             .frame(width: 520, height: 120).padding().background(Color.white)
         assertSnapshot(of: render(view, size: CGSize(width: 552, height: 160)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
+
+    /// Same annotation set as `_lowZoomClusterBadge`, but at the Scan
+    /// tier the rail collapses chips into short colored ticks and drops
+    /// normal ("N") beats entirely. Locks in the
+    /// project_waveform_zoom_lod_spec.md rail treatment for Scan.
+    func testWaveformAnnotationOverlay_scanTierFlaggedTicks() {
+        var annotations: [Annotation] = []
+        for i in 0..<12 {
+            annotations.append(Annotation(kind: .point, sampleIndex: Int64(125 + i * 50),
+                                          category: "PVC", source: "demo"))
+        }
+        for i in 0..<8 {
+            annotations.append(Annotation(kind: .point, sampleIndex: Int64(4_000 + i * 250),
+                                          category: "N", source: "demo"))
+        }
+        annotations.append(Annotation(kind: .point, sampleIndex: 12_000,
+                                      category: "VT", source: "demo"))
+        let view = WaveformAnnotationOverlay(annotations: annotations,
+            startSample: 0, endSample: 15_000, tier: .scan)
+            .frame(width: 660, height: 40).background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 660, height: 40)),
+                       as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
+    /// At Context the overlay is silent — beat identity there lives in
+    /// the (forthcoming) density-lane component. Pin the empty invariant
+    /// so a stray re-render regression at Context is caught by a red diff.
+    func testWaveformAnnotationOverlay_contextTierEmpty() {
+        let annotations: [Annotation] = (0..<20).map { i in
+            Annotation(kind: .point, sampleIndex: Int64(500 + i * 400),
+                       category: i.isMultiple(of: 4) ? "PVC" : "N", source: "demo")
+        }
+        let view = WaveformAnnotationOverlay(annotations: annotations,
+            startSample: 0, endSample: 15_000, tier: .context)
+            .frame(width: 660, height: 40).background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 660, height: 40)),
+                       as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
 }
 
 #endif // canImport(SnapshotTesting)

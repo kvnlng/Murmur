@@ -381,15 +381,18 @@ struct WaveformAnnotationOverlay: View {
     private static let labelPitchPx: CGFloat = 40
 
     var body: some View {
-        // Non-Inspect tiers drop the chip rail — per the spec, chips are
-        // "too tight" at Scan and get replaced by shorter treatments; at
-        // Context the rail is landmarks + a density lane, both distinct
-        // components. Rendering silently keeps the caller's ZStack layout
-        // stable while those components come online.
-        guard tier == .inspect else {
+        switch tier {
+        case .inspect:
+            return AnyView(chipRail)
+        case .scan:
+            return AnyView(flaggedTickRail)
+        case .context:
+            // Context's rail is landmarks + a density lane — both live in
+            // dedicated components (density lane sits BELOW the trace, not
+            // above it). This overlay stays silent so it doesn't
+            // double-render or fight the density lane's neutral ink.
             return AnyView(EmptyView())
         }
-        return AnyView(chipRail)
     }
 
     private var chipRail: some View {
@@ -417,6 +420,59 @@ struct WaveformAnnotationOverlay: View {
             }
         }
         .allowsHitTesting(false)
+    }
+
+    /// Scan-tier rail: short colored ticks in the top rail for FLAGGED
+    /// categories only (V / A / F / rhythm / artifact — anything that
+    /// isn't the "N" normal-beat class). Normal beats are omitted; the
+    /// spec allows "faint hairline top-ticks or omitted entirely" and
+    /// omitting is cleaner at this density. Chips (with text) are too
+    /// wide to survive Scan without overlapping.
+    private var flaggedTickRail: some View {
+        GeometryReader { geo in
+            let span = max(1, endSample - startSample)
+            let canvasWidth = max(1, geo.size.width)
+            let samplesPerPixel = Double(span) / Double(canvasWidth)
+            // Narrow merge threshold: ticks are ~4pt wide, cluster them
+            // only when they'd literally paint the same pixels. Keeps
+            // ectopic runs (PVC bigeminy etc.) visually resolved without
+            // being able to individually count each one — which is fine
+            // at Scan zoom, where the analyst is scanning for CHANGE.
+            let mergeThresholdSamples = Int64(samplesPerPixel * Double(Self.tickPitchPx))
+            let flagged = annotations.filter { isFlagged(category: $0.category) }
+            let clusters = AnnotationClustering.cluster(
+                flagged,
+                mergeWithinSamples: mergeThresholdSamples
+            )
+            ForEach(clusters) { cluster in
+                let anchor: Int64 = {
+                    switch cluster.representative.kind {
+                    case .point: return cluster.sampleIndex
+                    case .range:
+                        let r = cluster.representative
+                        return (r.sampleIndex + r.renderEndSample) / 2
+                    }
+                }()
+                let frac = Double(anchor - startSample) / Double(span)
+                Rectangle()
+                    .fill(CategoryPalette.swiftUIColor(for: cluster.representative.category))
+                    .frame(width: 3, height: 12)
+                    .position(x: CGFloat(frac) * canvasWidth, y: 8)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    /// Approximate short-tick width in points for the Scan rail.
+    private static let tickPitchPx: CGFloat = 4
+
+    /// Flag test: the "N" normal-beat class is unflagged; every other
+    /// wfdb.atr / producer category is considered flagged for the purpose
+    /// of Scan-tier rail rendering. The palette's blue-family entries
+    /// include "N", "J" (nodal), etc.; only "N" is unflagged so that
+    /// nodal beats or conduction anomalies still surface as ticks.
+    private func isFlagged(category: String) -> Bool {
+        category != "N"
     }
 
     @ViewBuilder
