@@ -51,6 +51,13 @@ struct WaveformCanvas: NSViewRepresentable {
     /// no locator line rendered.
     var focusedBeatSampleIndex: Int64?
 
+    /// Semantic-zoom tier for the current viewport. Drives the
+    /// tier-conditional ECG-paper + grid rendering (pink paper + full
+    /// grid at Inspect; faint neutral, no grid at Scan; plain
+    /// background at Context). Defaulted to `.inspect` so pre-tier-wire
+    /// callers keep the original render.
+    var tier: WaveformZoomTier = .inspect
+
     /// Display range in mV. Defaults to ±5 (the clinical clipping
     /// reference). Set tighter by the caller when auto-scale is on so
     /// a low-amplitude channel uses the full canvas height. The
@@ -144,6 +151,11 @@ struct WaveformCanvas: NSViewRepresentable {
         // Move A. Sent AFTER uniforms so the buffer is baked with the
         // current y-range.
         renderer.setFocusedBeat(focusedBeatSampleIndex)
+
+        // Tier drives the tier-conditional paper + grid render. Set
+        // last so the next draw picks up the tier that matches the
+        // viewport we just synced.
+        renderer.tier = tier
     }
 
     // MARK: - Coordinator

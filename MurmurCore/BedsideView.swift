@@ -1523,6 +1523,7 @@ private struct ChannelPanel: View {
                         endSample: viewport.endSample,
                         annotations: visibleAnnotations,
                         focusedBeatSampleIndex: markingsContext.focusedBeatSampleIndex,
+                        tier: resolvedTier,
                         displayMin: displayRange.lowerBound,
                         displayMax: displayRange.upperBound
                     )

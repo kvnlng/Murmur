@@ -108,6 +108,14 @@ final class WaveformRenderer: NSObject, MTKViewDelegate {
     var style    = WaveformStyle()
     var useEnvelope = false
 
+    /// Semantic-zoom tier for the current viewport
+    /// (`project_waveform_zoom_lod_spec.md`). Drives the tier-conditional
+    /// ECG-paper and grid rendering: pink paper + full grid at Inspect,
+    /// faint neutral paper (no grid) at Scan, plain background (no
+    /// paper, no grid) at Context. Written by
+    /// `WaveformCanvas.sync` once per frame.
+    var tier: WaveformZoomTier = .inspect
+
     /// Sample rate of the loaded channel — needed to convert grid spacings
     /// from seconds (the spec uses) into samples (what the shader uses).
     var channelSampleRate: Double = 1
@@ -410,10 +418,16 @@ final class WaveformRenderer: NSObject, MTKViewDelegate {
         guard let drawable = view.currentDrawable,
               let descriptor = view.currentRenderPassDescriptor else { return }
 
+        // Tier-conditional paper — the pink ECG paper is the correct
+        // reading surface at Inspect (individual beats readable), but
+        // at wider zooms it becomes visual noise. Per
+        // project_waveform_zoom_lod_spec.md: fade to a faint neutral
+        // at Scan, plain background at Context.
+        let paper = paperColor(for: tier)
         descriptor.colorAttachments[0].clearColor = MTLClearColor(
-            red:   Double(style.paper.x),
-            green: Double(style.paper.y),
-            blue:  Double(style.paper.z),
+            red:   Double(paper.x),
+            green: Double(paper.y),
+            blue:  Double(paper.z),
             alpha: 1.0
         )
         descriptor.colorAttachments[0].loadAction = .clear
@@ -469,17 +483,26 @@ final class WaveformRenderer: NSObject, MTKViewDelegate {
 
         // 2. Grid — minor → major → landmark (every 5th major). Drawn in that
         // order so heavier lines win at intersections.
-        if gridMinorVertexCount > 0, let buf = gridMinorBuffer {
-            drawLines(encoder: encoder, buffer: buf, vertexCount: gridMinorVertexCount,
-                      color: style.gridMinor, uniforms: &u)
-        }
-        if gridMajorVertexCount > 0, let buf = gridMajorBuffer {
-            drawLines(encoder: encoder, buffer: buf, vertexCount: gridMajorVertexCount,
-                      color: style.gridMajor, uniforms: &u)
-        }
-        if gridLandmarkVertexCount > 0, let buf = gridLandmarkBuffer {
-            drawLines(encoder: encoder, buffer: buf, vertexCount: gridLandmarkVertexCount,
-                      color: style.gridLandmark, uniforms: &u)
+        //
+        // Grid rendering is tier-conditional per
+        // project_waveform_zoom_lod_spec.md: the ECG paper grid is the
+        // right measurement scaffold at Inspect (individual beats
+        // resolved) but reads as noise once beats compress. Scan +
+        // Context drop the grid entirely — the mockup calls this the
+        // "ECG paper fades to a faint guide (or off)" behavior.
+        if tier == .inspect {
+            if gridMinorVertexCount > 0, let buf = gridMinorBuffer {
+                drawLines(encoder: encoder, buffer: buf, vertexCount: gridMinorVertexCount,
+                          color: style.gridMinor, uniforms: &u)
+            }
+            if gridMajorVertexCount > 0, let buf = gridMajorBuffer {
+                drawLines(encoder: encoder, buffer: buf, vertexCount: gridMajorVertexCount,
+                          color: style.gridMajor, uniforms: &u)
+            }
+            if gridLandmarkVertexCount > 0, let buf = gridLandmarkBuffer {
+                drawLines(encoder: encoder, buffer: buf, vertexCount: gridLandmarkVertexCount,
+                          color: style.gridLandmark, uniforms: &u)
+            }
         }
 
         // 3. Trace OR envelope, with optional crossfade against the
@@ -564,6 +587,22 @@ final class WaveformRenderer: NSObject, MTKViewDelegate {
     }
 
     // MARK: - Pass helpers
+
+    /// Tier-conditional paper (background) color. Matches the mockup at
+    /// Planning/design/waveform-zoom-lod.html:
+    ///   - Inspect: `#f6e6e6` pink ECG paper (beats individually
+    ///     readable; the grid IS the measurement scaffold).
+    ///   - Scan: `#fcfcfe` near-white (paper fades — the trace itself
+    ///     carries the reading, not the grid).
+    ///   - Context: `#fbfbfd` — plain background; the trace becomes an
+    ///     overview silhouette and the paper metaphor is retired.
+    private func paperColor(for tier: WaveformZoomTier) -> SIMD4<Float> {
+        switch tier {
+        case .inspect: return style.paper
+        case .scan:    return SIMD4(0.988, 0.988, 0.996, 1.0)
+        case .context: return SIMD4(0.984, 0.984, 0.992, 1.0)
+        }
+    }
 
     private func drawLines(
         encoder: MTLRenderCommandEncoder,
