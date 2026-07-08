@@ -455,39 +455,30 @@ struct WaveformAnnotationOverlay: View {
     }
 
     /// Scan-tier rail per the mockup at
-    /// `~/Documents/Murmur/Planning/design/waveform-zoom-lod.html`:
-    ///   - Normal beats become a very faint gray hairline (0.8 pt wide,
-    ///     5 pt tall) — the analyst still gets a sense of beat density
-    ///     without normals dominating the top.
-    ///   - Flagged beats become a bolder colored line (2 pt × 11 pt)
-    ///     PLUS a small colored circle marker (radius 2.6) at the
-    ///     rail-y — the two marks together form the "beat with a
-    ///     verdict" pattern that stays legible even when the trace
-    ///     itself has compressed to Scan density.
+    /// `~/Documents/Murmur/Planning/design/waveform-zoom-lod.html` +
+    /// Kevin's 2026-07-07 refinement: normals are OMITTED ENTIRELY at
+    /// Scan (the mockup allows "faint hairline OR omitted"; on a
+    /// mostly-normal recording the hairlines still crowd the rail).
+    /// Only flagged beats render, as a bolder colored line (2 × 11 pt)
+    /// + a small colored circle (radius 2.6) at the rail-y — the "beat
+    /// with a verdict" pattern that survives Scan density.
     private var flaggedTickRail: some View {
         GeometryReader { geo in
             let span = max(1, endSample - startSample)
             let canvasWidth = max(1, geo.size.width)
             ForEach(annotations, id: \.id) { ann in
-                if ann.kind == .point {
+                if ann.kind == .point, isFlagged(category: ann.category) {
                     let frac = Double(ann.sampleIndex - startSample) / Double(span)
                     let x = CGFloat(frac) * canvasWidth
-                    if isFlagged(category: ann.category) {
-                        let color = CategoryPalette.swiftUIColor(for: ann.category)
-                        Rectangle()
-                            .fill(color)
-                            .frame(width: 2, height: 11)
-                            .position(x: x, y: 5.5)
-                        Circle()
-                            .fill(color)
-                            .frame(width: 5.2, height: 5.2)
-                            .position(x: x, y: 14)
-                    } else {
-                        Rectangle()
-                            .fill(Color.secondary.opacity(0.45))
-                            .frame(width: 0.8, height: 5)
-                            .position(x: x, y: 2.5)
-                    }
+                    let color = CategoryPalette.swiftUIColor(for: ann.category)
+                    Rectangle()
+                        .fill(color)
+                        .frame(width: 2, height: 11)
+                        .position(x: x, y: 5.5)
+                    Circle()
+                        .fill(color)
+                        .frame(width: 5.2, height: 5.2)
+                        .position(x: x, y: 14)
                 }
             }
         }
