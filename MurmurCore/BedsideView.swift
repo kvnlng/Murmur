@@ -1569,6 +1569,19 @@ private struct ChannelPanel: View {
                         .allowsHitTesting(false)
                         .transition(.opacity)
                 }
+                // Invisible accessibility element exposing the resolved
+                // tier + the beats-in-window count that fed the selector.
+                // Lets XCUI tests assert "did zooming out actually cross
+                // a tier?" without inspecting Metal render state. Same
+                // pattern as the ui-test-viewport-state overlay at the
+                // BedsideView level. Format uses letter separators so
+                // macOS's accessibility comma-injection doesn't rewrite
+                // 4+ digit numbers.
+                Color.clear
+                    .frame(width: 1, height: 1)
+                    .accessibilityIdentifier("ui-test-waveform-tier")
+                    .accessibilityLabel("tier=\(resolvedTier.rawValue) beats=\(beatsInWindow)")
+                    .allowsHitTesting(false)
             }
             // Persist the resolved tier back to @State so the next
             // body pass has the correct `current` input for the

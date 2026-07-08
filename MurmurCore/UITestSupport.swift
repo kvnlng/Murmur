@@ -185,6 +185,19 @@ enum UITestSupport {
         ProcessInfo.processInfo.arguments.contains("--ui-test-expand-all-findings-groups")
     }
 
+    /// If `--ui-test-seed-beat-annotations=N` is set, returns N. The
+    /// synthetic fixture generator adds N evenly-spaced normal-beat
+    /// ("N") point annotations across the whole recording so waveform
+    /// LOD tests have enough beats-in-window to cross tier thresholds.
+    /// Without seeding, the default fixture ships only 3 findings
+    /// (2 VT + 1 VF) and beatsInWindow stays at 0-1 for any viewport
+    /// — the tier selector never leaves Inspect.
+    static var seedBeatAnnotationsCount: Int? {
+        guard let raw = value(forFlag: "ui-test-seed-beat-annotations"),
+              let n = Int(raw), n > 0 else { return nil }
+        return n
+    }
+
     /// Filled by `ContentView` when `--ui-test-attach-findings` is set.
     /// `BedsideView` checks this on appear and, if non-nil, routes the URL
     /// through its `handleAttachFindings` path — the same one the toolbar

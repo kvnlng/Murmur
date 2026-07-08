@@ -269,11 +269,8 @@ enum SyntheticRecording {
     /// header so the welcome demo / `--ui-test-sample` flag has visible VT
     /// and VF findings to exercise the disposition workflow against.
     private static func writeAnnotationsSidecar(recordName: String, into directory: URL) throws {
-        let json = """
-        {
-          "schemaVersion": 1,
-          "source": "synth.se-reslstm.v1",
-          "findings": [
+        var findings: [String] = [
+            """
             {
               "kind": "range",
               "startSample": 500,
@@ -282,7 +279,9 @@ enum SyntheticRecording {
               "label": "VT",
               "confidence": 0.91,
               "note": "Sustained ventricular tachycardia, ~120 BPM"
-            },
+            }
+            """,
+            """
             {
               "kind": "point",
               "startSample": 1500,
@@ -290,7 +289,9 @@ enum SyntheticRecording {
               "label": "VF",
               "confidence": 0.78,
               "note": "Possible ventricular fibrillation — confirm morphology"
-            },
+            }
+            """,
+            """
             {
               "kind": "range",
               "startSample": 1900,
@@ -300,6 +301,40 @@ enum SyntheticRecording {
               "confidence": 0.85,
               "note": "Short VT run"
             }
+            """
+        ]
+        #if DEBUG
+        // XCUI-test hook: seed N evenly-spaced normal-beat point
+        // annotations across the fixture so waveform LOD tests have
+        // enough beats-in-window to cross tier thresholds. Absent this
+        // seeding, the default fixture has 1 point + 2 range findings
+        // and every viewport reports beats-in-window ≤ 1, so the tier
+        // selector never leaves Inspect regardless of zoom.
+        if let count = UITestSupport.seedBeatAnnotationsCount, count > 0 {
+            // Fixture is 10 s at 250 Hz = 2500 samples by default.
+            // Space N annotations evenly across the range.
+            let total = 2500
+            let stride = max(1, total / count)
+            for i in 0..<count {
+                let sample = i * stride
+                findings.append("""
+                {
+                  "kind": "point",
+                  "startSample": \(sample),
+                  "category": "N",
+                  "label": "N",
+                  "source": "ui-test-seed"
+                }
+                """)
+            }
+        }
+        #endif
+        let json = """
+        {
+          "schemaVersion": 1,
+          "source": "synth.se-reslstm.v1",
+          "findings": [
+        \(findings.joined(separator: ","))
           ]
         }
 
