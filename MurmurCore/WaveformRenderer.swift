@@ -547,10 +547,14 @@ final class WaveformRenderer: NSObject, MTKViewDelegate {
                       color: bucket.color, uniforms: &u)
         }
         if let buf = focusLocatorBuffer {
-            // Neutral dark ink, semi-transparent — reads as a location
-            // cursor, not a computed judgment (mockup-review B-RUO:
-            // app-computed = neutral; amber = analyst findings only).
-            let color = SIMD4<Float>(0.20, 0.20, 0.25, 0.40)
+            // Focus blue — matches the mockup's `--focus:#2e6f9e`
+            // (Planning/design/waveform-zoom-lod.html) and the accent
+            // colour the FiducialOverlay R-tick uses for the focused
+            // beat, so the two focus signals agree. Not a judgment
+            // colour (B-RUO carve-out): a focus cursor is a UI
+            // affordance for "you selected this," analogous to accent
+            // colour on a selected list row — RUO-neutral.
+            let color = SIMD4<Float>(0.18, 0.44, 0.62, 0.85)
             drawLines(encoder: encoder, buffer: buf, vertexCount: 2,
                       color: color, uniforms: &u)
         }

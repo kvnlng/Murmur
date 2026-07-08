@@ -556,28 +556,31 @@ struct WaveformAnnotationOverlay: View {
 
     @ViewBuilder
     private func clusterLabel(cluster: ClusteredAnnotation) -> some View {
+        // Every chip renders with a colored capsule background — matches
+        // the mockup at Planning/design/waveform-zoom-lod.html (rounded
+        // rect fill on every beat, not just the multi-count clusters).
+        // "N" normal chips render slightly more translucent so the eye
+        // reads flagged chips first, per the ratified review-queue
+        // attention hierarchy (normal quietest, flagged carry color).
         let color = CategoryPalette.swiftUIColor(for: cluster.category)
-        if cluster.count > 1 {
-            HStack(spacing: 3) {
-                Text(cluster.representative.displayLabel)
-                    .font(.caption2.monospaced().weight(.semibold))
-                    .foregroundStyle(.white)
+        let isNormal = cluster.category == "N"
+        return HStack(spacing: 3) {
+            Text(cluster.representative.displayLabel)
+                .font(.caption2.monospaced().weight(.semibold))
+                .foregroundStyle(.white)
+            if cluster.count > 1 {
                 Text("×\(cluster.count)")
                     .font(.caption2.monospacedDigit().weight(.bold))
                     .foregroundStyle(.white.opacity(0.85))
             }
-            .padding(.horizontal, 5)
-            .padding(.vertical, 1)
-            .background(
-                Capsule().fill(color.opacity(0.85))
-            )
-            .overlay(
-                Capsule().stroke(color, lineWidth: 0.5)
-            )
-        } else {
-            Text(cluster.representative.displayLabel)
-                .font(.caption2.monospaced().weight(.semibold))
-                .foregroundStyle(color)
         }
+        .padding(.horizontal, 5)
+        .padding(.vertical, 1)
+        .background(
+            Capsule().fill(color.opacity(isNormal ? 0.75 : 0.92))
+        )
+        .overlay(
+            Capsule().stroke(color, lineWidth: 0.5)
+        )
     }
 }
