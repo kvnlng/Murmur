@@ -756,18 +756,53 @@ extension SnapshotTests {
                        as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 
-    /// At Context the overlay is silent — beat identity there lives in
-    /// the (forthcoming) density-lane component. Pin the empty invariant
-    /// so a stray re-render regression at Context is caught by a red diff.
-    func testWaveformAnnotationOverlay_contextTierEmpty() {
-        let annotations: [Annotation] = (0..<20).map { i in
-            Annotation(kind: .point, sampleIndex: Int64(500 + i * 400),
-                       category: i.isMultiple(of: 4) ? "PVC" : "N", source: "demo")
+    /// At Context the overlay's rail carries only INDIVIDUALLY
+    /// LOCATABLE landmarks — SF Symbol glyphs for rare flagged
+    /// categories. Categories whose count would blow past
+    /// count * minMarkSpacing collapse into the density lane below the
+    /// trace (rendered by AnnotationDensityLane), not this overlay.
+    func testWaveformAnnotationOverlay_contextTierLandmarks() {
+        // A rare rhythm event + a rare fusion event, plus a wall of
+        // ventricular ectopy that would blow past the landmark budget.
+        var annotations: [Annotation] = []
+        annotations.append(Annotation(kind: .point, sampleIndex: 2_000,
+                                      category: "rhythm", source: "demo"))
+        annotations.append(Annotation(kind: .point, sampleIndex: 9_000,
+                                      category: "F", source: "demo"))
+        for i in 0..<60 {
+            annotations.append(Annotation(kind: .point, sampleIndex: Int64(500 + i * 200),
+                                          category: "PVC", source: "demo"))
         }
         let view = WaveformAnnotationOverlay(annotations: annotations,
             startSample: 0, endSample: 15_000, tier: .context)
             .frame(width: 660, height: 40).background(Color.white)
         assertSnapshot(of: render(view, size: CGSize(width: 660, height: 40)),
+                       as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
+    /// AnnotationDensityLane: bulk ventricular ectopy collapses into a
+    /// per-bucket density strip below the trace. Neutral ink (never
+    /// category-hued — RUO consistency).
+    func testAnnotationDensityLane_bulkVentricular() {
+        // Bimodal density: a dense burst 20–40% of the window, a lighter
+        // burst 60–80%. Reads as two visible clumps in the strip.
+        var annotations: [Annotation] = []
+        for i in 0..<80 {
+            annotations.append(Annotation(kind: .point, sampleIndex: Int64(3_000 + i * 25),
+                                          category: "PVC", source: "demo"))
+        }
+        for i in 0..<40 {
+            annotations.append(Annotation(kind: .point, sampleIndex: Int64(9_000 + i * 75),
+                                          category: "PVC", source: "demo"))
+        }
+        let view = AnnotationDensityLane(
+            bulkAnnotations: annotations,
+            startSample: 0,
+            endSample: 15_000,
+            categoryLabel: "PVC"
+        )
+        .frame(width: 660).background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 660, height: 20)),
                        as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 }

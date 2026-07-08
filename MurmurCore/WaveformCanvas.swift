@@ -387,11 +387,13 @@ struct WaveformAnnotationOverlay: View {
         case .scan:
             return AnyView(flaggedTickRail)
         case .context:
-            // Context's rail is landmarks + a density lane — both live in
-            // dedicated components (density lane sits BELOW the trace, not
-            // above it). This overlay stays silent so it doesn't
-            // double-render or fight the density lane's neutral ink.
-            return AnyView(EmptyView())
+            // At Context the rail carries only INDIVIDUALLY LOCATABLE
+            // landmarks — the rare-flagged-category events. Bulk
+            // categories fall out to the density lane BELOW the trace,
+            // rendered by AnnotationDensityLane. The partitioning rule
+            // lives in AnnotationDensityLane.partition(...) so both
+            // sides key off the same math.
+            return AnyView(landmarkRail)
         }
     }
 
@@ -473,6 +475,57 @@ struct WaveformAnnotationOverlay: View {
     /// nodal beats or conduction anomalies still surface as ticks.
     private func isFlagged(category: String) -> Bool {
         category != "N"
+    }
+
+    /// Context-tier rail: individually locatable landmarks (SF Symbols)
+    /// for RARE flagged categories that would still fit as individual
+    /// marks at the current on-screen scale. The partitioning rule is
+    /// centralised in AnnotationDensityLane.partition so the bulk (in
+    /// the density lane below the trace) and the landmarks (here)
+    /// never disagree about which category is which.
+    private var landmarkRail: some View {
+        GeometryReader { geo in
+            let span = max(1, endSample - startSample)
+            let canvasWidth = max(1, geo.size.width)
+            let split = AnnotationDensityLane.partition(
+                annotations: annotations,
+                plotWidthPoints: canvasWidth
+            )
+            ForEach(split.landmarks) { ann in
+                let frac = Double(ann.sampleIndex - startSample) / Double(span)
+                Image(systemName: Self.landmarkSymbol(for: ann.category))
+                    .font(.caption2)
+                    .foregroundStyle(CategoryPalette.swiftUIColor(for: ann.category))
+                    .position(x: CGFloat(frac) * canvasWidth, y: 10)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    /// SF Symbol glyph for a landmark at Context. Kept as a single
+    /// method (not per-category variants) so the choice stays visible
+    /// + editable in one spot. All glyphs are neutral geometric shapes
+    /// — the tinting by category color carries the classification,
+    /// consistent with the mockup-review "SF Symbols not emoji" call.
+    private static func landmarkSymbol(for category: String) -> String {
+        switch category {
+        case "V", "PVC", "VT", "VF", "VF_onset", "E":
+            return "triangle.fill"        // ventricular family
+        case "A", "APC", "AFib", "S":
+            return "diamond.fill"          // atrial family
+        case "F":
+            return "circle.grid.cross.fill" // fusion
+        case "L", "R", "J":
+            return "square.fill"           // conduction anomaly
+        case "/":
+            return "bolt.fill"             // paced
+        case "Noise", "NoiseGap", "~":
+            return "sparkles"              // artifact
+        case "Q", "?":
+            return "questionmark.circle.fill"
+        default:
+            return "circle.fill"           // producer-defined; neutral
+        }
     }
 
     @ViewBuilder

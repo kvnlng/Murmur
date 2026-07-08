@@ -1407,6 +1407,16 @@ private struct ChannelPanel: View {
                 canvasArea
             }
             .frame(maxHeight: sizing.expands ? .infinity : nil)
+            // Density lane — only visible at Context tier per
+            // project_waveform_zoom_lod_spec.md. Aligned with the trace
+            // by the same 56pt leading pad the time axis uses. When
+            // hidden it collapses to zero height; the tier crossing is
+            // an intentional, honest layout shift (no forever-reserved
+            // gap at non-Context).
+            if waveformZoomTier == .context {
+                densityLane
+                    .padding(.leading, 56)
+            }
             WaveformTimeAxis(startTime: startTime, endTime: endTime)
                 .padding(.leading, 56)
         }
@@ -1427,6 +1437,32 @@ private struct ChannelPanel: View {
             return Self.yMin...Self.yMax
         }
         return range.displayRange()
+    }
+
+    /// Density lane for the Context tier. Uses its own GeometryReader
+    /// because the plot width feeds the landmark/bulk split rule in
+    /// `AnnotationDensityLane.partition(...)` — same math as the
+    /// landmark rail above the trace, so the two never disagree about
+    /// which category collapsed into density and which are still
+    /// individually locatable.
+    private var densityLane: some View {
+        GeometryReader { geo in
+            let split = AnnotationDensityLane.partition(
+                annotations: visibleAnnotations,
+                plotWidthPoints: geo.size.width
+            )
+            let bulkCategories = Set(split.bulk.map(\.category)).sorted()
+            let label = bulkCategories.count == 1
+                ? bulkCategories.first
+                : (bulkCategories.isEmpty ? nil : "flagged")
+            AnnotationDensityLane(
+                bulkAnnotations: split.bulk,
+                startSample: viewport.startSample,
+                endSample: viewport.endSample,
+                categoryLabel: label
+            )
+        }
+        .frame(height: 14)
     }
 
     private var canvasArea: some View {
