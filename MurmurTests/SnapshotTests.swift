@@ -802,7 +802,7 @@ extension SnapshotTests {
             categoryLabel: "PVC"
         )
         .frame(width: 660).background(Color.white)
-        assertSnapshot(of: render(view, size: CGSize(width: 660, height: 20)),
+        assertSnapshot(of: render(view, size: CGSize(width: 660, height: 44)),
                        as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 }

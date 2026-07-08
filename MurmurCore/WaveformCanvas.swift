@@ -407,6 +407,24 @@ struct WaveformAnnotationOverlay: View {
                 annotations,
                 mergeWithinSamples: mergeThresholdSamples
             )
+            // Per-annotation short top-tick UNDER each cluster's chip.
+            // Matches the mockup's Inspect rail: every beat gets a small
+            // colored anchor extending down from the top of the trace,
+            // so the chip above always has a beat it visibly points to.
+            // Normals are faint (opacity 0.5, thinner) so flagged beats
+            // stand out; per the ratified review-queue attention
+            // hierarchy (normal quietest, flagged carry the color).
+            ForEach(annotations, id: \.id) { ann in
+                if ann.kind == .point {
+                    let frac = Double(ann.sampleIndex - startSample) / Double(span)
+                    let color = CategoryPalette.swiftUIColor(for: ann.category)
+                    let flagged = isFlagged(category: ann.category)
+                    Rectangle()
+                        .fill(color.opacity(flagged ? 1.0 : 0.5))
+                        .frame(width: flagged ? 1.8 : 1.0, height: 8)
+                        .position(x: CGFloat(frac) * canvasWidth, y: 3)
+                }
+            }
             ForEach(clusters) { cluster in
                 let anchorSample: Int64 = {
                     switch cluster.representative.kind {
@@ -418,48 +436,47 @@ struct WaveformAnnotationOverlay: View {
                 }()
                 let frac = Double(anchorSample - startSample) / Double(span)
                 clusterLabel(cluster: cluster)
-                    .position(x: CGFloat(frac) * canvasWidth, y: 10)
+                    .position(x: CGFloat(frac) * canvasWidth, y: 15)
             }
         }
         .allowsHitTesting(false)
     }
 
-    /// Scan-tier rail: short colored ticks in the top rail for FLAGGED
-    /// categories only (V / A / F / rhythm / artifact — anything that
-    /// isn't the "N" normal-beat class). Normal beats are omitted; the
-    /// spec allows "faint hairline top-ticks or omitted entirely" and
-    /// omitting is cleaner at this density. Chips (with text) are too
-    /// wide to survive Scan without overlapping.
+    /// Scan-tier rail per the mockup at
+    /// `~/Documents/Murmur/Planning/design/waveform-zoom-lod.html`:
+    ///   - Normal beats become a very faint gray hairline (0.8 pt wide,
+    ///     5 pt tall) — the analyst still gets a sense of beat density
+    ///     without normals dominating the top.
+    ///   - Flagged beats become a bolder colored line (2 pt × 11 pt)
+    ///     PLUS a small colored circle marker (radius 2.6) at the
+    ///     rail-y — the two marks together form the "beat with a
+    ///     verdict" pattern that stays legible even when the trace
+    ///     itself has compressed to Scan density.
     private var flaggedTickRail: some View {
         GeometryReader { geo in
             let span = max(1, endSample - startSample)
             let canvasWidth = max(1, geo.size.width)
-            let samplesPerPixel = Double(span) / Double(canvasWidth)
-            // Narrow merge threshold: ticks are ~4pt wide, cluster them
-            // only when they'd literally paint the same pixels. Keeps
-            // ectopic runs (PVC bigeminy etc.) visually resolved without
-            // being able to individually count each one — which is fine
-            // at Scan zoom, where the analyst is scanning for CHANGE.
-            let mergeThresholdSamples = Int64(samplesPerPixel * Double(Self.tickPitchPx))
-            let flagged = annotations.filter { isFlagged(category: $0.category) }
-            let clusters = AnnotationClustering.cluster(
-                flagged,
-                mergeWithinSamples: mergeThresholdSamples
-            )
-            ForEach(clusters) { cluster in
-                let anchor: Int64 = {
-                    switch cluster.representative.kind {
-                    case .point: return cluster.sampleIndex
-                    case .range:
-                        let r = cluster.representative
-                        return (r.sampleIndex + r.renderEndSample) / 2
+            ForEach(annotations, id: \.id) { ann in
+                if ann.kind == .point {
+                    let frac = Double(ann.sampleIndex - startSample) / Double(span)
+                    let x = CGFloat(frac) * canvasWidth
+                    if isFlagged(category: ann.category) {
+                        let color = CategoryPalette.swiftUIColor(for: ann.category)
+                        Rectangle()
+                            .fill(color)
+                            .frame(width: 2, height: 11)
+                            .position(x: x, y: 5.5)
+                        Circle()
+                            .fill(color)
+                            .frame(width: 5.2, height: 5.2)
+                            .position(x: x, y: 14)
+                    } else {
+                        Rectangle()
+                            .fill(Color.secondary.opacity(0.45))
+                            .frame(width: 0.8, height: 5)
+                            .position(x: x, y: 2.5)
                     }
-                }()
-                let frac = Double(anchor - startSample) / Double(span)
-                Rectangle()
-                    .fill(CategoryPalette.swiftUIColor(for: cluster.representative.category))
-                    .frame(width: 3, height: 12)
-                    .position(x: CGFloat(frac) * canvasWidth, y: 8)
+                }
             }
         }
         .allowsHitTesting(false)
@@ -477,12 +494,16 @@ struct WaveformAnnotationOverlay: View {
         category != "N"
     }
 
-    /// Context-tier rail: individually locatable landmarks (SF Symbols)
-    /// for RARE flagged categories that would still fit as individual
-    /// marks at the current on-screen scale. The partitioning rule is
-    /// centralised in AnnotationDensityLane.partition so the bulk (in
-    /// the density lane below the trace) and the landmarks (here)
-    /// never disagree about which category is which.
+    /// Context-tier rail per the mockup: RARE flagged categories that
+    /// still fit as individually locatable marks show as a short colored
+    /// tick + a small rotated square (diamond glyph). Bulk categories
+    /// (from `AnnotationDensityLane.partition`) are handled by the
+    /// density lane below the trace and never appear here.
+    ///
+    /// The diamond is a rectangle rotated 45° rather than an SF Symbol
+    /// so the shape stays consistent across accent-color themes and
+    /// small point sizes; the tinting by CategoryPalette color carries
+    /// the classification (color, not shape).
     private var landmarkRail: some View {
         GeometryReader { geo in
             let span = max(1, endSample - startSample)
@@ -493,34 +514,39 @@ struct WaveformAnnotationOverlay: View {
             )
             ForEach(split.landmarks) { ann in
                 let frac = Double(ann.sampleIndex - startSample) / Double(span)
-                Image(systemName: Self.landmarkSymbol(for: ann.category))
-                    .font(.caption2)
-                    .foregroundStyle(CategoryPalette.swiftUIColor(for: ann.category))
-                    .position(x: CGFloat(frac) * canvasWidth, y: 10)
+                let x = CGFloat(frac) * canvasWidth
+                let color = CategoryPalette.swiftUIColor(for: ann.category)
+                Rectangle()
+                    .fill(color)
+                    .frame(width: 1.6, height: 9)
+                    .position(x: x, y: 4.5)
+                Rectangle()
+                    .fill(color)
+                    .frame(width: 4.4, height: 4.4)
+                    .rotationEffect(.degrees(45))
+                    .position(x: x, y: 12)
             }
         }
         .allowsHitTesting(false)
     }
 
-    /// SF Symbol glyph for a landmark at Context. Kept as a single
-    /// method (not per-category variants) so the choice stays visible
-    /// + editable in one spot. All glyphs are neutral geometric shapes
-    /// — the tinting by category color carries the classification,
-    /// consistent with the mockup-review "SF Symbols not emoji" call.
+    /// (Retained placeholder — old SF-Symbol map is unused after the
+    /// mockup-aligned refactor. Left here as a stub to preserve the
+    /// site if we later want per-category glyph variants.)
     private static func landmarkSymbol(for category: String) -> String {
         switch category {
         case "V", "PVC", "VT", "VF", "VF_onset", "E":
-            return "triangle.fill"        // ventricular family
+            return "triangle.fill"
         case "A", "APC", "AFib", "S":
-            return "diamond.fill"          // atrial family
+            return "diamond.fill"
         case "F":
-            return "circle.grid.cross.fill" // fusion
+            return "circle.grid.cross.fill"
         case "L", "R", "J":
-            return "square.fill"           // conduction anomaly
+            return "square.fill"
         case "/":
-            return "bolt.fill"             // paced
+            return "bolt.fill"
         case "Noise", "NoiseGap", "~":
-            return "sparkles"              // artifact
+            return "sparkles"
         case "Q", "?":
             return "questionmark.circle.fill"
         default:

@@ -77,26 +77,41 @@ struct AnnotationDensityLane: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
+        // Layout per the mockup: a bordered strip with the density bars
+        // inside, and the "<category> · density — neutral, not a heatmap"
+        // label BELOW the strip. Putting the label inline at the leading
+        // edge (the previous layout) crowded the strip and made the
+        // "density lane, not a chip rail" reading harder to catch at a
+        // glance.
+        VStack(alignment: .leading, spacing: 2) {
+            densityStrip
+                .frame(height: Self.stripHeight)
+                .background(
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Color.secondary.opacity(0.06))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 3)
+                        .stroke(Color.secondary.opacity(0.20), lineWidth: 0.5)
+                )
             if let label = categoryLabel {
-                Text("\(label) · density")
-                    .font(.caption2)
+                Text("\(label) · density — neutral, not a heatmap")
+                    .font(.caption2.monospaced())
                     .foregroundStyle(.tertiary)
-                    .padding(.trailing, 6)
                     .accessibilityIdentifier("annotation-density-lane-label")
             }
-            densityStrip
         }
-        .frame(height: 14)
         .accessibilityIdentifier("annotation-density-lane")
     }
 
+    private static let stripHeight: CGFloat = 20
+
     /// Canvas-drawn per-bucket density. Neutral primary ink; alpha is
     /// proportional to bucket count (clamped to 0.75 so a dense stretch
-    /// still reads as ink and not a black bar). Empty viewports render
-    /// as a blank strip — the reserved space signals "there'd be a lane
-    /// here if the category were populated," which matches how the
-    /// trace's rest state renders paper without a trace.
+    /// still reads as ink and not a black bar). Bars are height-scaled
+    /// too so a lightly-populated stretch reads as a shorter mark inside
+    /// the reserved strip — matches the mockup's "column-height carries
+    /// intensity" pattern.
     private var densityStrip: some View {
         Canvas { context, size in
             guard size.width > 0, size.height > 0 else { return }
@@ -111,13 +126,16 @@ struct AnnotationDensityLane: View {
                 buckets[idx] += 1
             }
             let maxCount = max(1, buckets.max() ?? 1)
+            let usableHeight = max(0, size.height - 2)
             for (i, count) in buckets.enumerated() where count > 0 {
-                let alpha = min(0.75, Double(count) / Double(maxCount))
+                let ratio = Double(count) / Double(maxCount)
+                let alpha = min(0.75, ratio)
+                let h = usableHeight * CGFloat(max(0.25, ratio))
                 let rect = CGRect(
                     x: CGFloat(i) * bucketWidthPx,
-                    y: 0,
-                    width: bucketWidthPx - 1,
-                    height: size.height
+                    y: size.height - 1 - h,
+                    width: max(0.6, bucketWidthPx - 1),
+                    height: h
                 )
                 context.fill(Path(rect), with: .color(Color.primary.opacity(alpha)))
             }

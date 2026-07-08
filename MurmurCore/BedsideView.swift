@@ -1462,7 +1462,7 @@ private struct ChannelPanel: View {
                 categoryLabel: label
             )
         }
-        .frame(height: 14)
+        .frame(height: 36)
     }
 
     private var canvasArea: some View {
