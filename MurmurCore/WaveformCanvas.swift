@@ -366,6 +366,14 @@ struct WaveformAnnotationOverlay: View {
     let startSample: Int64
     let endSample: Int64
 
+    /// Current semantic-zoom tier per project_waveform_zoom_lod_spec.md.
+    /// Chips render only at `.inspect`; at `.scan` and `.context` this
+    /// overlay is silent (Scan's short-tick rail and Context's density
+    /// lane + landmarks land in follow-up components). Default `.inspect`
+    /// preserves the pre-tier-wiring behavior for callers/tests that
+    /// haven't been updated yet.
+    var tier: WaveformZoomTier = .inspect
+
     /// Approximate label width in points. Any two same-category points
     /// closer than this on screen would visually overlap, so we cluster
     /// them. 40pt covers a badge "PVC ×99" at caption2 weight with the
@@ -373,6 +381,18 @@ struct WaveformAnnotationOverlay: View {
     private static let labelPitchPx: CGFloat = 40
 
     var body: some View {
+        // Non-Inspect tiers drop the chip rail — per the spec, chips are
+        // "too tight" at Scan and get replaced by shorter treatments; at
+        // Context the rail is landmarks + a density lane, both distinct
+        // components. Rendering silently keeps the caller's ZStack layout
+        // stable while those components come online.
+        guard tier == .inspect else {
+            return AnyView(EmptyView())
+        }
+        return AnyView(chipRail)
+    }
+
+    private var chipRail: some View {
         GeometryReader { geo in
             let span = max(1, endSample - startSample)
             let canvasWidth = max(1, geo.size.width)

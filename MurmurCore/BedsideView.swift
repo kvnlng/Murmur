@@ -1386,6 +1386,14 @@ private struct ChannelPanel: View {
     /// IntervalMarkingsOrchestrator.
     @State private var markingsContext = IntervalMarkingsContext.shared
 
+    /// Semantic-zoom tier for the waveform per
+    /// project_waveform_zoom_lod_spec.md. Persists across body evals so
+    /// `WaveformZoomTierSelector.select(current:)`'s hysteresis is
+    /// honoured — otherwise the tier would strobe on slow zooms across
+    /// a threshold. Written asynchronously via `.task(id:)` when the
+    /// resolved tier for the current viewport differs from the stored
+    /// value.
+    @State private var waveformZoomTier: WaveformZoomTier = .inspect
 
     private static let yMin: Double = -5
     private static let yMax: Double =  5
@@ -1432,6 +1440,24 @@ private struct ChannelPanel: View {
         // entirely.
         GeometryReader { geo in
             let liveSize = geo.size
+            // Points-per-beat for THIS viewport, at THIS panel's width.
+            // Feeds the semantic zoom tier — the annotation-rail
+            // treatment, the fiducial detail level, and (in follow-up
+            // commits) the density lane all key off the same value so
+            // every layer stays in lockstep with what the trace itself
+            // is showing.
+            let beatsInWindow = markingsContext.beats.count(where: {
+                $0.rPeakSampleIndex >= viewport.startSample
+                && $0.rPeakSampleIndex <= viewport.endSample
+            })
+            let pointsPerBeat = WaveformZoomTierSelector.pointsPerBeat(
+                plotWidthPoints: Double(liveSize.width),
+                beatsInWindow: beatsInWindow
+            )
+            let resolvedTier = WaveformZoomTierSelector.select(
+                pointsPerBeat: pointsPerBeat,
+                current: waveformZoomTier
+            )
             ZStack(alignment: .topLeading) {
                 // Chart content — translated by the rubber-band offset so
                 // the trace, off-scale markers, and annotation labels all
@@ -1461,7 +1487,8 @@ private struct ChannelPanel: View {
                     WaveformAnnotationOverlay(
                         annotations: visibleAnnotations,
                         startSample: viewport.startSample,
-                        endSample: viewport.endSample
+                        endSample: viewport.endSample,
+                        tier: resolvedTier
                     )
                 }
                 .offset(x: overscrollPx)
@@ -1516,6 +1543,17 @@ private struct ChannelPanel: View {
                         .offset(tooltipOffset(in: liveSize))
                         .allowsHitTesting(false)
                         .transition(.opacity)
+                }
+            }
+            // Persist the resolved tier back to @State so the next
+            // body pass has the correct `current` input for the
+            // hysteresis rule. Async by construction (Task-scheduled);
+            // acceptable because the visible tier this frame is already
+            // `resolvedTier` — the state write is only to inform the
+            // NEXT frame's selector call.
+            .task(id: resolvedTier) {
+                if resolvedTier != waveformZoomTier {
+                    waveformZoomTier = resolvedTier
                 }
             }
             .contentShape(Rectangle())
