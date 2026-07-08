@@ -1482,10 +1482,24 @@ private struct ChannelPanel: View {
             // commits) the density lane all key off the same value so
             // every layer stays in lockstep with what the trace itself
             // is showing.
-            let beatsInWindow = markingsContext.beats.count(where: {
+            //
+            // BEAT SOURCE: prefer the delineator's fiducial store when
+            // it's populated (paid ECG Metrics active), otherwise fall
+            // back to counting the wfdb.atr POINT annotations in the
+            // viewport. Without this fallback, the tier stays at
+            // .inspect forever for free-viewer users looking at a
+            // MIT-BIH recording — the whole zoom-out simplification
+            // never fires because the compute-side beat count is empty.
+            let delineatorBeats = markingsContext.beats.count(where: {
                 $0.rPeakSampleIndex >= viewport.startSample
                 && $0.rPeakSampleIndex <= viewport.endSample
             })
+            let beatsInWindow: Int = {
+                if delineatorBeats > 0 { return delineatorBeats }
+                return visibleAnnotations.reduce(0) { partial, ann in
+                    ann.kind == .point ? partial + 1 : partial
+                }
+            }()
             let pointsPerBeat = WaveformZoomTierSelector.pointsPerBeat(
                 plotWidthPoints: Double(liveSize.width),
                 beatsInWindow: beatsInWindow
