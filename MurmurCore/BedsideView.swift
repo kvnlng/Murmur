@@ -864,7 +864,8 @@ struct BedsideView: View {
                 sampleRate: channel.sampleRate,
                 viewport: viewport,
                 channelName: channel.name,
-                dispositionsByID: dispositionStore.records
+                dispositionsByID: dispositionStore.records,
+                candidates: candidatesForChannel(channel)
             )
         }
         .padding(.horizontal, 16)

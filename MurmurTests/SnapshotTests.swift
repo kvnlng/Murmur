@@ -807,4 +807,39 @@ extension SnapshotTests {
     }
 }
 
+// Kept in an extension so the main class body stays under SwiftLint's
+// type_body_length cap.
+extension SnapshotTests {
+
+    func testOverviewMap_withVTVFCandidates() {
+        let totalSamples: Int64 = 60_000
+        let annotations: [Annotation] = [
+            Annotation(kind: .point, sampleIndex: 2_000, category: "N", source: "demo"),
+            Annotation(kind: .point, sampleIndex: 8_000, category: "N", source: "demo")
+        ]
+        // Two neutral candidate bands at different positions / lengths.
+        let candidates: [Annotation] = [
+            VTVFCandidateSource.makeAnnotation(startSample: 30_000, endSample: 34_000, score: 0.93),
+            VTVFCandidateSource.makeAnnotation(startSample: 48_000, endSample: 49_000, score: 0.81)
+        ]
+        let viewport = RecordingViewport(
+            totalSamples: totalSamples,
+            sampleRate: 250,
+            initialDurationSeconds: 10
+        )
+        let view = OverviewMap(
+            annotations: annotations,
+            totalSamples: totalSamples,
+            sampleRate: 250,
+            viewport: viewport,
+            channelName: "I",
+            candidates: candidates
+        )
+        .frame(width: 520)
+        .padding()
+        .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 552, height: 120)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+}
+
 #endif // canImport(SnapshotTesting)
