@@ -356,6 +356,62 @@ struct WaveformClippingOverlay: View {
     }
 }
 
+/// Draws VT/VF model candidate EPISODES as translucent vertical bands
+/// spanning their [start, end] on the trace, with a small label at the
+/// leading edge. Range findings aren't drawn by the annotation chip rail
+/// (it's point-only), so this is what makes a review-queue jump to a
+/// candidate land on a visibly marked region.
+///
+/// NEUTRAL ink throughout — model output is never painted in a caution
+/// hue (RUO). The band locates the episode; the queue owns triage.
+struct VTVFCandidateBandOverlay: View {
+    let candidates: [Annotation]    // range annotations, viewport-filtered
+    let startSample: Int64
+    let endSample: Int64
+
+    var body: some View {
+        GeometryReader { geo in
+            let span = max(1, endSample - startSample)
+            let w = max(1, geo.size.width)
+            let h = geo.size.height
+            ForEach(candidates, id: \.id) { candidate in
+                let s = max(candidate.sampleIndex, startSample)
+                let e = min(candidate.renderEndSample, endSample)
+                if e > s {
+                    let x0 = CGFloat(Double(s - startSample) / Double(span)) * w
+                    let x1 = CGFloat(Double(e - startSample) / Double(span)) * w
+                    let bandWidth = max(2, x1 - x0)
+                    band(width: bandWidth, height: h)
+                        .position(x: x0 + bandWidth / 2, y: h / 2)
+                }
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func band(width: CGFloat, height: CGFloat) -> some View {
+        ZStack(alignment: .topLeading) {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.12))
+            // Leading + trailing edges so the episode bounds read clearly
+            // even when the fill is subtle.
+            HStack {
+                Rectangle().fill(Color.secondary.opacity(0.55)).frame(width: 1.5)
+                Spacer(minLength: 0)
+                Rectangle().fill(Color.secondary.opacity(0.55)).frame(width: 1.5)
+            }
+            Text("VT/VF candidate")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .background(RoundedRectangle(cornerRadius: 3).fill(.background.opacity(0.7)))
+                .padding(4)
+        }
+        .frame(width: width, height: height)
+    }
+}
+
 /// Annotation labels anchored to the top of the canvas. For point findings
 /// the label sits at the finding's sample. For ranges, the label sits at
 /// the range midpoint. Color comes from `CategoryPalette` so labels match

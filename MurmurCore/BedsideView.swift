@@ -156,6 +156,13 @@ struct BedsideView: View {
         filteredAnnotations.filter { $0.matchesChannel(channel.name) }
     }
 
+    /// VT/VF candidate episodes to draw on `channel`'s trace. Same
+    /// lead-matching rule as annotations; lead-less candidates show on
+    /// every channel.
+    private func candidatesForChannel(_ channel: Channel) -> [Annotation] {
+        scanContext.candidates.filter { $0.matchesChannel(channel.name) }
+    }
+
     private var focusedChannel: Channel? {
         guard case .focus(let id) = layoutMode else { return nil }
         return ecgChannels.first { $0.id == id }
@@ -743,6 +750,7 @@ struct BedsideView: View {
                             directory: recordingDirectory,
                             viewport: viewport,
                             annotations: annotationsForChannel(channel),
+                            candidates: candidatesForChannel(channel),
                             sizing: .strip
                         )
                     }
@@ -796,6 +804,7 @@ struct BedsideView: View {
                     directory: recordingDirectory,
                     viewport: viewport,
                     annotations: annotationsForChannel(channel),
+                    candidates: candidatesForChannel(channel),
                     sizing: .focus
                 )
                 // Tear down + rebuild when the focused lead changes —
@@ -1399,6 +1408,11 @@ private struct ChannelPanel: View {
     let directory: URL
     let viewport: RecordingViewport
     let annotations: [Annotation]
+    /// VT/VF model candidate episodes (range annotations) to draw as
+    /// translucent bands on the trace so a queue jump lands on a visible
+    /// region. Kept separate from `annotations` because candidates route
+    /// through the region-keyed disposition store, not the annotation one.
+    var candidates: [Annotation] = []
     var sizing: Sizing = .strip
 
     @State private var clippedRanges: [ClippedRange] = []
@@ -1590,6 +1604,16 @@ private struct ChannelPanel: View {
                         startSample: viewport.startSample,
                         endSample: viewport.endSample,
                         tier: resolvedTier
+                    )
+
+                    // VT/VF candidate regions as translucent bands. Range
+                    // annotations aren't drawn by the chip rail (point-only),
+                    // so without this a queue jump to a candidate lands on a
+                    // trace with no marker for the episode.
+                    VTVFCandidateBandOverlay(
+                        candidates: visibleCandidates,
+                        startSample: viewport.startSample,
+                        endSample: viewport.endSample
                     )
                 }
                 .offset(x: overscrollPx)
@@ -1866,6 +1890,18 @@ private struct ChannelPanel: View {
                 let end   = ann.endSampleIndex ?? ann.sampleIndex
                 return end >= range.lowerBound && start < range.upperBound
             }
+        }
+    }
+
+    /// Candidate episodes whose [start, end] interval intersects the
+    /// viewport — the subset the band overlay needs to draw.
+    private var visibleCandidates: [Annotation] {
+        guard !candidates.isEmpty else { return [] }
+        let range = viewport.rangeSamples
+        return candidates.filter { c in
+            let start = c.sampleIndex
+            let end = c.endSampleIndex ?? c.sampleIndex
+            return end >= range.lowerBound && start < range.upperBound
         }
     }
 
