@@ -30,6 +30,14 @@ struct BedsideView: View {
     /// Analyst review state for this recording's findings — confirm /
     /// dismiss / reset. Persisted to `<bundle>/dispositions.json`.
     @State private var dispositionStore: DispositionStore
+    /// Analyst review state for VT/VF model CANDIDATES — keyed on time
+    /// region (not annotation id) so it survives a rescan. Persisted to
+    /// `<bundle>/candidate-dispositions.json`.
+    @State private var candidateDispositionStore: VTVFCandidateDispositionStore
+    /// Bridge to the App-target VT/VF scan orchestrator: exposes the
+    /// committed candidates + drives the "Scan for VT/VF candidates"
+    /// toolbar affordance. The model + entitlement live on the App side.
+    @State private var scanContext = VTVFScanContext.shared
     /// Findings the analyst attached after import (via the "Attach
     /// findings…" toolbar action). Merged with `recording.annotations`
     /// for display. In-memory only for now; a future pass persists them
@@ -93,6 +101,7 @@ struct BedsideView: View {
         // workflow; strips mode is opt-in for cross-lead comparison.
         _layoutMode = State(initialValue: firstECG.map { .focus($0.id) } ?? .strips)
         _dispositionStore = State(initialValue: DispositionStore(bundleDirectory: recordingDirectory))
+        _candidateDispositionStore = State(initialValue: VTVFCandidateDispositionStore(bundleDirectory: recordingDirectory))
         _trendGuideStore = State(initialValue: IntervalTrendGuideStore(bundleDirectory: recordingDirectory))
     }
 
@@ -150,6 +159,56 @@ struct BedsideView: View {
     private var focusedChannel: Channel? {
         guard case .focus(let id) = layoutMode else { return nil }
         return ecgChannels.first { $0.id == id }
+    }
+
+    /// Extracted out of `body` to keep the view's type-check tractable —
+    /// the interpolation was tipping the whole body over the inference
+    /// budget once the VT/VF surfaces were added.
+    private var viewportStateLabel: String {
+        "start=\(viewport.startSample) end=\(viewport.endSample)"
+    }
+
+    /// VT/VF candidate scan toolbar item — only surfaces when the VT/VF
+    /// IAP is owned AND a recording is loaded (the App-target orchestrator
+    /// sets `isScanAvailable`). The free viewer never sees it, so the model
+    /// is never implied to be present. Extracted as its own toolbar-content
+    /// property to keep the `.toolbar` builder's type-check tractable.
+    @ToolbarContentBuilder
+    private var scanToolbarItem: some ToolbarContent {
+        if scanContext.isScanAvailable {
+            ToolbarItem {
+                Button {
+                    scanContext.requestScanDialog(
+                        viewStartSample: viewport.startSample,
+                        viewEndSample: viewport.endSample
+                    )
+                } label: {
+                    Label("Scan for VT/VF candidates", systemImage: "waveform.badge.magnifyingglass")
+                }
+                .help("Scan this recording for candidate VT/VF episodes (research use only)")
+                .accessibilityIdentifier("vtvf-scan-action")
+            }
+        }
+    }
+
+    /// The review-queue inspector — extracted from `body` for the same
+    /// type-check reason. Carries both the annotation findings and the
+    /// VT/VF model candidates + their region-keyed disposition store.
+    private var findingsInspector: some View {
+        FindingsPanel(
+            annotations: allAnnotations,
+            viewport: viewport,
+            sampleRate: recording.channels.first?.sampleRate ?? 250,
+            headerComments: recording.headerComments,
+            filter: $filter,
+            dispositionStore: dispositionStore,
+            isEditing: isEditing,
+            candidates: scanContext.candidates,
+            candidateDispositionStore: candidateDispositionStore,
+            regulatoryNotice: scanContext.regulatoryNotice,
+            parametersCaption: scanContext.parametersCaption
+        )
+        .inspectorColumnWidth(min: 260, ideal: 340, max: 500)
     }
 
     var body: some View {
@@ -241,20 +300,11 @@ struct BedsideView: View {
                 // accessibility post-processor reformats with thousands
                 // separators (e.g. `1750` → `1,750`). Letter separators
                 // keep tests' equality comparisons stable.
-                .accessibilityLabel("start=\(viewport.startSample) end=\(viewport.endSample)")
+                .accessibilityLabel(viewportStateLabel)
                 .allowsHitTesting(false)
         }
         .inspector(isPresented: $showFindings) {
-            FindingsPanel(
-                annotations: allAnnotations,
-                viewport: viewport,
-                sampleRate: recording.channels.first?.sampleRate ?? 250,
-                headerComments: recording.headerComments,
-                filter: $filter,
-                dispositionStore: dispositionStore,
-                isEditing: isEditing
-            )
-            .inspectorColumnWidth(min: 260, ideal: 340, max: 500)
+            findingsInspector
         }
         .toolbar {
             ToolbarItem {
@@ -281,6 +331,7 @@ struct BedsideView: View {
                 .help("Merge a producer's annotations JSON into this recording")
                 .accessibilityIdentifier("attach-findings")
             }
+            scanToolbarItem
             ToolbarItem {
                 Button { exportMarkdownReport() } label: {
                     Label("Export report…", systemImage: "square.and.arrow.up")
@@ -345,6 +396,27 @@ struct BedsideView: View {
     }
 
     #if DEBUG
+    /// Grants the VT/VF IAP and publishes a fixed set of synthetic
+    /// candidates — the same state a committed scan produces — so XCUI can
+    /// exercise the candidate group + disposition wire-up without running
+    /// Core ML. Coordinates sit inside the 10 s synthetic fixture.
+    @MainActor
+    private func injectSyntheticVTVFCandidates() {
+        let store = PurchaseStore.shared
+        store._setOwnedForTesting(store.ownedProductIDs.union([.vtDetection]))
+        let sr = ecgChannels.first?.sampleRate ?? 250
+        let candidates = [
+            VTVFCandidateSource.makeAnnotation(
+                startSample: Int64(1 * sr), endSample: Int64(4 * sr), score: 0.93
+            ),
+            VTVFCandidateSource.makeAnnotation(
+                startSample: Int64(6 * sr), endSample: Int64(9 * sr), score: 0.81
+            ),
+        ]
+        scanContext.setCandidates(candidates, parametersCaption: "τ 0.87 · min 4s · gap 5s · vtvf_seres_lstm")
+        scanContext.isScanAvailable = true
+    }
+
     /// Applies launch-arg-driven viewport mutations once the view appears.
     /// Mirrors the gestures' code paths so the wiring from launch arg →
     /// viewport state matches the wiring from gesture → viewport state.
@@ -355,6 +427,9 @@ struct BedsideView: View {
             // but short enough that the test's waitForExistence still catches
             // the post-hook state.
             try? await Task.sleep(nanoseconds: 1_000_000)
+            if UITestSupport.injectVTVFCandidates {
+                injectSyntheticVTVFCandidates()
+            }
             if let delta = UITestSupport.panBySamples {
                 viewport.setStart(viewport.startSample + delta)
             }

@@ -50,6 +50,10 @@ struct MurmurApp: App {
                 // fiducials + per-patient normal template + interval readouts,
                 // publishes to IntervalMarkingsContext.
                 .background(IntervalMarkingsOrchestrator())
+                // Third invisible orchestrator: owns the VT/VF Core ML model +
+                // entitlement gate, presents the scan dialog, and publishes
+                // committed candidates to VTVFScanContext for the review queue.
+                .background(VTVFScanOrchestrator())
         }
         .defaultSize(width: 1320, height: 880)
         .commands {

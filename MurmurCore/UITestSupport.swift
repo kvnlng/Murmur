@@ -176,6 +176,16 @@ enum UITestSupport {
         return n
     }
 
+    /// True when `--ui-test-vtvf-candidates` is passed. BedsideView grants
+    /// the VT/VF IAP (via `_setOwnedForTesting`) and injects a fixed set of
+    /// synthetic candidates into `VTVFScanContext` on appear — the same
+    /// state a committed scan produces — so the candidate group, the scan
+    /// toolbar affordance, and the region-keyed disposition wire-up are
+    /// exercisable without running Core ML in the test process.
+    static var injectVTVFCandidates: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-vtvf-candidates")
+    }
+
     /// True when `--ui-test-expand-all-findings-groups` is passed.
     /// The review-queue rail reads this and initialises its expanded-
     /// groups set to include every category, so exemplar rows
