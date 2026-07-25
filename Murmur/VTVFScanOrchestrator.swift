@@ -59,6 +59,17 @@ struct VTVFScanOrchestrator: View {
 
     @MainActor
     private func refreshAvailability() async {
+        #if DEBUG
+        // XCUI candidate-injection bypass: the test publishes candidates
+        // directly and needs the scan affordance available WITHOUT running
+        // Core ML (compiling the model would add cold-start latency and the
+        // flow under test doesn't need it). Mark available and skip both the
+        // entitlement check and the model load.
+        if ProcessInfo.processInfo.arguments.contains("--ui-test-vtvf-candidates") {
+            scanContext.isScanAvailable = recordingContext.recording != nil
+            return
+        }
+        #endif
         let owned = store.owns(.vtDetection)
         scanContext.isScanAvailable = owned && recordingContext.recording != nil
 

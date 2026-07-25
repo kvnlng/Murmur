@@ -70,9 +70,11 @@ final class MurmurUIVTVFTests: XCTestCase {
     func testCandidateGroupRendersWithCount() throws {
         let app = launchWithCandidates()
 
-        let group = app.descendants(matching: .any)
-            .matching(identifier: "vtvf-candidate-group").firstMatch
-        XCTAssertTrue(group.waitForExistence(timeout: 5),
+        // The top candidate row proves the group rendered; the count leaf
+        // proves the group header reflects the injected set.
+        let row0 = app.descendants(matching: .any)
+            .matching(identifier: "vtvf-candidate-row-0").firstMatch
+        XCTAssertTrue(row0.waitForExistence(timeout: 5),
                       "Candidate group should render in the review queue")
 
         let count = app.descendants(matching: .any)
@@ -113,7 +115,7 @@ final class MurmurUIVTVFTests: XCTestCase {
         let state0 = app.descendants(matching: .any)
             .matching(identifier: "vtvf-candidate-state-0").firstMatch
         XCTAssertTrue(state0.waitForExistence(timeout: 3))
-        let confirmed = NSPredicate(format: "value == %@", "confirmed")
+        let confirmed = NSPredicate(format: "label == %@", "confirmed")
         let exp = XCTNSPredicateExpectation(predicate: confirmed, object: state0)
         XCTAssertEqual(XCTWaiter.wait(for: [exp], timeout: 3), .completed,
                        "Confirming a candidate should route into the region store")
@@ -137,7 +139,7 @@ final class MurmurUIVTVFTests: XCTestCase {
         let state1 = app.descendants(matching: .any)
             .matching(identifier: "vtvf-candidate-state-1").firstMatch
         XCTAssertTrue(state1.waitForExistence(timeout: 3))
-        let dismissed = NSPredicate(format: "value == %@", "dismissed")
+        let dismissed = NSPredicate(format: "label == %@", "dismissed")
         let exp = XCTNSPredicateExpectation(predicate: dismissed, object: state1)
         XCTAssertEqual(XCTWaiter.wait(for: [exp], timeout: 3), .completed,
                        "Dismissing a candidate should route into the region store")

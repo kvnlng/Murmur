@@ -402,8 +402,10 @@ struct BedsideView: View {
     /// Core ML. Coordinates sit inside the 10 s synthetic fixture.
     @MainActor
     private func injectSyntheticVTVFCandidates() {
-        let store = PurchaseStore.shared
-        store._setOwnedForTesting(store.ownedProductIDs.union([.vtDetection]))
+        // Deliberately does NOT grant PurchaseStore entitlement — that
+        // races against the store's async currentEntitlements refresh. The
+        // orchestrator makes the scan affordance available under the same
+        // launch flag instead (without loading Core ML).
         let sr = ecgChannels.first?.sampleRate ?? 250
         let candidates = [
             VTVFCandidateSource.makeAnnotation(

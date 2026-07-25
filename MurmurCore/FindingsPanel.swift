@@ -971,6 +971,16 @@ struct FindingsPanel: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("vtvf-candidate-group")
+        // Reliable, addressable count leaf (the container id itself isn't
+        // always matchable through the ScrollView/LazyVStack — see
+        // project_swiftui_accessibility_contain).
+        .overlay(alignment: .topLeading) {
+            Color.clear
+                .frame(width: 1, height: 1)
+                .accessibilityIdentifier("vtvf-candidate-count")
+                .accessibilityLabel("\(sortedCandidates.count)")
+                .allowsHitTesting(false)
+        }
     }
 
     private var candidateGroupHeader: some View {
@@ -1003,8 +1013,6 @@ struct FindingsPanel: View {
                 Text("\(sortedCandidates.count)")
                     .font(.callout.monospacedDigit().weight(.semibold))
                     .foregroundStyle(.secondary)
-                    // Hidden addressable count for XCUI wire-up assertions.
-                    .accessibilityIdentifier("vtvf-candidate-count")
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
@@ -1077,10 +1085,17 @@ struct FindingsPanel: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
         .opacity(state == .dismissed ? 0.5 : 1.0)
-        // Addressable disposition state for XCUI disposition-survival tests.
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("vtvf-candidate-state-\(rank)")
-        .accessibilityValue(candidateStateLabel(state))
+        // Addressable disposition state for XCUI wire-up assertions. A
+        // dedicated hidden leaf carrying the state as its accessibilityLabel
+        // reads reliably from XCUI (the ui-test-viewport-state pattern) —
+        // a value on a children:.contain container does not.
+        .overlay(alignment: .topLeading) {
+            Color.clear
+                .frame(width: 1, height: 1)
+                .accessibilityIdentifier("vtvf-candidate-state-\(rank)")
+                .accessibilityLabel(candidateStateLabel(state))
+                .allowsHitTesting(false)
+        }
     }
 
     /// Confirmed = amber (the only place amber is allowed for a candidate).
