@@ -82,6 +82,9 @@ struct FindingsPanel: View {
     @Binding var filter: FindingFilter
     let dispositionStore: DispositionStore
     let isEditing: Bool
+    /// When true, finding jumps preserve the current zoom (the 10 s window
+    /// lock is engaged). Candidate jumps always preserve zoom regardless.
+    var lockZoom: Bool = false
 
     /// VT/VF model candidates for the current recording, as range
     /// annotations (source `VTVFCandidateSource.id`). Rendered as ONE
@@ -578,7 +581,7 @@ struct FindingsPanel: View {
         // label collapses the entire subtree into one hit target.
         HStack(alignment: .center, spacing: 8) {
             Button {
-                jump(to: entry.annotation)
+                jump(to: entry.annotation, preserveZoom: lockZoom)
             } label: {
                 HStack(alignment: .center, spacing: 8) {
                     Circle()
@@ -913,17 +916,25 @@ struct FindingsPanel: View {
 
     // MARK: - Jump
 
-    private func jump(to ann: Annotation) {
-        let centerSample = (ann.sampleIndex + ann.renderEndSample) / 2
+    /// Recenter the viewport on `ann`.
+    ///
+    /// `preserveZoom` keeps the analyst's current time window (only pans,
+    /// centering on the finding's onset) — used for candidate jumps and for
+    /// any jump while the 10 s window lock is on, so the window never shifts
+    /// out from under someone thinking in fixed time spans. When false, a
+    /// range finding zooms to fit its span with lead-in context.
+    private func jump(to ann: Annotation, preserveZoom: Bool = false) {
         let total = viewport.totalSamples
         guard total > 0 else { return }
-        if ann.kind == .range, let endSample = ann.endSampleIndex {
+        if !preserveZoom, ann.kind == .range, let endSample = ann.endSampleIndex {
             let spanSamples = endSample - ann.sampleIndex
             let context = max(spanSamples * 2, Int64(sampleRate * 5))
             viewport.setWidth(spanSamples + context, anchorFraction: 0.5)
         }
-        let fraction = Double(centerSample) / Double(total)
-        viewport.animateJump(toFraction: fraction)
+        let centerSample = preserveZoom
+            ? ann.sampleIndex                              // onset
+            : (ann.sampleIndex + ann.renderEndSample) / 2  // midpoint
+        viewport.animateJump(toFraction: Double(centerSample) / Double(total))
     }
 
     private func formatTime(_ sample: Int64) -> String {
@@ -1056,7 +1067,7 @@ struct FindingsPanel: View {
         let score = candidate.confidence ?? 0
         return HStack(alignment: .center, spacing: 8) {
             Button {
-                jump(to: candidate)
+                jump(to: candidate, preserveZoom: true)
             } label: {
                 HStack(alignment: .center, spacing: 8) {
                     candidateStateGlyph(state)

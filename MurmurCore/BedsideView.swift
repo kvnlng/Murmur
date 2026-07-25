@@ -22,6 +22,10 @@ struct BedsideView: View {
     @State private var viewport: RecordingViewport
     @State private var filter = FindingFilter()
     @State private var showFindings = true
+    /// When on, the viewport is held at a 10-second window and finding /
+    /// candidate jumps recenter without changing zoom — for analysts who
+    /// read in fixed time windows. A manual zoom breaks the lock.
+    @State private var windowLockedTo10s = false
     @State private var layoutMode: BedsideLayoutMode
     /// App-wide read/write latch. Governs the context-notes editor and the
     /// per-finding disposition trio; new annotation create/edit/delete will
@@ -180,6 +184,26 @@ struct BedsideView: View {
     /// sets `isScanAvailable`). The free viewer never sees it, so the model
     /// is never implied to be present. Extracted as its own toolbar-content
     /// property to keep the `.toolbar` builder's type-check tractable.
+    /// 10-second window lock. Snaps the viewport to a 10 s window and holds
+    /// it there — finding + candidate jumps recenter without re-zooming, so
+    /// an analyst reading in fixed windows keeps their frame. A manual zoom
+    /// (see `zoom(factor:)`) releases the lock.
+    @ToolbarContentBuilder
+    private var windowLockToolbarItem: some ToolbarContent {
+        ToolbarItem {
+            Button {
+                toggleWindowLock()
+            } label: {
+                Label("10 s window", systemImage: windowLockedTo10s ? "lock.fill" : "lock.open")
+            }
+            .help(windowLockedTo10s
+                  ? "Locked to a 10-second window. Jumps recenter without changing zoom. Click (or zoom) to unlock."
+                  : "Lock the trace to a 10-second window so jumps keep your time frame.")
+            .tint(windowLockedTo10s ? Color.accentColor : nil)
+            .accessibilityIdentifier("window-lock-toggle")
+        }
+    }
+
     @ToolbarContentBuilder
     private var scanToolbarItem: some ToolbarContent {
         if scanContext.isScanAvailable {
@@ -210,6 +234,7 @@ struct BedsideView: View {
             filter: $filter,
             dispositionStore: dispositionStore,
             isEditing: isEditing,
+            lockZoom: windowLockedTo10s,
             candidates: scanContext.candidates,
             candidateDispositionStore: candidateDispositionStore,
             regulatoryNotice: scanContext.regulatoryNotice,
@@ -364,6 +389,7 @@ struct BedsideView: View {
                 .accessibilityIdentifier("producers-toggle")
             }
             #endif
+            windowLockToolbarItem
             ToolbarItem {
                 Button {
                     showFindings.toggle()
@@ -622,9 +648,24 @@ struct BedsideView: View {
     /// keeps whatever the analyst was looking at in the same on-screen
     /// position.
     private func zoom(factor: Double) {
+        // A deliberate zoom breaks the 10 s window lock — the analyst has
+        // chosen a different frame.
+        if windowLockedTo10s { windowLockedTo10s = false }
         let currentWidth = viewport.endSample - viewport.startSample
         let newWidth = Int64(Double(currentWidth) * factor)
         viewport.setWidth(newWidth, anchorFraction: 0.5)
+    }
+
+    /// Toggle the 10-second window lock. Engaging it snaps the viewport to a
+    /// 10 s window centered on the current position; the lock then holds the
+    /// zoom steady through finding / candidate jumps (see FindingsPanel's
+    /// `lockZoom`). Candidate jumps preserve zoom regardless of this lock.
+    private func toggleWindowLock() {
+        windowLockedTo10s.toggle()
+        if windowLockedTo10s {
+            let tenSeconds = Int64(viewport.sampleRate * 10)
+            viewport.setWidth(tenSeconds, anchorFraction: 0.5)
+        }
     }
 
     /// Animated jump to the first filtered finding strictly after the
