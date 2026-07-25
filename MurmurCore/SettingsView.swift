@@ -79,6 +79,32 @@ private struct PurchasesSettingsTab: View {
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
+
+            #if DEBUG
+            // Developer-only local unlock. There's no in-app Buy surface for
+            // VT/VF yet (its LockedView is still to be built), so this is the
+            // only way to exercise paid features against a StoreKit-less debug
+            // build. Compiled out of Release entirely.
+            Section {
+                ForEach(PurchaseStore.ProductID.allCases, id: \.self) { id in
+                    Toggle(displayName(for: id), isOn: Binding(
+                        get: { store.owns(id) },
+                        set: { grant in
+                            let updated = grant
+                                ? store.ownedProductIDs.union([id])
+                                : store.ownedProductIDs.subtracting([id])
+                            store._setOwnedForTesting(updated)
+                        }
+                    ))
+                }
+            } header: {
+                Text("Developer — grant entitlements (DEBUG)")
+            } footer: {
+                Text("Debug builds only. Flips local ownership so paid features can be exercised without a StoreKit purchase. Grant \"VT/VF Detection (RUO)\", open a recording, then use the \"Scan for VT/VF candidates\" toolbar button.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            #endif
         }
         .formStyle(.grouped)
         .padding()
