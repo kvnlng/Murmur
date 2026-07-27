@@ -68,6 +68,28 @@ final class MurmurUIVTVFTests: XCTestCase {
                        "Scan action must not appear in the free viewer")
     }
 
+    // MARK: - WFDB export
+
+    /// End-to-end: confirming a candidate and exporting writes exactly the
+    /// confirmed finding to the `.mur` annotator. The count routes through the
+    /// amber filter and the byte writer, so only an XCUI assertion on the
+    /// exposed result proves the plumbing (snapshot/unit tests can't reach it).
+    @MainActor
+    func testWFDBExportWritesConfirmedFinding() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-sample", "--ui-test-export-wfdb"]
+        app.launch()
+
+        let leaf = app.descendants(matching: .any)
+            .matching(identifier: "ui-test-wfdb-export").firstMatch
+        XCTAssertTrue(leaf.waitForExistence(timeout: 5))
+
+        let expected = NSPredicate(format: "label == %@", "annotator=mur count=1")
+        let exp = XCTNSPredicateExpectation(predicate: expected, object: leaf)
+        XCTAssertEqual(XCTWaiter.wait(for: [exp], timeout: 5), .completed,
+                       "Export should write one confirmed finding to the .mur annotator")
+    }
+
     // MARK: - Candidate group
 
     /// Candidates render as one group with the correct count.

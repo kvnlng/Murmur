@@ -198,6 +198,17 @@ enum UITestSupport {
         ProcessInfo.processInfo.arguments.contains("--ui-test-no-entitlements")
     }
 
+    /// True when `--ui-test-export-wfdb` is passed. BedsideView confirms a
+    /// synthetic candidate region and runs the WFDB export end-to-end (amber
+    /// filter → writer → `<base>.mur` beside the fixture), then publishes the
+    /// result on the `ui-test-wfdb-export` accessibility leaf. Bypasses the
+    /// export confirmation dialog and the toolbar click so XCUI can assert the
+    /// exported count + annotator suffix — the plumbing snapshot/unit tests
+    /// can't reach.
+    static var exportWFDBFindings: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-export-wfdb")
+    }
+
     /// True when `--ui-test-expand-all-findings-groups` is passed.
     /// The review-queue rail reads this and initialises its expanded-
     /// groups set to include every category, so exemplar rows
