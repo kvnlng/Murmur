@@ -53,6 +53,27 @@ struct WFDBAnnotationExportTests {
         #expect(findings.map(\.text) == ["VT", "sustained run"])   // note wins over kind
     }
 
+    @Test("Analyst-authored findings export even without a disposition")
+    func amberIncludesAuthored() {
+        let authored = Annotation(
+            kind: .range, sampleIndex: 500, endSampleIndex: 900,
+            category: "ANALYST_FINDING", label: "QTc 432→508 ms · 0:02–0:04",
+            source: Annotation.analystAuthoredSource
+        )
+        // A model candidate with no disposition is NOT amber → excluded.
+        let candidate = Annotation(
+            kind: .range, sampleIndex: 100, endSampleIndex: 200,
+            category: "VTVF_CANDIDATE", label: "VT/VF candidate", source: "murmur.vtdetect"
+        )
+        let findings = WFDBAnnotationExport.amberFindings(
+            annotations: [authored, candidate],
+            annotationDispositions: [:],
+            confirmedRegions: []
+        )
+        #expect(findings.map(\.startSample) == [500])
+        #expect(findings.first?.text == "QTc 432→508 ms · 0:02–0:04")
+    }
+
     @Test("Only confirmed annotations export; dismissed and unreviewed excluded")
     func amberOnlyForAnnotations() {
         let confirmed = Annotation(kind: .range, sampleIndex: 100, endSampleIndex: 200,

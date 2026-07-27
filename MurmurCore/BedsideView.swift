@@ -351,6 +351,16 @@ struct BedsideView: View {
                 .accessibilityLabel(lastWFDBExport.map { "annotator=\($0.annotator) count=\($0.findingCount)" } ?? "none")
                 .allowsHitTesting(false)
         }
+        .overlay(alignment: .topLeading) {
+            // Count of analyst-authored range findings — proves drag-to-author
+            // created + persisted a finding (the gesture itself isn't XCUI-
+            // drivable, so the bypass invokes the handler and this leaf reports).
+            Color.clear
+                .frame(width: 1, height: 1)
+                .accessibilityIdentifier("ui-test-authored-count")
+                .accessibilityLabel("\(authoredRangeFindings.count)")
+                .allowsHitTesting(false)
+        }
         .inspector(isPresented: $showFindings) {
             findingsInspector
         }
@@ -518,6 +528,16 @@ struct BedsideView: View {
                 // Confirm a region but do NOT export — lets an XCUI test drive
                 // the real export button + confirm alert.
                 seedConfirmedRegionForTests()
+            }
+            if UITestSupport.authorRange {
+                // Drive the drag-to-author handler directly (the DragGesture
+                // itself isn't XCUI-drivable) so the author→persist→render path
+                // is assertable via the authored-count leaf.
+                authorRangeFinding(
+                    startSeconds: 1, endSeconds: 4,
+                    label: "QTc 432→508 ms · 0:01–0:04",
+                    citation: "QTc · Fridericia · test"
+                )
             }
             if let delta = UITestSupport.panBySamples {
                 viewport.setStart(viewport.startSample + delta)
@@ -1145,6 +1165,8 @@ struct BedsideView: View {
                 externalHoverTimeSeconds: laneContext.hoveredSource == .ecg
                     ? laneContext.hoveredTimeSeconds
                     : nil,
+                rangeFindings: authoredRangeFindings,
+                authoringEnabled: canAuthorFindings,
                 onLaneHover: { time in
                     laneContext.setHover(time: time, from: .lane)
                 },
@@ -1169,9 +1191,68 @@ struct BedsideView: View {
                 },
                 onRemoveGuide: { guideID in
                     trendGuideStore.remove(guideID)
+                },
+                onAuthorRange: { startSeconds, endSeconds, label, citation in
+                    authorRangeFinding(
+                        startSeconds: startSeconds,
+                        endSeconds: endSeconds,
+                        label: label,
+                        citation: citation
+                    )
                 }
             )
             .equatable()
+        }
+    }
+
+    /// Analyst-authored range findings, projected onto the trend lane's time
+    /// axis. Sourced from the same `Annotation` store everything else reads, so
+    /// they persist and also flow to the review queue + WFDB export.
+    private var authoredRangeFindings: [IntervalTrendRangeFinding] {
+        let sr = viewport.sampleRate
+        guard sr > 0 else { return [] }
+        return allAnnotations
+            .filter { $0.kind == .range && $0.source == Annotation.analystAuthoredSource }
+            .map { ann in
+                IntervalTrendRangeFinding(
+                    id: ann.id,
+                    startSeconds: Double(ann.sampleIndex) / sr,
+                    endSeconds: Double(ann.renderEndSample) / sr,
+                    label: ann.displayLabel
+                )
+            }
+    }
+
+    /// Drag-to-author is live only when the analyst is editing AND owns the
+    /// Annotation IAP — authoring is a paid mutation; viewing findings is free.
+    private var canAuthorFindings: Bool {
+        isEditing && PurchaseStore.shared.owns(.annotationAuthoring)
+    }
+
+    /// Creates + persists a range `Annotation` from a drag-to-author gesture.
+    /// The lane composes the factual `label` (analyst-editable) and the
+    /// immutable `citation`; this stamps the analyst-authored source so it's
+    /// amber everywhere and exports to WFDB. Persistence mirrors
+    /// `handleProducerOutput`. Not entitlement-gated itself — the gesture that
+    /// calls it is (`canAuthorFindings`); a DEBUG test hook also drives it.
+    @MainActor
+    private func authorRangeFinding(startSeconds: Double, endSeconds: Double, label: String, citation: String) {
+        let sr = viewport.sampleRate
+        guard sr > 0, endSeconds > startSeconds else { return }
+        let finding = Annotation(
+            kind: .range,
+            sampleIndex: Int64((startSeconds * sr).rounded()),
+            endSampleIndex: Int64((endSeconds * sr).rounded()),
+            category: "ANALYST_FINDING",
+            label: label,
+            source: Annotation.analystAuthoredSource,
+            citationCaption: citation
+        )
+        attachedAnnotations.append(finding)
+        do {
+            try BundleAnnotationsFile.write(allAnnotations, to: recordingDirectory)
+        } catch {
+            attachError = "Finding was added for this session but could not be saved to the bundle: \(error.localizedDescription)"
         }
     }
 
@@ -2301,6 +2382,12 @@ private struct IntervalTrendLaneMemoizedStrip: View, Equatable {
     let guides: [IntervalTrendGuide]
     let events: [IntervalTrendEvent]
     let externalHoverTimeSeconds: Double?
+    /// Analyst-authored range findings rendered as amber overlays. In the
+    /// fingerprint so authoring a new finding rebuilds the lane.
+    let rangeFindings: [IntervalTrendRangeFinding]
+    /// Whether drag-to-author is active (edit latch + Annotation IAP). In the
+    /// fingerprint so toggling edit mode / entitlement re-arms the gesture.
+    let authoringEnabled: Bool
     let onLaneHover: (Double?) -> Void
     let onBinClick: (Double) -> Void
     let onPickMetric: (IntervalTrendMetric) -> Void
@@ -2308,6 +2395,9 @@ private struct IntervalTrendLaneMemoizedStrip: View, Equatable {
     let onPickShowMode: (IntervalTrendShowMode) -> Void
     let onAddGuide: (Double, String) -> Void
     let onRemoveGuide: (UUID) -> Void
+    /// Excluded from `==` (a closure rebuilt every pass); gated by
+    /// `authoringEnabled`, which IS in the fingerprint.
+    let onAuthorRange: (Double, Double, String, String) -> Void
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         guard lhs.beats.count == rhs.beats.count,
@@ -2326,6 +2416,8 @@ private struct IntervalTrendLaneMemoizedStrip: View, Equatable {
             && lhs.guides == rhs.guides
             && lhs.events == rhs.events
             && lhs.externalHoverTimeSeconds == rhs.externalHoverTimeSeconds
+            && lhs.rangeFindings == rhs.rangeFindings
+            && lhs.authoringEnabled == rhs.authoringEnabled
     }
 
     var body: some View {
@@ -2346,6 +2438,7 @@ private struct IntervalTrendLaneMemoizedStrip: View, Equatable {
             selectedBinPreset: selectedBinPreset,
             guides: guides,
             events: events,
+            rangeFindings: rangeFindings,
             externalHoverTimeSeconds: externalHoverTimeSeconds,
             onLaneHover: onLaneHover,
             onBinClick: onBinClick,
@@ -2353,7 +2446,10 @@ private struct IntervalTrendLaneMemoizedStrip: View, Equatable {
             onPickBinPreset: onPickBinPreset,
             onPickShowMode: onPickShowMode,
             onAddGuide: onAddGuide,
-            onRemoveGuide: onRemoveGuide
+            onRemoveGuide: onRemoveGuide,
+            // Gate the gesture here so a locked / unentitled lane still taps +
+            // hovers but never authors.
+            onAuthorRange: authoringEnabled ? onAuthorRange : nil
         )
     }
 }

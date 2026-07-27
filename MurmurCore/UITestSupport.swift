@@ -219,6 +219,16 @@ enum UITestSupport {
         ProcessInfo.processInfo.arguments.contains("--ui-test-seed-confirmed-region")
     }
 
+    /// True when `--ui-test-author-range` is passed. BedsideView invokes the
+    /// drag-to-author handler directly with a fixed time range (a real
+    /// DragGesture isn't XCUI-drivable on macOS, same as pan/zoom), creating +
+    /// persisting a range finding, and publishes the authored-finding count on
+    /// the `ui-test-authored-count` leaf. Exercises the author→persist→render
+    /// plumbing end-to-end without the gesture.
+    static var authorRange: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-author-range")
+    }
+
     /// True when `--ui-test-expand-all-findings-groups` is passed.
     /// The review-queue rail reads this and initialises its expanded-
     /// groups set to include every category, so exemplar rows

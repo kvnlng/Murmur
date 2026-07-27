@@ -36,11 +36,20 @@ public struct Annotation: Codable, Equatable, Sendable, Identifiable {
     public let note: String?                // free-form analyst-readable text
     public let lead: String?                // channel/lead label if finding is lead-specific
     public let evidenceContextSeconds: Double?  // viewer-side scroll-into-view hint
+    public let citationCaption: String?     // immutable reproducibility payload for analyst-authored findings (label vs caption split)
 
     public enum Kind: String, Codable, Sendable {
         case point
         case range
     }
+
+    /// `source` value stamped on findings the analyst authors directly (e.g.
+    /// drag-to-author range findings on the trend lane), as distinct from
+    /// model/producer output. Matches the Annotation-authoring producer id so
+    /// `PurchaseStore.requiredProduct(forProducerID:)` gates it. Authored
+    /// findings are "amber" by nature and export to WFDB without needing a
+    /// disposition.
+    public static let analystAuthoredSource = "murmur.annotation"
 
     /// Historical `Severity` enum was removed 2026-07-04. An
     /// app-assigned "critical" on a beat is a clinical verdict —
@@ -120,7 +129,8 @@ public struct Annotation: Codable, Equatable, Sendable, Identifiable {
         source: String,
         note: String? = nil,
         lead: String? = nil,
-        evidenceContextSeconds: Double? = nil
+        evidenceContextSeconds: Double? = nil,
+        citationCaption: String? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -135,6 +145,7 @@ public struct Annotation: Codable, Equatable, Sendable, Identifiable {
         self.note = note
         self.lead = lead
         self.evidenceContextSeconds = evidenceContextSeconds
+        self.citationCaption = citationCaption
     }
 }
 

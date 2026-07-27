@@ -79,14 +79,20 @@ enum WFDBAnnotationExport {
             ))
         }
 
-        // Annotations the analyst confirmed through the id-keyed store.
+        // Annotations that are amber: either the analyst confirmed them through
+        // the id-keyed store, OR the analyst authored them directly (drag-to-
+        // author range findings carry `analystAuthoredSource` and need no
+        // disposition). A confirmed disposition's note wins as the text.
         for annotation in annotations {
-            guard annotationDispositions[annotation.id]?.state == .confirmed else { continue }
-            let note = annotationDispositions[annotation.id]?.note
+            let confirmedNote = annotationDispositions[annotation.id]?.state == .confirmed
+                ? annotationDispositions[annotation.id]?.note ?? annotation.displayLabel
+                : nil
+            let authored = annotation.source == Annotation.analystAuthoredSource
+            guard let text = confirmedNote ?? (authored ? annotation.displayLabel : nil) else { continue }
             findings.append(Finding(
                 startSample: annotation.sampleIndex,
                 endSample: annotation.endSampleIndex,
-                text: note ?? annotation.displayLabel
+                text: text
             ))
         }
 
