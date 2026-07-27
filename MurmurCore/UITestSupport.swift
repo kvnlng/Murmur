@@ -176,14 +176,26 @@ enum UITestSupport {
         return n
     }
 
-    /// True when `--ui-test-vtvf-candidates` is passed. BedsideView grants
-    /// the VT/VF IAP (via `_setOwnedForTesting`) and injects a fixed set of
-    /// synthetic candidates into `VTVFScanContext` on appear — the same
-    /// state a committed scan produces — so the candidate group, the scan
-    /// toolbar affordance, and the region-keyed disposition wire-up are
-    /// exercisable without running Core ML in the test process.
+    /// True when `--ui-test-vtvf-candidates` is passed. BedsideView injects
+    /// a fixed set of synthetic candidates into `VTVFScanContext` on appear —
+    /// the same state a committed scan produces — so the candidate group, the
+    /// scan toolbar affordance, and the region-keyed disposition wire-up are
+    /// exercisable without running Core ML in the test process. Deliberately
+    /// does NOT grant the PurchaseStore entitlement (that races the async
+    /// currentEntitlements refresh); the scan orchestrator makes the affordance
+    /// available under this same flag instead.
     static var injectVTVFCandidates: Bool {
         ProcessInfo.processInfo.arguments.contains("--ui-test-vtvf-candidates")
+    }
+
+    /// True when `--ui-test-no-entitlements` is passed. `PurchaseStore` then
+    /// starts with an empty owned-set and neither walks `currentEntitlements`
+    /// nor listens for transaction updates, so "the free viewer never exposes
+    /// a paid affordance" XCUI assertions are hermetic against StoreKit-test
+    /// transactions a developer may have persisted on the machine (e.g. via
+    /// the DEBUG grant toggle's real-purchase sibling).
+    static var forceNoEntitlements: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-no-entitlements")
     }
 
     /// True when `--ui-test-expand-all-findings-groups` is passed.

@@ -69,6 +69,14 @@ public final class PurchaseStore {
     public private(set) var ownedProductIDs: Set<ProductID> = []
 
     public init() {
+        #if DEBUG
+        // Free-viewer XCUI hermeticity: `--ui-test-no-entitlements` makes this
+        // process ignore any ambient StoreKit-test transactions persisted on
+        // the dev machine, so the "no IAP owned" assertions don't depend on
+        // local Manage-Transactions state. Start no listener and skip the
+        // entitlement walk — ownedProductIDs stays empty for the process.
+        if UITestSupport.forceNoEntitlements { return }
+        #endif
         // Listen for transactions forever. Must be started before any
         // purchase begins so we don't miss the resolution of in-flight
         // transactions (e.g. interrupted purchases that resolve on the

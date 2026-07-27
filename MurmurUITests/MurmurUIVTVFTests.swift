@@ -49,7 +49,12 @@ final class MurmurUIVTVFTests: XCTestCase {
     @MainActor
     func testScanActionHiddenWithoutEntitlement() throws {
         let app = XCUIApplication()
-        app.launchArguments += ["--ui-test-sample"]
+        // `--ui-test-no-entitlements` guarantees a hermetic free viewer: it
+        // stops PurchaseStore from adopting any StoreKit-test transaction a
+        // developer may have persisted locally, so this gate assertion can't
+        // be broken by ambient machine state (it would still pass on a clean
+        // CI runner, but this makes it deterministic everywhere).
+        app.launchArguments += ["--ui-test-sample", "--ui-test-no-entitlements"]
         app.launch()
 
         // Wait for the bedside so the toolbar has mounted.
