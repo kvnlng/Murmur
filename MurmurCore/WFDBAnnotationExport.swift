@@ -136,6 +136,26 @@ enum WFDBAnnotationExport {
         )
         return Result(url: url, annotator: annotator.lowercased(), findingCount: findings.count)
     }
+
+    /// Filters to amber, maps to NOTE events, and writes to an explicit
+    /// destination `fileURL` (chosen by the user through a save panel).
+    @discardableResult
+    static func export(
+        annotations: [Annotation],
+        annotationDispositions: [UUID: AnnotationDisposition],
+        confirmedRegions: [RegionDisposition],
+        authoredExtra: [Finding] = [],
+        to fileURL: URL
+    ) throws -> Result {
+        let findings = amberFindings(
+            annotations: annotations,
+            annotationDispositions: annotationDispositions,
+            confirmedRegions: confirmedRegions,
+            authoredExtra: authoredExtra
+        )
+        let url = try WFDBAnnotationWriter.write(events(from: findings), to: fileURL)
+        return Result(url: url, annotator: url.pathExtension.lowercased(), findingCount: findings.count)
+    }
 }
 
 private extension Optional where Wrapped == AnnotationDisposition.ConfirmedKind {

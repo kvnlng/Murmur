@@ -117,6 +117,39 @@ struct WFDBAnnotationExportTests {
         #expect(decoded.map(\.sampleIndex) == [200, 16_000_000])
     }
 
+    // MARK: - Explicit destination (save-panel path)
+
+    @Test("Export to a chosen file URL writes the amber set and reports its extension")
+    func exportToExplicitURL() throws {
+        let dir = try tempDir()
+        let dest = dir.appendingPathComponent("handoff.mur")
+        let result = try WFDBAnnotationExport.export(
+            annotations: [],
+            annotationDispositions: [:],
+            confirmedRegions: [region(1000, 2000, state: .confirmed, kind: .vt)],
+            to: dest
+        )
+        #expect(result.url == dest)
+        #expect(result.annotator == "mur")
+        #expect(result.findingCount == 1)
+        let decoded = WFDBAnnotationParser.parse(data: try Data(contentsOf: dest))
+        #expect(decoded.map(\.sampleIndex) == [1000])
+    }
+
+    @Test("Export to a chosen URL still refuses a reserved .atr extension")
+    func exportToExplicitURLRefusesAtr() throws {
+        let dir = try tempDir()
+        #expect(throws: WFDBAnnotationWriter.WriteError.reservedAnnotator("atr")) {
+            try WFDBAnnotationExport.export(
+                annotations: [],
+                annotationDispositions: [:],
+                confirmedRegions: [region(1000, 2000, state: .confirmed, kind: .vt)],
+                to: dir.appendingPathComponent("rec.atr")
+            )
+        }
+        #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("rec.atr").path))
+    }
+
     // MARK: - Non-clobber
 
     @Test("A pre-existing annotator file is byte-identical after a refused export")

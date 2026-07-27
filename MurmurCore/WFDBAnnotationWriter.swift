@@ -158,4 +158,18 @@ enum WFDBAnnotationWriter {
         try encode(events).write(to: url, options: .atomic)
         return url
     }
+
+    /// Serialises `events` to an explicit destination `fileURL` — used when the
+    /// user picks the location through a save panel (which already handles the
+    /// replace-existing prompt, so there's no clobber check here). Still refuses
+    /// a reserved annotator extension (`.atr`). Returns the URL written.
+    @discardableResult
+    static func write(_ events: [Event], to fileURL: URL) throws -> URL {
+        let suffix = fileURL.pathExtension.lowercased()
+        guard !reservedAnnotators.contains(suffix) else {
+            throw WriteError.reservedAnnotator(suffix)
+        }
+        try encode(events).write(to: fileURL, options: .atomic)
+        return fileURL
+    }
 }

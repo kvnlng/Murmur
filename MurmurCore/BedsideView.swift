@@ -52,11 +52,6 @@ struct BedsideView: View {
     /// Error message shown when an attach attempt fails (unreadable file,
     /// unsupported schema, malformed JSON, etc).
     @State private var attachError: String?
-    /// Drives the WFDB export confirmation. A state-driven SwiftUI `.alert`
-    /// (the same idiom as `attachError`) — NOT a synchronous `NSAlert`/
-    /// `.confirmationDialog`, both of which present a modal inside the toolbar
-    /// action's layout pass and trip `_NSDetectedLayoutRecursion`.
-    @State private var showWFDBExportConfirm: Bool = false
     /// Result of the most recent WFDB export — surfaced to XCUI via a hidden
     /// accessibility leaf (exported count + annotator suffix).
     @State private var lastWFDBExport: WFDBAnnotationExport.Result?
@@ -400,7 +395,7 @@ struct BedsideView: View {
                 .accessibilityIdentifier("export-snapshot")
             }
             ToolbarItem {
-                Button { showWFDBExportConfirm = true } label: {
+                Button { exportWFDBAnnotations() } label: {
                     Label("Export WFDB annotations…", systemImage: "doc.badge.arrow.up")
                 }
                 .help("Write your confirmed findings as a WFDB annotation file (\(wfdbRecordBase).\(WFDBAnnotationWriter.defaultAnnotator)) beside the recording, to hand to a peer")
@@ -451,17 +446,6 @@ struct BedsideView: View {
             Button("OK") { attachError = nil }
         } message: {
             Text(attachError ?? "")
-        }
-        .alert(
-            "Export \(amberFindingCount) confirmed finding\(amberFindingCount == 1 ? "" : "s")?",
-            isPresented: $showWFDBExportConfirm
-        ) {
-            Button(wfdbTargetExists ? "Replace" : "Export") { performWFDBExport() }
-                .accessibilityIdentifier("wfdb-export-confirm")
-            Button("Cancel", role: .cancel) {}
-                .accessibilityIdentifier("wfdb-export-cancel")
-        } message: {
-            Text(wfdbExportConfirmMessage)
         }
         #if DEBUG
         .task { applyUITestHooks() }
@@ -522,10 +506,13 @@ struct BedsideView: View {
             }
             if UITestSupport.exportWFDBFindings {
                 // Confirm a synthetic candidate region so the amber filter has
-                // something to export, then run the full export beside the
-                // fixture and publish the result on the a11y leaf.
+                // something to export, then export to a fixed container path
+                // (no save panel — XCUI can't drive one) and publish the result
+                // on the a11y leaf.
                 seedConfirmedRegionForTests()
-                performWFDBExport()
+                let url = recordingDirectory
+                    .appendingPathComponent("\(wfdbRecordBase).\(WFDBAnnotationWriter.defaultAnnotator)")
+                performWFDBExport(to: url)
             }
             if UITestSupport.seedConfirmedRegion {
                 // Confirm a region but do NOT export — lets an XCUI test drive
@@ -705,7 +692,7 @@ struct BedsideView: View {
     }
 
     /// Count of amber (analyst-authored / confirmed) findings eligible for
-    /// export — drives the toolbar button's enabled state and the dialog copy.
+    /// export — drives the toolbar button's enabled state.
     private var amberFindingCount: Int {
         WFDBAnnotationExport.amberFindings(
             annotations: allAnnotations,
@@ -714,32 +701,33 @@ struct BedsideView: View {
         ).count
     }
 
-    /// True when a `<base>.mur` already exists — the dialog then asks to
-    /// replace it rather than silently clobbering.
-    private var wfdbTargetExists: Bool {
-        FileManager.default.fileExists(atPath: recordingDirectory
-            .appendingPathComponent("\(wfdbRecordBase).\(WFDBAnnotationWriter.defaultAnnotator)").path)
+    /// Presents a save panel (suggesting `<base>.mur`) so the analyst chooses
+    /// where the annotations land — the file is meant to be handed to a peer,
+    /// so it must be reachable, not buried in the app container. The panel's
+    /// message surfaces the lossy span→onset-comment reduction (consent at the
+    /// moment of export); the panel itself handles any replace-existing prompt.
+    /// Mirrors the imperative NSSavePanel idiom of the report/PNG exports.
+    private func exportWFDBAnnotations() {
+        let panel = NSSavePanel()
+        panel.title = "Export WFDB annotations"
+        panel.message = "Each finding is written as a WFDB comment at its onset carrying your label text. A span's extent is described in that text, not written as rhythm boundaries — drop this file beside a copy of the record to read it back."
+        panel.allowedContentTypes = [UTType(filenameExtension: WFDBAnnotationWriter.defaultAnnotator) ?? .data]
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = "\(wfdbRecordBase).\(WFDBAnnotationWriter.defaultAnnotator)"
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        performWFDBExport(to: url)
     }
 
-    /// Human-readable confirmation copy for the export alert — surfaces the
-    /// lossy span→onset-comment reduction and any file replacement.
-    private var wfdbExportConfirmMessage: String {
-        "Writes \(wfdbRecordBase).\(WFDBAnnotationWriter.defaultAnnotator) beside the recording. Each finding becomes a WFDB comment at its onset carrying your label text — a span's extent is described in that text, not written as rhythm boundaries.\(wfdbTargetExists ? " This replaces the existing file." : "")"
-    }
-
-    /// Writes the amber findings as `<base>.mur` beside the recording. The
-    /// confirmation alert has already secured consent (including to replace an
-    /// existing file), so this passes `overwrite: true`. Failures route through
-    /// the shared `attachError` alert.
-    private func performWFDBExport() {
+    /// Writes the amber findings to `url`. Failures route through the shared
+    /// `attachError` alert. The result feeds the hidden XCUI leaf.
+    private func performWFDBExport(to url: URL) {
         do {
             lastWFDBExport = try WFDBAnnotationExport.export(
                 annotations: allAnnotations,
                 annotationDispositions: dispositionStore.records,
                 confirmedRegions: candidateDispositionStore.records,
-                recordName: wfdbRecordBase,
-                in: recordingDirectory,
-                overwrite: true
+                to: url
             )
         } catch {
             attachError = "Couldn't export findings: \(error.localizedDescription)"

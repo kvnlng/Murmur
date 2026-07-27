@@ -90,39 +90,26 @@ final class MurmurUIVTVFTests: XCTestCase {
                        "Export should write one confirmed finding to the .mur annotator")
     }
 
-    /// Drives the REAL export affordance — toolbar button → confirmation alert
-    /// → Export — rather than the bypass. This is the path a manual test
-    /// crashes on; if the app terminates here the test fails, giving a
-    /// reproducible repro instead of console-paste guessing.
+    /// The export toolbar button is present and ENABLES once a finding is
+    /// confirmed (it's disabled with nothing to export). The click opens an
+    /// NSSavePanel — system-modal, not XCUI-drivable — so this asserts the
+    /// affordance + its enablement wiring; the write itself is covered by the
+    /// bypass test above and the export unit tests. Mirrors
+    /// `testExportReportToolbarButtonExists`.
     @MainActor
-    func testWFDBExportButtonThroughConfirmAlert() throws {
+    func testWFDBExportButtonEnablesWithConfirmedFinding() throws {
         let app = XCUIApplication()
         app.launchArguments += ["--ui-test-sample", "--ui-test-seed-confirmed-region"]
         app.launch()
 
-        let exportButton = app.descendants(matching: .any)
-            .matching(identifier: "export-wfdb").firstMatch
+        let exportButton = app.buttons.matching(identifier: "export-wfdb").firstMatch
         XCTAssertTrue(exportButton.waitForExistence(timeout: 5),
-                      "Export toolbar button should exist")
-        // Seeded confirmed region enables it; give the async seed a moment.
-        XCTAssertTrue(exportButton.isEnabled || exportButton.waitForExistence(timeout: 2))
-        exportButton.click()
-
-        // Scope to the alert's identified button (avoids the Touch Bar mirror
-        // of a bare "Export" label that XCUI otherwise grabs first).
-        let confirm = app.descendants(matching: .any)
-            .matching(identifier: "wfdb-export-confirm").firstMatch
-        XCTAssertTrue(confirm.waitForExistence(timeout: 5),
-                      "Export confirmation alert should appear")
-        confirm.click()
-
-        let leaf = app.descendants(matching: .any)
-            .matching(identifier: "ui-test-wfdb-export").firstMatch
-        XCTAssertTrue(leaf.waitForExistence(timeout: 5))
-        let expected = NSPredicate(format: "label BEGINSWITH %@", "annotator=mur")
-        let exp = XCTNSPredicateExpectation(predicate: expected, object: leaf)
+                      "Toolbar should expose an 'export-wfdb' button")
+        // The seeded confirmed region flips amberFindingCount > 0 → enabled.
+        let enabled = NSPredicate(format: "isEnabled == true")
+        let exp = XCTNSPredicateExpectation(predicate: enabled, object: exportButton)
         XCTAssertEqual(XCTWaiter.wait(for: [exp], timeout: 5), .completed,
-                       "Real export path should complete and publish its result")
+                       "Export button should enable once a finding is confirmed")
     }
 
     // MARK: - Candidate group
