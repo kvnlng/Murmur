@@ -209,6 +209,16 @@ enum UITestSupport {
         ProcessInfo.processInfo.arguments.contains("--ui-test-export-wfdb")
     }
 
+    /// True when `--ui-test-seed-confirmed-region` is passed. BedsideView
+    /// confirms a synthetic candidate region on appear but does NOT export —
+    /// so `amberFindingCount > 0` enables the export toolbar button and an XCUI
+    /// test can drive the REAL button → confirm alert → write path (the path
+    /// the `--ui-test-export-wfdb` bypass deliberately skips). This is what
+    /// reproduces a crash IN the export affordance itself.
+    static var seedConfirmedRegion: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-seed-confirmed-region")
+    }
+
     /// True when `--ui-test-expand-all-findings-groups` is passed.
     /// The review-queue rail reads this and initialises its expanded-
     /// groups set to include every category, so exemplar rows

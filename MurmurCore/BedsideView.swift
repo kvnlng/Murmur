@@ -457,7 +457,9 @@ struct BedsideView: View {
             isPresented: $showWFDBExportConfirm
         ) {
             Button(wfdbTargetExists ? "Replace" : "Export") { performWFDBExport() }
+                .accessibilityIdentifier("wfdb-export-confirm")
             Button("Cancel", role: .cancel) {}
+                .accessibilityIdentifier("wfdb-export-cancel")
         } message: {
             Text(wfdbExportConfirmMessage)
         }
@@ -494,6 +496,17 @@ struct BedsideView: View {
         scanContext.isScanAvailable = true
     }
 
+    /// Confirms a fixed synthetic candidate region — shared by the export
+    /// bypass and the seed-only flag so both exercise the same amber input.
+    @MainActor
+    private func seedConfirmedRegionForTests() {
+        let sr = ecgChannels.first?.sampleRate ?? 250
+        candidateDispositionStore.confirm(
+            start: Int64(1 * sr), end: Int64(4 * sr), kind: .vt,
+            modelIdentifier: "vtvf_seres_lstm", tauAtConfirmation: 0.87
+        )
+    }
+
     /// Applies launch-arg-driven viewport mutations once the view appears.
     /// Mirrors the gestures' code paths so the wiring from launch arg →
     /// viewport state matches the wiring from gesture → viewport state.
@@ -511,12 +524,13 @@ struct BedsideView: View {
                 // Confirm a synthetic candidate region so the amber filter has
                 // something to export, then run the full export beside the
                 // fixture and publish the result on the a11y leaf.
-                let sr = ecgChannels.first?.sampleRate ?? 250
-                candidateDispositionStore.confirm(
-                    start: Int64(1 * sr), end: Int64(4 * sr), kind: .vt,
-                    modelIdentifier: "vtvf_seres_lstm", tauAtConfirmation: 0.87
-                )
+                seedConfirmedRegionForTests()
                 performWFDBExport()
+            }
+            if UITestSupport.seedConfirmedRegion {
+                // Confirm a region but do NOT export — lets an XCUI test drive
+                // the real export button + confirm alert.
+                seedConfirmedRegionForTests()
             }
             if let delta = UITestSupport.panBySamples {
                 viewport.setStart(viewport.startSample + delta)

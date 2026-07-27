@@ -90,6 +90,41 @@ final class MurmurUIVTVFTests: XCTestCase {
                        "Export should write one confirmed finding to the .mur annotator")
     }
 
+    /// Drives the REAL export affordance — toolbar button → confirmation alert
+    /// → Export — rather than the bypass. This is the path a manual test
+    /// crashes on; if the app terminates here the test fails, giving a
+    /// reproducible repro instead of console-paste guessing.
+    @MainActor
+    func testWFDBExportButtonThroughConfirmAlert() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-sample", "--ui-test-seed-confirmed-region"]
+        app.launch()
+
+        let exportButton = app.descendants(matching: .any)
+            .matching(identifier: "export-wfdb").firstMatch
+        XCTAssertTrue(exportButton.waitForExistence(timeout: 5),
+                      "Export toolbar button should exist")
+        // Seeded confirmed region enables it; give the async seed a moment.
+        XCTAssertTrue(exportButton.isEnabled || exportButton.waitForExistence(timeout: 2))
+        exportButton.click()
+
+        // Scope to the alert's identified button (avoids the Touch Bar mirror
+        // of a bare "Export" label that XCUI otherwise grabs first).
+        let confirm = app.descendants(matching: .any)
+            .matching(identifier: "wfdb-export-confirm").firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5),
+                      "Export confirmation alert should appear")
+        confirm.click()
+
+        let leaf = app.descendants(matching: .any)
+            .matching(identifier: "ui-test-wfdb-export").firstMatch
+        XCTAssertTrue(leaf.waitForExistence(timeout: 5))
+        let expected = NSPredicate(format: "label BEGINSWITH %@", "annotator=mur")
+        let exp = XCTNSPredicateExpectation(predicate: expected, object: leaf)
+        XCTAssertEqual(XCTWaiter.wait(for: [exp], timeout: 5), .completed,
+                       "Real export path should complete and publish its result")
+    }
+
     // MARK: - Candidate group
 
     /// Candidates render as one group with the correct count.
