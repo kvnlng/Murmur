@@ -97,6 +97,26 @@ struct WFDBAnnotationExportTests {
         #expect(decoded.map(\.sampleIndex) == [1000])
     }
 
+    @Test("Findings at large sample indices (multi-hour recording) encode without trapping")
+    func largeSampleIndices() throws {
+        let dir = try tempDir()
+        // A 9-hour recording at 500 Hz spans ~16.2M samples; findings can sit
+        // anywhere in that range, forcing big inter-annotation deltas.
+        let result = try WFDBAnnotationExport.export(
+            annotations: [],
+            annotationDispositions: [:],
+            confirmedRegions: [
+                region(16_000_000, 16_000_500, state: .confirmed, kind: .vt),
+                region(200, 700, state: .confirmed, kind: .vf, note: "early run"),
+            ],
+            recordName: "rec",
+            in: dir
+        )
+        #expect(result.findingCount == 2)
+        let decoded = WFDBAnnotationParser.parse(data: try Data(contentsOf: result.url))
+        #expect(decoded.map(\.sampleIndex) == [200, 16_000_000])
+    }
+
     // MARK: - Non-clobber
 
     @Test("A pre-existing annotator file is byte-identical after a refused export")
