@@ -77,7 +77,10 @@ final class VTVFCandidateDispositionStore {
         start: Int64,
         end: Int64,
         kind: AnnotationDisposition.ConfirmedKind?,
-        note: String? = nil
+        note: String? = nil,
+        modelIdentifier: String? = nil,
+        modelVersion: String? = nil,
+        tauAtConfirmation: Double? = nil
     ) {
         upsert(RegionDisposition(
             startSample: start,
@@ -86,7 +89,10 @@ final class VTVFCandidateDispositionStore {
             confirmedKind: kind,
             note: note?.nilIfBlank,
             reviewedAt: .now,
-            reviewedBy: defaultReviewerName
+            reviewedBy: defaultReviewerName,
+            modelIdentifier: modelIdentifier,
+            modelVersion: modelVersion,
+            tauAtConfirmation: tauAtConfirmation
         ))
     }
 

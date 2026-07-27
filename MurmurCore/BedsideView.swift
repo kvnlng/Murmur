@@ -238,7 +238,8 @@ struct BedsideView: View {
             candidates: scanContext.candidates,
             candidateDispositionStore: candidateDispositionStore,
             regulatoryNotice: scanContext.regulatoryNotice,
-            parametersCaption: scanContext.parametersCaption
+            parametersCaption: scanContext.parametersCaption,
+            candidateProvenance: scanContext.candidateProvenance
         )
         .inspectorColumnWidth(min: 260, ideal: 340, max: 500)
     }
@@ -448,7 +449,11 @@ struct BedsideView: View {
                 startSample: Int64(6 * sr), endSample: Int64(9 * sr), score: 0.81
             ),
         ]
-        scanContext.setCandidates(candidates, parametersCaption: "τ 0.87 · min 4s · gap 5s · vtvf_seres_lstm")
+        scanContext.setCandidates(
+            candidates,
+            parametersCaption: "τ 0.87 · min 4s · gap 5s · vtvf_seres_lstm",
+            provenance: .init(modelIdentifier: "vtvf_seres_lstm", tau: 0.87)
+        )
         scanContext.isScanAvailable = true
     }
 

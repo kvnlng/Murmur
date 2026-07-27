@@ -34,6 +34,15 @@ struct RegionDisposition: Codable, Equatable, Sendable, Identifiable {
     public let reviewedAt: Date
     public let reviewedBy: String?
 
+    /// Model provenance captured AT CONFIRMATION — which model proposed the
+    /// candidate the analyst adjudicated, and at what operating point. Sidecar
+    /// only; deliberately NOT written to any exported WFDB file (that carries
+    /// the analyst's words, never the model's parameters). Optional so older
+    /// sidecars and non-candidate confirmations decode cleanly.
+    public let modelIdentifier: String?
+    public let modelVersion: String?
+    public let tauAtConfirmation: Double?
+
     public init(
         id: UUID = UUID(),
         startSample: Int64,
@@ -42,7 +51,10 @@ struct RegionDisposition: Codable, Equatable, Sendable, Identifiable {
         confirmedKind: AnnotationDisposition.ConfirmedKind?,
         note: String?,
         reviewedAt: Date,
-        reviewedBy: String?
+        reviewedBy: String?,
+        modelIdentifier: String? = nil,
+        modelVersion: String? = nil,
+        tauAtConfirmation: Double? = nil
     ) {
         self.id = id
         self.startSample = startSample
@@ -52,6 +64,9 @@ struct RegionDisposition: Codable, Equatable, Sendable, Identifiable {
         self.note = note
         self.reviewedAt = reviewedAt
         self.reviewedBy = reviewedBy
+        self.modelIdentifier = modelIdentifier
+        self.modelVersion = modelVersion
+        self.tauAtConfirmation = tauAtConfirmation
     }
 
     /// Number of samples this region and `other` share. Zero when they

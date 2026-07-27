@@ -36,6 +36,21 @@ struct VTVFCandidateDispositionStoreTests {
         #expect(store.state(forStart: 5000, end: 6000) == nil)
     }
 
+    @Test("Model provenance is stamped on confirm and survives a sidecar reload")
+    func provenancePersists() throws {
+        let dir = try makeTempDir()
+        VTVFCandidateDispositionStore(bundleDirectory: dir).confirm(
+            start: 1000, end: 2000, kind: .vt,
+            modelIdentifier: "vtvf_seres_lstm", modelVersion: "0.10.0", tauAtConfirmation: 0.87
+        )
+        // Reload from disk — provenance is in the sidecar, not just memory.
+        let reloaded = VTVFCandidateDispositionStore(bundleDirectory: dir)
+        let record = try #require(reloaded.records.first)
+        #expect(record.modelIdentifier == "vtvf_seres_lstm")
+        #expect(record.modelVersion == "0.10.0")
+        #expect(record.tauAtConfirmation == 0.87)
+    }
+
     @Test("Rescan: a shifted re-derived candidate inherits the disposition")
     func rescanInheritance() throws {
         let dir = try makeTempDir()

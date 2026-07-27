@@ -101,6 +101,10 @@ struct FindingsPanel: View {
     /// Operating point the candidates were produced at (τ / min-dur /
     /// merge-gap / model) — the group's subtitle + citation payload.
     var parametersCaption: String?
+    /// Structured model provenance recorded onto a disposition when the analyst
+    /// confirms a candidate (sidecar only, never exported to WFDB). Defaulted
+    /// nil so snapshot/other callers stay unaffected.
+    var candidateProvenance: VTVFScanContext.ModelProvenance? = nil
 
     @State private var sort: FindingSort = .structural
     @State private var expandedGroups: Set<String> = []
@@ -1160,17 +1164,30 @@ struct FindingsPanel: View {
         .frame(width: 44, height: 5)
     }
 
+    /// Confirms a candidate region, stamping the current model provenance onto
+    /// the disposition record (sidecar only — never exported to WFDB).
+    private func confirmCandidate(start: Int64, end: Int64, kind: AnnotationDisposition.ConfirmedKind?) {
+        candidateDispositionStore?.confirm(
+            start: start,
+            end: end,
+            kind: kind,
+            modelIdentifier: candidateProvenance?.modelIdentifier,
+            modelVersion: candidateProvenance?.modelVersion,
+            tauAtConfirmation: candidateProvenance?.tau
+        )
+    }
+
     private func candidateDispositionButtons(rank: Int, start: Int64, end: Int64, hasRecord: Bool) -> some View {
         HStack(spacing: 3) {
             Menu {
                 Button("Confirm as VT") {
-                    candidateDispositionStore?.confirm(start: start, end: end, kind: .vt)
+                    confirmCandidate(start: start, end: end, kind: .vt)
                 }
                 Button("Confirm as VF") {
-                    candidateDispositionStore?.confirm(start: start, end: end, kind: .vf)
+                    confirmCandidate(start: start, end: end, kind: .vf)
                 }
                 Button("Confirm (unsure)") {
-                    candidateDispositionStore?.confirm(start: start, end: end, kind: .unclassified)
+                    confirmCandidate(start: start, end: end, kind: .unclassified)
                 }
             } label: {
                 Image(systemName: "checkmark.circle")

@@ -98,7 +98,14 @@ struct VTVFScanOrchestrator: View {
                 viewStartSample: scanContext.currentViewStartSample,
                 viewEndSample: scanContext.currentViewEndSample,
                 onCommit: { annotations, caption in
-                    scanContext.setCandidates(annotations, parametersCaption: caption)
+                    scanContext.setCandidates(
+                        annotations,
+                        parametersCaption: caption,
+                        provenance: VTVFScanContext.ModelProvenance(
+                            modelIdentifier: model.modelID,
+                            tau: model.thresholdTau
+                        )
+                    )
                     scanContext.showScanDialog = false
                 },
                 onCancel: { scanContext.showScanDialog = false }

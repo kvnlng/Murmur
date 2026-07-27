@@ -90,18 +90,45 @@ public final class VTVFScanContext {
     /// model metadata by the orchestrator; falls back to the standard text.
     public var regulatoryNotice: String = "RESEARCH USE ONLY — not for diagnosis"
 
+    /// Structured model provenance for the current candidate set — recorded
+    /// onto a disposition when the analyst CONFIRMS a candidate, so the sidecar
+    /// remembers which model at which operating point proposed the region. Kept
+    /// structured (not just folded into `parametersCaption`) because the
+    /// disposition store persists the fields individually.
+    public struct ModelProvenance: Equatable, Sendable {
+        public let modelIdentifier: String?
+        public let modelVersion: String?
+        public let tau: Double?
+
+        public init(modelIdentifier: String?, modelVersion: String? = nil, tau: Double?) {
+            self.modelIdentifier = modelIdentifier
+            self.modelVersion = modelVersion
+            self.tau = tau
+        }
+    }
+
+    /// Provenance of the current candidate set. Nil until a scan is committed
+    /// (or under the XCUI candidate-injection bypass, which has no live model).
+    public private(set) var candidateProvenance: ModelProvenance?
+
     public init() {}
 
     /// Publish a committed scan's candidates for the queue to render.
-    public func setCandidates(_ candidates: [Annotation], parametersCaption: String?) {
+    public func setCandidates(
+        _ candidates: [Annotation],
+        parametersCaption: String?,
+        provenance: ModelProvenance? = nil
+    ) {
         self.candidates = candidates
         self.parametersCaption = parametersCaption
+        self.candidateProvenance = provenance
     }
 
     /// Drop all candidates — e.g. when the recording closes.
     public func clearCandidates() {
         candidates = []
         parametersCaption = nil
+        candidateProvenance = nil
     }
 
     /// Request the scan dialog, capturing the viewport span to preview on.
