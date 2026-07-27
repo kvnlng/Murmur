@@ -52,6 +52,11 @@ struct BedsideView: View {
     /// Error message shown when an attach attempt fails (unreadable file,
     /// unsupported schema, malformed JSON, etc).
     @State private var attachError: String?
+    /// Drives the WFDB export confirmation. A state-driven SwiftUI `.alert`
+    /// (the same idiom as `attachError`) — NOT a synchronous `NSAlert`/
+    /// `.confirmationDialog`, both of which present a modal inside the toolbar
+    /// action's layout pass and trip `_NSDetectedLayoutRecursion`.
+    @State private var showWFDBExportConfirm: Bool = false
     /// Result of the most recent WFDB export — surfaced to XCUI via a hidden
     /// accessibility leaf (exported count + annotator suffix).
     @State private var lastWFDBExport: WFDBAnnotationExport.Result?
@@ -395,7 +400,7 @@ struct BedsideView: View {
                 .accessibilityIdentifier("export-snapshot")
             }
             ToolbarItem {
-                Button { confirmAndExportWFDB() } label: {
+                Button { showWFDBExportConfirm = true } label: {
                     Label("Export WFDB annotations…", systemImage: "doc.badge.arrow.up")
                 }
                 .help("Write your confirmed findings as a WFDB annotation file (\(wfdbRecordBase).\(WFDBAnnotationWriter.defaultAnnotator)) beside the recording, to hand to a peer")
@@ -446,6 +451,15 @@ struct BedsideView: View {
             Button("OK") { attachError = nil }
         } message: {
             Text(attachError ?? "")
+        }
+        .alert(
+            "Export \(amberFindingCount) confirmed finding\(amberFindingCount == 1 ? "" : "s")?",
+            isPresented: $showWFDBExportConfirm
+        ) {
+            Button(wfdbTargetExists ? "Replace" : "Export") { performWFDBExport() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(wfdbExportConfirmMessage)
         }
         #if DEBUG
         .task { applyUITestHooks() }
@@ -693,19 +707,10 @@ struct BedsideView: View {
             .appendingPathComponent("\(wfdbRecordBase).\(WFDBAnnotationWriter.defaultAnnotator)").path)
     }
 
-    /// Confirms the (lossy, possibly file-replacing) export with a synchronous
-    /// NSAlert — the same imperative AppKit idiom the markdown/PNG exports use —
-    /// then writes on approval. Kept off the SwiftUI presentation path so it
-    /// composes cleanly with the toolbar.
-    private func confirmAndExportWFDB() {
-        let alert = NSAlert()
-        let n = amberFindingCount
-        alert.messageText = "Export \(n) confirmed finding\(n == 1 ? "" : "s")?"
-        alert.informativeText = "Writes \(wfdbRecordBase).\(WFDBAnnotationWriter.defaultAnnotator) beside the recording. Each finding becomes a WFDB comment at its onset carrying your label text — a span's extent is described in that text, not written as rhythm boundaries.\(wfdbTargetExists ? " This replaces the existing file." : "")"
-        alert.addButton(withTitle: wfdbTargetExists ? "Replace" : "Export")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        performWFDBExport()
+    /// Human-readable confirmation copy for the export alert — surfaces the
+    /// lossy span→onset-comment reduction and any file replacement.
+    private var wfdbExportConfirmMessage: String {
+        "Writes \(wfdbRecordBase).\(WFDBAnnotationWriter.defaultAnnotator) beside the recording. Each finding becomes a WFDB comment at its onset carrying your label text — a span's extent is described in that text, not written as rhythm boundaries.\(wfdbTargetExists ? " This replaces the existing file." : "")"
     }
 
     /// Writes the amber findings as `<base>.mur` beside the recording. The
