@@ -110,7 +110,7 @@ struct WFDBAnnotationExportTests {
             recordName: "rec",
             in: dir
         )
-        #expect(result.annotator == "mur")
+        #expect(result.annotator == "mrm")
         #expect(result.findingCount == 1)
         #expect(FileManager.default.fileExists(atPath: result.url.path))
         // Reads back through Murmur's own parser at the right sample.
@@ -143,7 +143,7 @@ struct WFDBAnnotationExportTests {
     @Test("Export to a chosen file URL writes the amber set and reports its extension")
     func exportToExplicitURL() throws {
         let dir = try tempDir()
-        let dest = dir.appendingPathComponent("handoff.mur")
+        let dest = dir.appendingPathComponent("handoff.mrm")
         let result = try WFDBAnnotationExport.export(
             annotations: [],
             annotationDispositions: [:],
@@ -151,7 +151,7 @@ struct WFDBAnnotationExportTests {
             to: dest
         )
         #expect(result.url == dest)
-        #expect(result.annotator == "mur")
+        #expect(result.annotator == "mrm")
         #expect(result.findingCount == 1)
         let decoded = WFDBAnnotationParser.parse(data: try Data(contentsOf: dest))
         #expect(decoded.map(\.sampleIndex) == [1000])
@@ -173,10 +173,24 @@ struct WFDBAnnotationExportTests {
 
     // MARK: - Non-clobber
 
+    @Test("Export to a chosen URL refuses the reserved .mur (native save) extension")
+    func exportToExplicitURLRefusesMur() throws {
+        let dir = try tempDir()
+        #expect(throws: WFDBAnnotationWriter.WriteError.reservedAnnotator("mur")) {
+            try WFDBAnnotationExport.export(
+                annotations: [],
+                annotationDispositions: [:],
+                confirmedRegions: [region(1000, 2000, state: .confirmed, kind: .vt)],
+                to: dir.appendingPathComponent("rec.mur")
+            )
+        }
+        #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("rec.mur").path))
+    }
+
     @Test("A pre-existing annotator file is byte-identical after a refused export")
     func nonClobber() throws {
         let dir = try tempDir()
-        let existing = dir.appendingPathComponent("rec.mur")
+        let existing = dir.appendingPathComponent("rec.mrm")
         let sentinel = Data([0xDE, 0xAD, 0xBE, 0xEF])
         try sentinel.write(to: existing)
 
@@ -212,7 +226,7 @@ struct WFDBAnnotationExportTests {
     @Test("Explicit overwrite replaces an existing annotator")
     func overwriteReplaces() throws {
         let dir = try tempDir()
-        let existing = dir.appendingPathComponent("rec.mur")
+        let existing = dir.appendingPathComponent("rec.mrm")
         try Data([0x00]).write(to: existing)
         let result = try WFDBAnnotationExport.export(
             annotations: [],

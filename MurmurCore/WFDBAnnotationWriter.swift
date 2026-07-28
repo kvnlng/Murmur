@@ -107,15 +107,19 @@ enum WFDBAnnotationWriter {
 
     // MARK: - File output
 
-    /// The annotator suffix Murmur writes its own findings under —
-    /// `<record>.mur`. Deliberately distinct from `.atr` so an export never
-    /// touches the reference annotation set.
-    static let defaultAnnotator = "mur"
+    /// The annotator suffix the WFDB EXPORT writes under — `<record>.mrm`.
+    /// A real WFDB annotator (`rdann -a mrm`), distinct from `.atr` (reference
+    /// set) and from `.mur` (the native Murmur SAVE format, NOT a WFDB
+    /// annotator). Export projects DOWN to WFDB; SAVE is a separate, richer
+    /// format (see project_save_vs_export_model_correction.md).
+    static let defaultAnnotator = "mrm"
 
-    /// Annotator suffixes Murmur must never write. `.atr` is the reference
-    /// annotation set — for PhysioNet records it is the published ground truth
-    /// the analyst is working against; overwriting it destroys that.
-    static let reservedAnnotators: Set<String> = ["atr"]
+    /// Annotator suffixes the WFDB writer must never produce. `.atr` is the
+    /// reference annotation set — for PhysioNet records the published ground
+    /// truth the analyst works against. `.mur` denotes the native Murmur SAVE
+    /// format (a document package), never a WFDB annotator — refusing it here
+    /// keeps the export from masquerading as a saved session.
+    static let reservedAnnotators: Set<String> = ["atr", "mur"]
 
     enum WriteError: LocalizedError, Equatable {
         /// Refused to write a reserved annotator (e.g. `.atr`).

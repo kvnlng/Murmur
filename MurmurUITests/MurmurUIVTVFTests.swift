@@ -84,10 +84,10 @@ final class MurmurUIVTVFTests: XCTestCase {
             .matching(identifier: "ui-test-wfdb-export").firstMatch
         XCTAssertTrue(leaf.waitForExistence(timeout: 5))
 
-        let expected = NSPredicate(format: "label == %@", "annotator=mur count=1")
+        let expected = NSPredicate(format: "label == %@", "annotator=mrm count=1")
         let exp = XCTNSPredicateExpectation(predicate: expected, object: leaf)
         XCTAssertEqual(XCTWaiter.wait(for: [exp], timeout: 5), .completed,
-                       "Export should write one confirmed finding to the .mur annotator")
+                       "Export should write one confirmed finding to the .mrm annotator")
     }
 
     /// The export toolbar button is present and ENABLES once a finding is
