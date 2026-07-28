@@ -26,6 +26,62 @@ struct CSVImportTests {
         catch { return nil }
     }
 
+    private func tempDir() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("csv-wfdb-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    // MARK: - CSV → WFDB → import round-trip (X15-B)
+
+    @Test("ADC-counts CSV → WFDB record → import recovers the counts")
+    func adcRoundTripThroughImporter() throws {
+        let csv = """
+        # index_kind: sample_number
+        # sample_rate_hz: 250
+        # num_channels: 2
+        # lead_names: II, V1
+        # amplitude_encoding: adc_counts
+        0,10,-20
+        1,11,-21
+        2,12,-22
+        """
+        let parsed = try parse(csv)
+        let dir = try tempDir()
+        let heaURL = try CSVImport.writeWFDBRecord(parsed, recordName: "rec", in: dir)
+        let summary = try WFDBImporter.importRecord(heaURL: heaURL, outputDirectory: try tempDir())
+        #expect(summary.recording.channels.count == 2)
+        #expect(summary.recording.channels.first?.sampleRate == 250)
+        let primary = try #require(summary.recording.primaryECGSamples(inDirectory: summary.directory))
+        // gain unspecified → 1, so physical readback equals the raw counts.
+        #expect(primary.map { Int($0.rounded()) } == [10, 11, 12])
+    }
+
+    @Test("Physical CSV → WFDB record → import recovers the physical values")
+    func physicalRoundTripThroughImporter() throws {
+        let csv = """
+        # index_kind: time_seconds
+        # num_channels: 1
+        # lead_names: II
+        # amplitude_encoding: physical
+        # physical_unit: mV
+        0,0.10
+        0.004,0.25
+        0.008,-0.05
+        """
+        let parsed = try parse(csv)
+        let dir = try tempDir()
+        let heaURL = try CSVImport.writeWFDBRecord(parsed, recordName: "rec", in: dir)
+        let summary = try WFDBImporter.importRecord(heaURL: heaURL, outputDirectory: try tempDir())
+        let primary = try #require(summary.recording.primaryECGSamples(inDirectory: summary.directory))
+        let expected = [0.10, 0.25, -0.05]
+        #expect(primary.count == 3)
+        for (got, want) in zip(primary, expected) {
+            #expect(abs(Double(got) - want) < 1e-4, "recovered \(got), expected \(want)")
+        }
+    }
+
     // MARK: - Golden parses
 
     @Test("ADC-counts + sample_number header block parses verbatim")

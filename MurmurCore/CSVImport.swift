@@ -525,4 +525,31 @@ public enum CSVImport {
         for ch in token where ch.isLetter && ch != "e" && ch != "E" { return true }
         return false
     }
+
+    // MARK: - Convert to a WFDB record (X15-B)
+
+    /// Writes the parsed CSV as a WFDB format-16 record (`<recordName>.hea` +
+    /// `.dat`) into `directory`, returning the `.hea` URL for
+    /// `WFDBImporter.importRecord`. The gain written recovers the intended
+    /// values on decode: `physical` uses the digitizing power-of-ten (baseline
+    /// 0); `adc_counts` carries counts verbatim under the declared gain, or gain
+    /// 1 when unspecified (raw counts shown through — no fabricated calibration).
+    @discardableResult
+    public static func writeWFDBRecord(_ parsed: Parsed, recordName: String, in directory: URL) throws -> URL {
+        let calibration: WFDBRecordWriter.Calibration
+        switch parsed.metadata.amplitude {
+        case .physical(let unit):
+            calibration = .init(gain: parsed.gain, baseline: 0, unit: unit)
+        case .adcCounts(_, let gain, let baseline, let unit):
+            calibration = .init(gain: gain > 0 ? gain : 1, baseline: baseline, unit: unit)
+        }
+        return try WFDBRecordWriter.write(
+            recordName: recordName,
+            channelSamples: parsed.channelSamples,
+            sampleRateHz: parsed.sampleRateHz,
+            leadNames: parsed.metadata.leadNames,
+            calibration: calibration,
+            in: directory
+        )
+    }
 }
