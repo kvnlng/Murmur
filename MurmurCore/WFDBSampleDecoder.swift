@@ -220,8 +220,11 @@ enum WFDBSampleDecoder {
                 let b1 = UInt16(bytes[byteIdx + 1])
                 let b2 = UInt16(bytes[byteIdx + 2])
 
-                let rawA = b0 | ((b1 & 0x0F) << 8)     // A: byte[0] + low nibble of byte[1]
-                let rawB = (b2 << 4) | (b1 >> 4)        // B: byte[2] + high nibble of byte[1]
+                // WFDB 212 packs two 12-bit samples per 3 bytes:
+                //   s0 = byte0 | (byte1 & 0x0F) << 8   (low nibble of byte1 = s0 high bits)
+                //   s1 = byte2 | (byte1 & 0xF0) << 4   (high nibble of byte1 = s1 high bits)
+                let rawA = b0 | ((b1 & 0x0F) << 8)      // A: byte[0] + low nibble of byte[1]
+                let rawB = b2 | ((b1 & 0xF0) << 4)      // B: byte[2] + high nibble of byte[1]
 
                 // Sign-extend from 12 bits to 16 bits using arithmetic right shift.
                 flat[flatIdx]     = Int32(Int16(bitPattern: rawA << 4) >> 4)

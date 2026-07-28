@@ -37,6 +37,11 @@ struct OverviewMap: View {
     /// ring / dismissed-dim treatment used in the expanded per-category
     /// lanes. Empty when disposition state isn't wired through yet.
     var dispositionsByID: [UUID: AnnotationDisposition] = [:]
+    /// VT/VF model candidate episodes (range annotations) to mark on the
+    /// locator strip so "where is the VT" is answerable at a glance on a
+    /// long recording. Drawn in NEUTRAL ink (RUO) — the strip locates, the
+    /// queue triages. Empty when no scan has been applied.
+    var candidates: [Annotation] = []
 
     @State private var isExpanded: Bool = false
 
@@ -90,6 +95,7 @@ struct OverviewMap: View {
                 RoundedRectangle(cornerRadius: 6)
                     .fill(Color.secondary.opacity(0.10))
                 densityTicks(width: geo.size.width, height: geo.size.height)
+                candidateBands(width: geo.size.width, height: geo.size.height)
                 viewportIndicator(width: geo.size.width, height: geo.size.height)
             }
             .contentShape(Rectangle())
@@ -123,6 +129,32 @@ struct OverviewMap: View {
                         dispositionsByID[ann.id]?.state
                     )
                     ctx.fill(Path(rect), with: .color(color.opacity(alpha)))
+                }
+            }
+            .frame(width: width, height: height)
+            .allowsHitTesting(false)
+        )
+    }
+
+    /// Neutral-ink bands marking VT/VF candidate episodes on the locator
+    /// strip, each with a bolder top edge so a narrow episode still reads on
+    /// a multi-hour recording. Model output stays neutral (RUO); the queue
+    /// owns triage colour.
+    private func candidateBands(width: CGFloat, height: CGFloat) -> some View {
+        let total = Double(totalSamples)
+        guard total > 0, !candidates.isEmpty else {
+            return AnyView(EmptyView())
+        }
+        return AnyView(
+            Canvas { ctx, size in
+                for candidate in candidates {
+                    let x0 = CGFloat(max(0.0, min(1.0, Double(candidate.sampleIndex) / total))) * size.width
+                    let x1 = CGFloat(max(0.0, min(1.0, Double(candidate.renderEndSample) / total))) * size.width
+                    let widthPx = max(3, x1 - x0)
+                    let band = CGRect(x: x0, y: 0, width: widthPx, height: size.height)
+                    ctx.fill(Path(band), with: .color(Color.secondary.opacity(0.28)))
+                    let topEdge = CGRect(x: x0, y: 0, width: widthPx, height: 3)
+                    ctx.fill(Path(topEdge), with: .color(Color.secondary.opacity(0.9)))
                 }
             }
             .frame(width: width, height: height)

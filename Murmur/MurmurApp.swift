@@ -9,6 +9,7 @@ import AppKit
 import MurmurCore
 import MurmurMetrics
 import SwiftUI
+import UniformTypeIdentifiers
 
 @main
 struct MurmurApp: App {
@@ -50,9 +51,24 @@ struct MurmurApp: App {
                 // fiducials + per-patient normal template + interval readouts,
                 // publishes to IntervalMarkingsContext.
                 .background(IntervalMarkingsOrchestrator())
+                // Third invisible orchestrator: owns the VT/VF Core ML model +
+                // entitlement gate, presents the scan dialog, and publishes
+                // committed candidates to VTVFScanContext for the review queue.
+                .background(VTVFScanOrchestrator())
         }
         .defaultSize(width: 1320, height: 880)
         .commands {
+            // File menu — native .mur session Save/Open. SAVE is free (per the
+            // save-vs-export model): it reads the current recording + its bundle
+            // and writes a portable Murmur session package. OPEN routes the
+            // picked package to ContentView via the coordinator.
+            CommandGroup(after: .newItem) {
+                Button("Open Session…") { openSessionPanel() }
+                    .keyboardShortcut("o", modifiers: .command)
+                Button("Import CSV…") { importCSVPanel() }
+                Button("Save Session As…") { saveSessionPanel() }
+                    .keyboardShortcut("s", modifiers: [.command, .shift])
+            }
             // Window menu additions — separate from Help. `openWindow`
             // is only available inside a view scope, so we expose the
             // metrics scene ID and call it from a Button action closure.
@@ -101,5 +117,68 @@ struct MurmurApp: App {
         }
         .defaultSize(width: 380, height: 320)
         .commandsRemoved()
+    }
+
+    // MARK: - Native .mur session Save / Open
+
+    private static let sessionType = UTType("com.kevinlong.murmur.session")
+
+    /// Writes the current recording + its analyst layer to a `.mur` package the
+    /// analyst chooses the location of. Session/provenance capture from live UI
+    /// is a later refinement; this already saves the source + the analyst's
+    /// findings/dispositions/guides faithfully.
+    @MainActor private func saveSessionPanel() {
+        let context = CurrentRecordingContext.shared
+        guard let recording = context.recording, let directory = context.directory else {
+            presentSessionAlert(title: "No recording open",
+                                message: "Open a recording before saving a Murmur session.")
+            return
+        }
+        let panel = NSSavePanel()
+        panel.title = "Save Murmur Session"
+        if let type = Self.sessionType { panel.allowedContentTypes = [type] }
+        panel.canCreateDirectories = true
+        let base = (recording.sourceFileName as NSString).deletingPathExtension
+        panel.nameFieldStringValue = "\(base.isEmpty ? "Session" : base).mur"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try MurSessionPackage.write(recording: recording, recordingDirectory: directory, to: url)
+        } catch {
+            presentSessionAlert(title: "Couldn't save session", message: error.localizedDescription)
+        }
+    }
+
+    /// Picks a `.mur` package and hands it to ContentView (via the coordinator)
+    /// to load + present. The package appears as a single file thanks to
+    /// LSTypeIsPackage.
+    @MainActor private func openSessionPanel() {
+        let panel = NSOpenPanel()
+        panel.title = "Open Murmur Session"
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        if let type = Self.sessionType { panel.allowedContentTypes = [type] }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        SessionDocumentCoordinator.shared.requestOpen(url)
+    }
+
+    /// Picks a CSV and hands it to ContentView to convert + present (free
+    /// viewer's CSV on-ramp). Header-less CSVs surface an "add metadata" refusal
+    /// until the import dialog (X15-C2) lands.
+    @MainActor private func importCSVPanel() {
+        let panel = NSOpenPanel()
+        panel.title = "Import CSV"
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.commaSeparatedText]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        SessionDocumentCoordinator.shared.requestOpen(url)
+    }
+
+    @MainActor private func presentSessionAlert(title: String, message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 }

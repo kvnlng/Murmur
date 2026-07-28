@@ -22,6 +22,10 @@ struct BedsideView: View {
     @State private var viewport: RecordingViewport
     @State private var filter = FindingFilter()
     @State private var showFindings = true
+    /// When on, the viewport is held at a 10-second window and finding /
+    /// candidate jumps recenter without changing zoom — for analysts who
+    /// read in fixed time windows. A manual zoom breaks the lock.
+    @State private var windowLockedTo10s = false
     @State private var layoutMode: BedsideLayoutMode
     /// App-wide read/write latch. Governs the context-notes editor and the
     /// per-finding disposition trio; new annotation create/edit/delete will
@@ -30,6 +34,14 @@ struct BedsideView: View {
     /// Analyst review state for this recording's findings — confirm /
     /// dismiss / reset. Persisted to `<bundle>/dispositions.json`.
     @State private var dispositionStore: DispositionStore
+    /// Analyst review state for VT/VF model CANDIDATES — keyed on time
+    /// region (not annotation id) so it survives a rescan. Persisted to
+    /// `<bundle>/candidate-dispositions.json`.
+    @State private var candidateDispositionStore: VTVFCandidateDispositionStore
+    /// Bridge to the App-target VT/VF scan orchestrator: exposes the
+    /// committed candidates + drives the "Scan for VT/VF candidates"
+    /// toolbar affordance. The model + entitlement live on the App side.
+    @State private var scanContext = VTVFScanContext.shared
     /// Findings the analyst attached after import (via the "Attach
     /// findings…" toolbar action). Merged with `recording.annotations`
     /// for display. In-memory only for now; a future pass persists them
@@ -40,6 +52,9 @@ struct BedsideView: View {
     /// Error message shown when an attach attempt fails (unreadable file,
     /// unsupported schema, malformed JSON, etc).
     @State private var attachError: String?
+    /// Result of the most recent WFDB export — surfaced to XCUI via a hidden
+    /// accessibility leaf (exported count + annotator suffix).
+    @State private var lastWFDBExport: WFDBAnnotationExport.Result?
     /// Drives the producer-run sheet. Visible in DEBUG via the toolbar;
     /// once IAP frameworks land in RELEASE, the toolbar item gates on
     /// "any producer registered" instead of the DEBUG flag.
@@ -93,6 +108,7 @@ struct BedsideView: View {
         // workflow; strips mode is opt-in for cross-lead comparison.
         _layoutMode = State(initialValue: firstECG.map { .focus($0.id) } ?? .strips)
         _dispositionStore = State(initialValue: DispositionStore(bundleDirectory: recordingDirectory))
+        _candidateDispositionStore = State(initialValue: VTVFCandidateDispositionStore(bundleDirectory: recordingDirectory))
         _trendGuideStore = State(initialValue: IntervalTrendGuideStore(bundleDirectory: recordingDirectory))
     }
 
@@ -147,9 +163,88 @@ struct BedsideView: View {
         filteredAnnotations.filter { $0.matchesChannel(channel.name) }
     }
 
+    /// VT/VF candidate episodes to draw on `channel`'s trace. Same
+    /// lead-matching rule as annotations; lead-less candidates show on
+    /// every channel.
+    private func candidatesForChannel(_ channel: Channel) -> [Annotation] {
+        scanContext.candidates.filter { $0.matchesChannel(channel.name) }
+    }
+
     private var focusedChannel: Channel? {
         guard case .focus(let id) = layoutMode else { return nil }
         return ecgChannels.first { $0.id == id }
+    }
+
+    /// Extracted out of `body` to keep the view's type-check tractable —
+    /// the interpolation was tipping the whole body over the inference
+    /// budget once the VT/VF surfaces were added.
+    private var viewportStateLabel: String {
+        "start=\(viewport.startSample) end=\(viewport.endSample)"
+    }
+
+    /// VT/VF candidate scan toolbar item — only surfaces when the VT/VF
+    /// IAP is owned AND a recording is loaded (the App-target orchestrator
+    /// sets `isScanAvailable`). The free viewer never sees it, so the model
+    /// is never implied to be present. Extracted as its own toolbar-content
+    /// property to keep the `.toolbar` builder's type-check tractable.
+    /// 10-second window lock. Snaps the viewport to a 10 s window and holds
+    /// it there — finding + candidate jumps recenter without re-zooming, so
+    /// an analyst reading in fixed windows keeps their frame. A manual zoom
+    /// (see `zoom(factor:)`) releases the lock.
+    @ToolbarContentBuilder
+    private var windowLockToolbarItem: some ToolbarContent {
+        ToolbarItem {
+            Button {
+                toggleWindowLock()
+            } label: {
+                Label("10 s window", systemImage: windowLockedTo10s ? "lock.fill" : "lock.open")
+            }
+            .help(windowLockedTo10s
+                  ? "Locked to a 10-second window. Jumps recenter without changing zoom. Click (or zoom) to unlock."
+                  : "Lock the trace to a 10-second window so jumps keep your time frame.")
+            .tint(windowLockedTo10s ? Color.accentColor : nil)
+            .accessibilityIdentifier("window-lock-toggle")
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var scanToolbarItem: some ToolbarContent {
+        if scanContext.isScanAvailable {
+            ToolbarItem {
+                Button {
+                    scanContext.requestScanDialog(
+                        viewStartSample: viewport.startSample,
+                        viewEndSample: viewport.endSample
+                    )
+                } label: {
+                    Label("Scan for VT/VF candidates", systemImage: "waveform.badge.magnifyingglass")
+                }
+                .help("Scan this recording for candidate VT/VF episodes (research use only)")
+                .accessibilityIdentifier("vtvf-scan-action")
+            }
+        }
+    }
+
+    /// The review-queue inspector — extracted from `body` for the same
+    /// type-check reason. Carries both the annotation findings and the
+    /// VT/VF model candidates + their region-keyed disposition store.
+    private var findingsInspector: some View {
+        FindingsPanel(
+            annotations: allAnnotations,
+            viewport: viewport,
+            sampleRate: recording.channels.first?.sampleRate ?? 250,
+            headerComments: recording.headerComments,
+            filter: $filter,
+            dispositionStore: dispositionStore,
+            isEditing: isEditing,
+            lockZoom: windowLockedTo10s,
+            candidates: scanContext.candidates,
+            candidateDispositionStore: candidateDispositionStore,
+            regulatoryNotice: scanContext.regulatoryNotice,
+            parametersCaption: scanContext.parametersCaption,
+            candidateProvenance: scanContext.candidateProvenance
+        )
+        .inspectorColumnWidth(min: 260, ideal: 340, max: 500)
     }
 
     var body: some View {
@@ -241,20 +336,33 @@ struct BedsideView: View {
                 // accessibility post-processor reformats with thousands
                 // separators (e.g. `1750` → `1,750`). Letter separators
                 // keep tests' equality comparisons stable.
-                .accessibilityLabel("start=\(viewport.startSample) end=\(viewport.endSample)")
+                .accessibilityLabel(viewportStateLabel)
+                .allowsHitTesting(false)
+        }
+        .overlay(alignment: .topLeading) {
+            // Hidden leaf exposing the last WFDB export's result to XCUI —
+            // the count travels through the amber filter + writer, so only an
+            // end-to-end assertion proves the plumbing. Suffix uses letters,
+            // count stays under 1000, so the accessibility post-processor
+            // doesn't reformat the label.
+            Color.clear
+                .frame(width: 1, height: 1)
+                .accessibilityIdentifier("ui-test-wfdb-export")
+                .accessibilityLabel(lastWFDBExport.map { "annotator=\($0.annotator) count=\($0.findingCount)" } ?? "none")
+                .allowsHitTesting(false)
+        }
+        .overlay(alignment: .topLeading) {
+            // Count of analyst-authored range findings — proves drag-to-author
+            // created + persisted a finding (the gesture itself isn't XCUI-
+            // drivable, so the bypass invokes the handler and this leaf reports).
+            Color.clear
+                .frame(width: 1, height: 1)
+                .accessibilityIdentifier("ui-test-authored-count")
+                .accessibilityLabel("\(authoredRangeFindings.count)")
                 .allowsHitTesting(false)
         }
         .inspector(isPresented: $showFindings) {
-            FindingsPanel(
-                annotations: allAnnotations,
-                viewport: viewport,
-                sampleRate: recording.channels.first?.sampleRate ?? 250,
-                headerComments: recording.headerComments,
-                filter: $filter,
-                dispositionStore: dispositionStore,
-                isEditing: isEditing
-            )
-            .inspectorColumnWidth(min: 260, ideal: 340, max: 500)
+            findingsInspector
         }
         .toolbar {
             ToolbarItem {
@@ -281,6 +389,7 @@ struct BedsideView: View {
                 .help("Merge a producer's annotations JSON into this recording")
                 .accessibilityIdentifier("attach-findings")
             }
+            scanToolbarItem
             ToolbarItem {
                 Button { exportMarkdownReport() } label: {
                     Label("Export report…", systemImage: "square.and.arrow.up")
@@ -295,6 +404,14 @@ struct BedsideView: View {
                 .help("Save a PNG snapshot of the current bedside view")
                 .accessibilityIdentifier("export-snapshot")
             }
+            ToolbarItem {
+                Button { exportWFDBAnnotations() } label: {
+                    Label("Export WFDB annotations…", systemImage: "doc.badge.arrow.up")
+                }
+                .help("Write your confirmed findings as a WFDB annotation file (\(wfdbRecordBase).\(WFDBAnnotationWriter.defaultAnnotator)) beside the recording, to hand to a peer")
+                .disabled(amberFindingCount == 0)
+                .accessibilityIdentifier("export-wfdb")
+            }
             #if DEBUG
             ToolbarItem {
                 Button {
@@ -306,6 +423,7 @@ struct BedsideView: View {
                 .accessibilityIdentifier("producers-toggle")
             }
             #endif
+            windowLockToolbarItem
             ToolbarItem {
                 Button {
                     showFindings.toggle()
@@ -345,6 +463,44 @@ struct BedsideView: View {
     }
 
     #if DEBUG
+    /// Grants the VT/VF IAP and publishes a fixed set of synthetic
+    /// candidates — the same state a committed scan produces — so XCUI can
+    /// exercise the candidate group + disposition wire-up without running
+    /// Core ML. Coordinates sit inside the 10 s synthetic fixture.
+    @MainActor
+    private func injectSyntheticVTVFCandidates() {
+        // Deliberately does NOT grant PurchaseStore entitlement — that
+        // races against the store's async currentEntitlements refresh. The
+        // orchestrator makes the scan affordance available under the same
+        // launch flag instead (without loading Core ML).
+        let sr = ecgChannels.first?.sampleRate ?? 250
+        let candidates = [
+            VTVFCandidateSource.makeAnnotation(
+                startSample: Int64(1 * sr), endSample: Int64(4 * sr), score: 0.93
+            ),
+            VTVFCandidateSource.makeAnnotation(
+                startSample: Int64(6 * sr), endSample: Int64(9 * sr), score: 0.81
+            ),
+        ]
+        scanContext.setCandidates(
+            candidates,
+            parametersCaption: "τ 0.87 · min 4s · gap 5s · vtvf_seres_lstm",
+            provenance: .init(modelIdentifier: "vtvf_seres_lstm", tau: 0.87)
+        )
+        scanContext.isScanAvailable = true
+    }
+
+    /// Confirms a fixed synthetic candidate region — shared by the export
+    /// bypass and the seed-only flag so both exercise the same amber input.
+    @MainActor
+    private func seedConfirmedRegionForTests() {
+        let sr = ecgChannels.first?.sampleRate ?? 250
+        candidateDispositionStore.confirm(
+            start: Int64(1 * sr), end: Int64(4 * sr), kind: .vt,
+            modelIdentifier: "vtvf_seres_lstm", tauAtConfirmation: 0.87
+        )
+    }
+
     /// Applies launch-arg-driven viewport mutations once the view appears.
     /// Mirrors the gestures' code paths so the wiring from launch arg →
     /// viewport state matches the wiring from gesture → viewport state.
@@ -355,6 +511,34 @@ struct BedsideView: View {
             // but short enough that the test's waitForExistence still catches
             // the post-hook state.
             try? await Task.sleep(nanoseconds: 1_000_000)
+            if UITestSupport.injectVTVFCandidates {
+                injectSyntheticVTVFCandidates()
+            }
+            if UITestSupport.exportWFDBFindings {
+                // Confirm a synthetic candidate region so the amber filter has
+                // something to export, then export to a fixed container path
+                // (no save panel — XCUI can't drive one) and publish the result
+                // on the a11y leaf.
+                seedConfirmedRegionForTests()
+                let url = recordingDirectory
+                    .appendingPathComponent("\(wfdbRecordBase).\(WFDBAnnotationWriter.defaultAnnotator)")
+                performWFDBExport(to: url)
+            }
+            if UITestSupport.seedConfirmedRegion {
+                // Confirm a region but do NOT export — lets an XCUI test drive
+                // the real export button + confirm alert.
+                seedConfirmedRegionForTests()
+            }
+            if UITestSupport.authorRange {
+                // Drive the drag-to-author handler directly (the DragGesture
+                // itself isn't XCUI-drivable) so the author→persist→render path
+                // is assertable via the authored-count leaf.
+                authorRangeFinding(
+                    startSeconds: 1, endSeconds: 4,
+                    label: "QTc 432→508 ms · 0:01–0:04",
+                    citation: "QTc · Fridericia · test"
+                )
+            }
             if let delta = UITestSupport.panBySamples {
                 viewport.setStart(viewport.startSample + delta)
             }
@@ -517,6 +701,59 @@ struct BedsideView: View {
         }
     }
 
+    // MARK: - WFDB annotation export
+
+    /// Record basename WFDB annotators must share (so `rdann` finds them
+    /// beside the `.hea`/`.dat`). Falls back to a stable stem when the source
+    /// name is empty.
+    private var wfdbRecordBase: String {
+        let base = (recording.sourceFileName as NSString).deletingPathExtension
+        return base.isEmpty ? "recording" : base
+    }
+
+    /// Count of amber (analyst-authored / confirmed) findings eligible for
+    /// export — drives the toolbar button's enabled state.
+    private var amberFindingCount: Int {
+        WFDBAnnotationExport.amberFindings(
+            annotations: allAnnotations,
+            annotationDispositions: dispositionStore.records,
+            confirmedRegions: candidateDispositionStore.records
+        ).count
+    }
+
+    /// Presents a save panel (suggesting `<base>.mur`) so the analyst chooses
+    /// where the annotations land — the file is meant to be handed to a peer,
+    /// so it must be reachable, not buried in the app container. The panel's
+    /// message surfaces the lossy span→onset-comment reduction (consent at the
+    /// moment of export); the panel itself handles any replace-existing prompt.
+    /// Mirrors the imperative NSSavePanel idiom of the report/PNG exports.
+    private func exportWFDBAnnotations() {
+        let panel = NSSavePanel()
+        panel.title = "Export WFDB annotations"
+        panel.message = "Each finding is written as a WFDB comment at its onset carrying your label text. A span's extent is described in that text, not written as rhythm boundaries — drop this file beside a copy of the record to read it back."
+        panel.allowedContentTypes = [UTType(filenameExtension: WFDBAnnotationWriter.defaultAnnotator) ?? .data]
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = "\(wfdbRecordBase).\(WFDBAnnotationWriter.defaultAnnotator)"
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        performWFDBExport(to: url)
+    }
+
+    /// Writes the amber findings to `url`. Failures route through the shared
+    /// `attachError` alert. The result feeds the hidden XCUI leaf.
+    private func performWFDBExport(to url: URL) {
+        do {
+            lastWFDBExport = try WFDBAnnotationExport.export(
+                annotations: allAnnotations,
+                annotationDispositions: dispositionStore.records,
+                confirmedRegions: candidateDispositionStore.records,
+                to: url
+            )
+        } catch {
+            attachError = "Couldn't export findings: \(error.localizedDescription)"
+        }
+    }
+
     // MARK: - Keyboard navigation actions
 
     private enum PanDirection {
@@ -538,9 +775,24 @@ struct BedsideView: View {
     /// keeps whatever the analyst was looking at in the same on-screen
     /// position.
     private func zoom(factor: Double) {
+        // A deliberate zoom breaks the 10 s window lock — the analyst has
+        // chosen a different frame.
+        if windowLockedTo10s { windowLockedTo10s = false }
         let currentWidth = viewport.endSample - viewport.startSample
         let newWidth = Int64(Double(currentWidth) * factor)
         viewport.setWidth(newWidth, anchorFraction: 0.5)
+    }
+
+    /// Toggle the 10-second window lock. Engaging it snaps the viewport to a
+    /// 10 s window centered on the current position; the lock then holds the
+    /// zoom steady through finding / candidate jumps (see FindingsPanel's
+    /// `lockZoom`). Candidate jumps preserve zoom regardless of this lock.
+    private func toggleWindowLock() {
+        windowLockedTo10s.toggle()
+        if windowLockedTo10s {
+            let tenSeconds = Int64(viewport.sampleRate * 10)
+            viewport.setWidth(tenSeconds, anchorFraction: 0.5)
+        }
     }
 
     /// Animated jump to the first filtered finding strictly after the
@@ -666,6 +918,7 @@ struct BedsideView: View {
                             directory: recordingDirectory,
                             viewport: viewport,
                             annotations: annotationsForChannel(channel),
+                            candidates: candidatesForChannel(channel),
                             sizing: .strip
                         )
                     }
@@ -719,6 +972,7 @@ struct BedsideView: View {
                     directory: recordingDirectory,
                     viewport: viewport,
                     annotations: annotationsForChannel(channel),
+                    candidates: candidatesForChannel(channel),
                     sizing: .focus
                 )
                 // Tear down + rebuild when the focused lead changes —
@@ -737,7 +991,8 @@ struct BedsideView: View {
                 sampleRate: channel.sampleRate,
                 viewport: viewport,
                 channelName: channel.name,
-                dispositionsByID: dispositionStore.records
+                dispositionsByID: dispositionStore.records,
+                candidates: candidatesForChannel(channel)
             )
         }
         .padding(.horizontal, 16)
@@ -910,6 +1165,8 @@ struct BedsideView: View {
                 externalHoverTimeSeconds: laneContext.hoveredSource == .ecg
                     ? laneContext.hoveredTimeSeconds
                     : nil,
+                rangeFindings: authoredRangeFindings,
+                authoringEnabled: canAuthorFindings,
                 onLaneHover: { time in
                     laneContext.setHover(time: time, from: .lane)
                 },
@@ -934,9 +1191,68 @@ struct BedsideView: View {
                 },
                 onRemoveGuide: { guideID in
                     trendGuideStore.remove(guideID)
+                },
+                onAuthorRange: { startSeconds, endSeconds, label, citation in
+                    authorRangeFinding(
+                        startSeconds: startSeconds,
+                        endSeconds: endSeconds,
+                        label: label,
+                        citation: citation
+                    )
                 }
             )
             .equatable()
+        }
+    }
+
+    /// Analyst-authored range findings, projected onto the trend lane's time
+    /// axis. Sourced from the same `Annotation` store everything else reads, so
+    /// they persist and also flow to the review queue + WFDB export.
+    private var authoredRangeFindings: [IntervalTrendRangeFinding] {
+        let sr = viewport.sampleRate
+        guard sr > 0 else { return [] }
+        return allAnnotations
+            .filter { $0.kind == .range && $0.source == Annotation.analystAuthoredSource }
+            .map { ann in
+                IntervalTrendRangeFinding(
+                    id: ann.id,
+                    startSeconds: Double(ann.sampleIndex) / sr,
+                    endSeconds: Double(ann.renderEndSample) / sr,
+                    label: ann.displayLabel
+                )
+            }
+    }
+
+    /// Drag-to-author is live only when the analyst is editing AND owns the
+    /// Annotation IAP — authoring is a paid mutation; viewing findings is free.
+    private var canAuthorFindings: Bool {
+        isEditing && PurchaseStore.shared.owns(.annotationAuthoring)
+    }
+
+    /// Creates + persists a range `Annotation` from a drag-to-author gesture.
+    /// The lane composes the factual `label` (analyst-editable) and the
+    /// immutable `citation`; this stamps the analyst-authored source so it's
+    /// amber everywhere and exports to WFDB. Persistence mirrors
+    /// `handleProducerOutput`. Not entitlement-gated itself — the gesture that
+    /// calls it is (`canAuthorFindings`); a DEBUG test hook also drives it.
+    @MainActor
+    private func authorRangeFinding(startSeconds: Double, endSeconds: Double, label: String, citation: String) {
+        let sr = viewport.sampleRate
+        guard sr > 0, endSeconds > startSeconds else { return }
+        let finding = Annotation(
+            kind: .range,
+            sampleIndex: Int64((startSeconds * sr).rounded()),
+            endSampleIndex: Int64((endSeconds * sr).rounded()),
+            category: "ANALYST_FINDING",
+            label: label,
+            source: Annotation.analystAuthoredSource,
+            citationCaption: citation
+        )
+        attachedAnnotations.append(finding)
+        do {
+            try BundleAnnotationsFile.write(allAnnotations, to: recordingDirectory)
+        } catch {
+            attachError = "Finding was added for this session but could not be saved to the bundle: \(error.localizedDescription)"
         }
     }
 
@@ -1322,6 +1638,11 @@ private struct ChannelPanel: View {
     let directory: URL
     let viewport: RecordingViewport
     let annotations: [Annotation]
+    /// VT/VF model candidate episodes (range annotations) to draw as
+    /// translucent bands on the trace so a queue jump lands on a visible
+    /// region. Kept separate from `annotations` because candidates route
+    /// through the region-keyed disposition store, not the annotation one.
+    var candidates: [Annotation] = []
     var sizing: Sizing = .strip
 
     @State private var clippedRanges: [ClippedRange] = []
@@ -1513,6 +1834,16 @@ private struct ChannelPanel: View {
                         startSample: viewport.startSample,
                         endSample: viewport.endSample,
                         tier: resolvedTier
+                    )
+
+                    // VT/VF candidate regions as translucent bands. Range
+                    // annotations aren't drawn by the chip rail (point-only),
+                    // so without this a queue jump to a candidate lands on a
+                    // trace with no marker for the episode.
+                    VTVFCandidateBandOverlay(
+                        candidates: visibleCandidates,
+                        startSample: viewport.startSample,
+                        endSample: viewport.endSample
                     )
                 }
                 .offset(x: overscrollPx)
@@ -1792,6 +2123,18 @@ private struct ChannelPanel: View {
         }
     }
 
+    /// Candidate episodes whose [start, end] interval intersects the
+    /// viewport — the subset the band overlay needs to draw.
+    private var visibleCandidates: [Annotation] {
+        guard !candidates.isEmpty else { return [] }
+        let range = viewport.rangeSamples
+        return candidates.filter { c in
+            let start = c.sampleIndex
+            let end = c.endSampleIndex ?? c.sampleIndex
+            return end >= range.lowerBound && start < range.upperBound
+        }
+    }
+
     private var startTime: Double {
         Double(viewport.startSample) / channel.sampleRate
     }
@@ -2039,6 +2382,12 @@ private struct IntervalTrendLaneMemoizedStrip: View, Equatable {
     let guides: [IntervalTrendGuide]
     let events: [IntervalTrendEvent]
     let externalHoverTimeSeconds: Double?
+    /// Analyst-authored range findings rendered as amber overlays. In the
+    /// fingerprint so authoring a new finding rebuilds the lane.
+    let rangeFindings: [IntervalTrendRangeFinding]
+    /// Whether drag-to-author is active (edit latch + Annotation IAP). In the
+    /// fingerprint so toggling edit mode / entitlement re-arms the gesture.
+    let authoringEnabled: Bool
     let onLaneHover: (Double?) -> Void
     let onBinClick: (Double) -> Void
     let onPickMetric: (IntervalTrendMetric) -> Void
@@ -2046,6 +2395,9 @@ private struct IntervalTrendLaneMemoizedStrip: View, Equatable {
     let onPickShowMode: (IntervalTrendShowMode) -> Void
     let onAddGuide: (Double, String) -> Void
     let onRemoveGuide: (UUID) -> Void
+    /// Excluded from `==` (a closure rebuilt every pass); gated by
+    /// `authoringEnabled`, which IS in the fingerprint.
+    let onAuthorRange: (Double, Double, String, String) -> Void
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         guard lhs.beats.count == rhs.beats.count,
@@ -2064,6 +2416,8 @@ private struct IntervalTrendLaneMemoizedStrip: View, Equatable {
             && lhs.guides == rhs.guides
             && lhs.events == rhs.events
             && lhs.externalHoverTimeSeconds == rhs.externalHoverTimeSeconds
+            && lhs.rangeFindings == rhs.rangeFindings
+            && lhs.authoringEnabled == rhs.authoringEnabled
     }
 
     var body: some View {
@@ -2084,6 +2438,7 @@ private struct IntervalTrendLaneMemoizedStrip: View, Equatable {
             selectedBinPreset: selectedBinPreset,
             guides: guides,
             events: events,
+            rangeFindings: rangeFindings,
             externalHoverTimeSeconds: externalHoverTimeSeconds,
             onLaneHover: onLaneHover,
             onBinClick: onBinClick,
@@ -2091,7 +2446,10 @@ private struct IntervalTrendLaneMemoizedStrip: View, Equatable {
             onPickBinPreset: onPickBinPreset,
             onPickShowMode: onPickShowMode,
             onAddGuide: onAddGuide,
-            onRemoveGuide: onRemoveGuide
+            onRemoveGuide: onRemoveGuide,
+            // Gate the gesture here so a locked / unentitled lane still taps +
+            // hovers but never authors.
+            onAuthorRange: authoringEnabled ? onAuthorRange : nil
         )
     }
 }

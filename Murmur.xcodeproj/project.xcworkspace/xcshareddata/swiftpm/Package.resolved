@@ -1,13 +1,22 @@
 {
-  "originHash" : "12e313058680e4f1f92e8ad452ef8ec2465cbcd29af81cb78e301d1d7e90ba4a",
+  "originHash" : "a535925aa4126ab27a1bbbf10cdf1175c40d7c21c1758ccb154c47e6a00b96dd",
   "pins" : [
     {
       "identity" : "murmur-extensions",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/kvnlng/Murmur-Extensions",
+      "location" : "https://github.com/kvnlng/Murmur-Extensions.git",
       "state" : {
-        "revision" : "e1254716250950ba0482014e1a2f9c26af52cc6e",
-        "version" : "0.9.0"
+        "revision" : "a219bc153a6ae949ff8cbc7cc3ecdd617063aeb6",
+        "version" : "0.11.0"
+      }
+    },
+    {
+      "identity" : "swift-algorithms",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-algorithms.git",
+      "state" : {
+        "revision" : "87e50f483c54e6efd60e885f7f5aa946cee68023",
+        "version" : "1.2.1"
       }
     },
     {
@@ -20,12 +29,21 @@
       }
     },
     {
+      "identity" : "swift-numerics",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-numerics.git",
+      "state" : {
+        "revision" : "0c0290ff6b24942dadb83a929ffaaa1481df04a2",
+        "version" : "1.1.1"
+      }
+    },
+    {
       "identity" : "swift-snapshot-testing",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/pointfreeco/swift-snapshot-testing",
       "state" : {
-        "revision" : "ad5e3190cc63dc288f28546f9c6827efc1e9d495",
-        "version" : "1.19.2"
+        "revision" : "59a99c458de4d2dee580529b61b4f78dca7b7fa6",
+        "version" : "1.19.4"
       }
     },
     {
@@ -42,8 +60,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/pointfreeco/xctest-dynamic-overlay",
       "state" : {
-        "revision" : "401bf70d95bfe8db2a1dc619f9e175a85c089321",
-        "version" : "1.10.1"
+        "revision" : "8f6abcf4c8950e2679d5b2fee4ca284fd7c34886",
+        "version" : "1.11.0"
       }
     }
   ],

@@ -7,15 +7,17 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		0A1467042FF93CA900E894CA /* MurmurAnnotation in Frameworks */ = {isa = PBXBuildFile; productRef = 0A1467032FF93CA900E894CA /* MurmurAnnotation */; };
-		0A1467062FF93CA900E894CA /* MurmurInference in Frameworks */ = {isa = PBXBuildFile; productRef = 0A1467052FF93CA900E894CA /* MurmurInference */; };
-		0A1467082FF93CA900E894CA /* MurmurMetrics in Frameworks */ = {isa = PBXBuildFile; productRef = 0A1467072FF93CA900E894CA /* MurmurMetrics */; };
-		0A14670A2FF93D3A00E894CA /* MurmurMetrics in Frameworks */ = {isa = PBXBuildFile; productRef = 0A1467092FF93D3A00E894CA /* MurmurMetrics */; };
-		0A14670C2FF93D4900E894CA /* MurmurInference in Frameworks */ = {isa = PBXBuildFile; productRef = 0A14670B2FF93D4900E894CA /* MurmurInference */; };
-		0A14670E2FF93D4F00E894CA /* MurmurAnnotation in Frameworks */ = {isa = PBXBuildFile; productRef = 0A14670D2FF93D4F00E894CA /* MurmurAnnotation */; };
+		0A28E8CC30192FF600672ABE /* MurmurAnnotation in Frameworks */ = {isa = PBXBuildFile; productRef = 0A28E8CB30192FF600672ABE /* MurmurAnnotation */; };
+		0A28E8CE30192FF600672ABE /* MurmurInference in Frameworks */ = {isa = PBXBuildFile; productRef = 0A28E8CD30192FF600672ABE /* MurmurInference */; };
+		0A28E8D030192FF600672ABE /* MurmurMetrics in Frameworks */ = {isa = PBXBuildFile; productRef = 0A28E8CF30192FF600672ABE /* MurmurMetrics */; };
+		0A28E8D2301930C500672ABE /* MurmurMetrics in Frameworks */ = {isa = PBXBuildFile; productRef = 0A28E8D1301930C500672ABE /* MurmurMetrics */; };
+		0A3994B6301501350053CB42 /* MurmurAnnotation in Frameworks */ = {isa = PBXBuildFile; productRef = 0A3994B5301501350053CB42 /* MurmurAnnotation */; };
+		0A3994B8301501350053CB42 /* MurmurInference in Frameworks */ = {isa = PBXBuildFile; productRef = 0A3994B7301501350053CB42 /* MurmurInference */; };
+		0A3994BA301501350053CB42 /* MurmurMetrics in Frameworks */ = {isa = PBXBuildFile; productRef = 0A3994B9301501350053CB42 /* MurmurMetrics */; };
 		0A3D783B2FF8856600093390 /* MurmurAnnotation in Frameworks */ = {isa = PBXBuildFile; productRef = 0A3D783A2FF8856600093390 /* MurmurAnnotation */; };
 		0A3D783D2FF8856600093390 /* MurmurInference in Frameworks */ = {isa = PBXBuildFile; productRef = 0A3D783C2FF8856600093390 /* MurmurInference */; };
 		0A3D783F2FF8856600093390 /* MurmurMetrics in Frameworks */ = {isa = PBXBuildFile; productRef = 0A3D783E2FF8856600093390 /* MurmurMetrics */; };
+		0AC0411D3019290E00025FAB /* Algorithms in Frameworks */ = {isa = PBXBuildFile; productRef = 0AC0411C3019290E00025FAB /* Algorithms */; };
 		0AC4C9532FEED49000A3D0A5 /* InlineSnapshotTesting in Frameworks */ = {isa = PBXBuildFile; productRef = 0AC4C9522FEED49000A3D0A5 /* InlineSnapshotTesting */; };
 		0AC4C9552FEED49000A3D0A5 /* SnapshotTesting in Frameworks */ = {isa = PBXBuildFile; productRef = 0AC4C9542FEED49000A3D0A5 /* SnapshotTesting */; };
 		0AC4C9572FEED49000A3D0A5 /* SnapshotTestingCustomDump in Frameworks */ = {isa = PBXBuildFile; productRef = 0AC4C9562FEED49000A3D0A5 /* SnapshotTestingCustomDump */; };
@@ -134,11 +136,15 @@
 			buildActionMask = 2147483647;
 			files = (
 				0A3D783F2FF8856600093390 /* MurmurMetrics in Frameworks */,
+				0A28E8D030192FF600672ABE /* MurmurMetrics in Frameworks */,
 				0AC4C9722FEF04B900A3D0A5 /* MurmurCore.framework in Frameworks */,
-				0A1467082FF93CA900E894CA /* MurmurMetrics in Frameworks */,
-				0A1467042FF93CA900E894CA /* MurmurAnnotation in Frameworks */,
+				0A3994BA301501350053CB42 /* MurmurMetrics in Frameworks */,
+				0A3994B6301501350053CB42 /* MurmurAnnotation in Frameworks */,
+				0A28E8CE30192FF600672ABE /* MurmurInference in Frameworks */,
+				0AC0411D3019290E00025FAB /* Algorithms in Frameworks */,
+				0A28E8CC30192FF600672ABE /* MurmurAnnotation in Frameworks */,
 				0A3D783D2FF8856600093390 /* MurmurInference in Frameworks */,
-				0A1467062FF93CA900E894CA /* MurmurInference in Frameworks */,
+				0A3994B8301501350053CB42 /* MurmurInference in Frameworks */,
 				0A3D783B2FF8856600093390 /* MurmurAnnotation in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -151,9 +157,7 @@
 				0AC4C9572FEED49000A3D0A5 /* SnapshotTestingCustomDump in Frameworks */,
 				0AC4C9532FEED49000A3D0A5 /* InlineSnapshotTesting in Frameworks */,
 				0AC4C9552FEED49000A3D0A5 /* SnapshotTesting in Frameworks */,
-				0A14670C2FF93D4900E894CA /* MurmurInference in Frameworks */,
-				0A14670E2FF93D4F00E894CA /* MurmurAnnotation in Frameworks */,
-				0A14670A2FF93D3A00E894CA /* MurmurMetrics in Frameworks */,
+				0A28E8D2301930C500672ABE /* MurmurMetrics in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -251,9 +255,13 @@
 				0A3D783A2FF8856600093390 /* MurmurAnnotation */,
 				0A3D783C2FF8856600093390 /* MurmurInference */,
 				0A3D783E2FF8856600093390 /* MurmurMetrics */,
-				0A1467032FF93CA900E894CA /* MurmurAnnotation */,
-				0A1467052FF93CA900E894CA /* MurmurInference */,
-				0A1467072FF93CA900E894CA /* MurmurMetrics */,
+				0A3994B5301501350053CB42 /* MurmurAnnotation */,
+				0A3994B7301501350053CB42 /* MurmurInference */,
+				0A3994B9301501350053CB42 /* MurmurMetrics */,
+				0AC0411C3019290E00025FAB /* Algorithms */,
+				0A28E8CB30192FF600672ABE /* MurmurAnnotation */,
+				0A28E8CD30192FF600672ABE /* MurmurInference */,
+				0A28E8CF30192FF600672ABE /* MurmurMetrics */,
 			);
 			productName = Murmur;
 			productReference = 0A9B42CF2FDF06BA0059C903 /* Murmur.app */;
@@ -280,9 +288,7 @@
 				0AC4C9522FEED49000A3D0A5 /* InlineSnapshotTesting */,
 				0AC4C9542FEED49000A3D0A5 /* SnapshotTesting */,
 				0AC4C9562FEED49000A3D0A5 /* SnapshotTestingCustomDump */,
-				0A1467092FF93D3A00E894CA /* MurmurMetrics */,
-				0A14670B2FF93D4900E894CA /* MurmurInference */,
-				0A14670D2FF93D4F00E894CA /* MurmurAnnotation */,
+				0A28E8D1301930C500672ABE /* MurmurMetrics */,
 			);
 			productName = MurmurTests;
 			productReference = 0A9B42E12FDF06BB0059C903 /* MurmurTests.xctest */;
@@ -399,7 +405,8 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				0AC4C9512FEED49000A3D0A5 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */,
-				0A1467022FF93CA900E894CA /* XCRemoteSwiftPackageReference "Murmur-Extensions" */,
+				0AC0411B3019290E00025FAB /* XCRemoteSwiftPackageReference "swift-algorithms" */,
+				0A28E8CA30192FF600672ABE /* XCRemoteSwiftPackageReference "Murmur-Extensions" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 0A9B42D02FDF06BA0059C903 /* Products */;
@@ -672,12 +679,23 @@
 				DEVELOPMENT_TEAM = 7G75BYLCSE;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
+				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
+				ENABLE_RESOURCE_ACCESS_USB = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
-				ENABLE_USER_SELECTED_FILES = readonly;
+				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Murmur/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Murmur Studio";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.medical";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -709,12 +727,23 @@
 				DEVELOPMENT_TEAM = 7G75BYLCSE;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
+				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
+				ENABLE_RESOURCE_ACCESS_USB = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
-				ENABLE_USER_SELECTED_FILES = readonly;
+				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Murmur/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Murmur Studio";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.medical";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -995,12 +1024,20 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		0A1467022FF93CA900E894CA /* XCRemoteSwiftPackageReference "Murmur-Extensions" */ = {
+		0A28E8CA30192FF600672ABE /* XCRemoteSwiftPackageReference "Murmur-Extensions" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/kvnlng/Murmur-Extensions";
+			repositoryURL = "https://github.com/kvnlng/Murmur-Extensions.git";
 			requirement = {
 				kind = exactVersion;
-				version = 0.9.0;
+				version = 0.11.0;
+			};
+		};
+		0AC0411B3019290E00025FAB /* XCRemoteSwiftPackageReference "swift-algorithms" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/apple/swift-algorithms.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.2.1;
 			};
 		};
 		0AC4C9512FEED49000A3D0A5 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */ = {
@@ -1014,35 +1051,37 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		0A1467032FF93CA900E894CA /* MurmurAnnotation */ = {
+		0A28E8CB30192FF600672ABE /* MurmurAnnotation */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 0A1467022FF93CA900E894CA /* XCRemoteSwiftPackageReference "Murmur-Extensions" */;
+			package = 0A28E8CA30192FF600672ABE /* XCRemoteSwiftPackageReference "Murmur-Extensions" */;
 			productName = MurmurAnnotation;
 		};
-		0A1467052FF93CA900E894CA /* MurmurInference */ = {
+		0A28E8CD30192FF600672ABE /* MurmurInference */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 0A1467022FF93CA900E894CA /* XCRemoteSwiftPackageReference "Murmur-Extensions" */;
+			package = 0A28E8CA30192FF600672ABE /* XCRemoteSwiftPackageReference "Murmur-Extensions" */;
 			productName = MurmurInference;
 		};
-		0A1467072FF93CA900E894CA /* MurmurMetrics */ = {
+		0A28E8CF30192FF600672ABE /* MurmurMetrics */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 0A1467022FF93CA900E894CA /* XCRemoteSwiftPackageReference "Murmur-Extensions" */;
+			package = 0A28E8CA30192FF600672ABE /* XCRemoteSwiftPackageReference "Murmur-Extensions" */;
 			productName = MurmurMetrics;
 		};
-		0A1467092FF93D3A00E894CA /* MurmurMetrics */ = {
+		0A28E8D1301930C500672ABE /* MurmurMetrics */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 0A1467022FF93CA900E894CA /* XCRemoteSwiftPackageReference "Murmur-Extensions" */;
+			package = 0A28E8CA30192FF600672ABE /* XCRemoteSwiftPackageReference "Murmur-Extensions" */;
 			productName = MurmurMetrics;
 		};
-		0A14670B2FF93D4900E894CA /* MurmurInference */ = {
+		0A3994B5301501350053CB42 /* MurmurAnnotation */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 0A1467022FF93CA900E894CA /* XCRemoteSwiftPackageReference "Murmur-Extensions" */;
-			productName = MurmurInference;
-		};
-		0A14670D2FF93D4F00E894CA /* MurmurAnnotation */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 0A1467022FF93CA900E894CA /* XCRemoteSwiftPackageReference "Murmur-Extensions" */;
 			productName = MurmurAnnotation;
+		};
+		0A3994B7301501350053CB42 /* MurmurInference */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MurmurInference;
+		};
+		0A3994B9301501350053CB42 /* MurmurMetrics */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MurmurMetrics;
 		};
 		0A3D783A2FF8856600093390 /* MurmurAnnotation */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -1055,6 +1094,11 @@
 		0A3D783E2FF8856600093390 /* MurmurMetrics */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = MurmurMetrics;
+		};
+		0AC0411C3019290E00025FAB /* Algorithms */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0AC0411B3019290E00025FAB /* XCRemoteSwiftPackageReference "swift-algorithms" */;
+			productName = Algorithms;
 		};
 		0AC4C9522FEED49000A3D0A5 /* InlineSnapshotTesting */ = {
 			isa = XCSwiftPackageProductDependency;

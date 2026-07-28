@@ -176,6 +176,59 @@ enum UITestSupport {
         return n
     }
 
+    /// True when `--ui-test-vtvf-candidates` is passed. BedsideView injects
+    /// a fixed set of synthetic candidates into `VTVFScanContext` on appear —
+    /// the same state a committed scan produces — so the candidate group, the
+    /// scan toolbar affordance, and the region-keyed disposition wire-up are
+    /// exercisable without running Core ML in the test process. Deliberately
+    /// does NOT grant the PurchaseStore entitlement (that races the async
+    /// currentEntitlements refresh); the scan orchestrator makes the affordance
+    /// available under this same flag instead.
+    static var injectVTVFCandidates: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-vtvf-candidates")
+    }
+
+    /// True when `--ui-test-no-entitlements` is passed. `PurchaseStore` then
+    /// starts with an empty owned-set and neither walks `currentEntitlements`
+    /// nor listens for transaction updates, so "the free viewer never exposes
+    /// a paid affordance" XCUI assertions are hermetic against StoreKit-test
+    /// transactions a developer may have persisted on the machine (e.g. via
+    /// the DEBUG grant toggle's real-purchase sibling).
+    static var forceNoEntitlements: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-no-entitlements")
+    }
+
+    /// True when `--ui-test-export-wfdb` is passed. BedsideView confirms a
+    /// synthetic candidate region and runs the WFDB export end-to-end (amber
+    /// filter → writer → `<base>.mur` beside the fixture), then publishes the
+    /// result on the `ui-test-wfdb-export` accessibility leaf. Bypasses the
+    /// export confirmation dialog and the toolbar click so XCUI can assert the
+    /// exported count + annotator suffix — the plumbing snapshot/unit tests
+    /// can't reach.
+    static var exportWFDBFindings: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-export-wfdb")
+    }
+
+    /// True when `--ui-test-seed-confirmed-region` is passed. BedsideView
+    /// confirms a synthetic candidate region on appear but does NOT export —
+    /// so `amberFindingCount > 0` enables the export toolbar button and an XCUI
+    /// test can drive the REAL button → confirm alert → write path (the path
+    /// the `--ui-test-export-wfdb` bypass deliberately skips). This is what
+    /// reproduces a crash IN the export affordance itself.
+    static var seedConfirmedRegion: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-seed-confirmed-region")
+    }
+
+    /// True when `--ui-test-author-range` is passed. BedsideView invokes the
+    /// drag-to-author handler directly with a fixed time range (a real
+    /// DragGesture isn't XCUI-drivable on macOS, same as pan/zoom), creating +
+    /// persisting a range finding, and publishes the authored-finding count on
+    /// the `ui-test-authored-count` leaf. Exercises the author→persist→render
+    /// plumbing end-to-end without the gesture.
+    static var authorRange: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-author-range")
+    }
+
     /// True when `--ui-test-expand-all-findings-groups` is passed.
     /// The review-queue rail reads this and initialises its expanded-
     /// groups set to include every category, so exemplar rows

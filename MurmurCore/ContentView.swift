@@ -13,6 +13,19 @@ public struct ContentView: View {
     @State private var errorMessage: String?
     @State private var currentImportTask: Task<Void, Never>?
     @State private var recentsStore = RecentFoldersStore()
+    /// Bridge for the File → Open Session… menu command (Scene-level, can't
+    /// reach this view's state directly). Finder double-clicks arrive via
+    /// `.onOpenURL` and share the same `openMurPackage` loader.
+    @State private var docCoordinator = SessionDocumentCoordinator.shared
+    /// A header-less CSV awaiting metadata from the import dialog.
+    @State private var pendingCSV: PendingCSVImport?
+
+    struct PendingCSVImport: Identifiable {
+        let id = UUID()
+        let url: URL
+        let columnCount: Int
+        var refusalMessage: String?
+    }
 
     public init() {}
 
@@ -64,7 +77,129 @@ public struct ContentView: View {
         .task {
             #if DEBUG
             loadUITestSampleIfRequested()
+            openUITestSessionIfRequested()
+            openUITestCSVIfRequested()
+            openUITestHeaderlessCSVIfRequested()
             #endif
+        }
+        .sheet(item: $pendingCSV) { pending in
+            CSVImportDialog(
+                fileName: pending.url.lastPathComponent,
+                columnCount: pending.columnCount,
+                refusalMessage: pending.refusalMessage,
+                onImport: { draft in importCSV(pending, draft: draft) },
+                onCancel: { pendingCSV = nil }
+            )
+        }
+        // Finder double-click / `open` routes here (both .mur and .csv).
+        .onOpenURL { url in open(url) }
+        // File → Open Session… / Import CSV… bridge through the coordinator.
+        .onChange(of: docCoordinator.openRequestURL) { _, url in
+            guard let url else { return }
+            open(url)
+            docCoordinator.openRequestURL = nil
+        }
+    }
+
+    /// Dispatches an opened file by extension: `.csv` converts through the CSV
+    /// importer, everything else is treated as a `.mur` session package.
+    private func open(_ url: URL) {
+        if url.pathExtension.lowercased() == "csv" {
+            openCSV(url)
+        } else {
+            openMurPackage(url)
+        }
+    }
+
+    /// The free viewer's CSV on-ramp. A CSV that carries a complete `#` header
+    /// block converts + presents directly; a header-less one opens the import
+    /// dialog to collect the metadata (the RUO surface). Any other refusal
+    /// surfaces its single reason.
+    private func openCSV(_ url: URL) {
+        let needsScope = url.startAccessingSecurityScopedResource()
+        defer { if needsScope { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url) else {
+            errorMessage = "Couldn't read \(url.lastPathComponent)."
+            return
+        }
+        do {
+            let parsed = try CSVImport.parse(data: data, dialogMetadata: nil)
+            try presentParsedCSV(parsed, url: url)
+        } catch let refusal as CSVImport.Refusal where refusal.reason == .incompleteMetadata {
+            pendingCSV = PendingCSVImport(
+                url: url,
+                columnCount: CSVImport.detectColumnCount(data: data) ?? 0,
+                refusalMessage: nil
+            )
+        } catch let refusal as CSVImport.Refusal {
+            errorMessage = refusal.message
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Re-parses the pending CSV with the dialog-supplied metadata and presents
+    /// it. A refusal keeps the dialog open with the reason (same sheet identity
+    /// so the analyst's edits survive) rather than starting over.
+    private func importCSV(_ pending: PendingCSVImport, draft: CSVImport.Draft) {
+        let url = pending.url
+        let needsScope = url.startAccessingSecurityScopedResource()
+        defer { if needsScope { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url) else {
+            pendingCSV = nil
+            errorMessage = "Couldn't read \(url.lastPathComponent)."
+            return
+        }
+        do {
+            let metadata = try draft.metadata(columnCount: pending.columnCount)
+            let parsed = try CSVImport.parse(data: data, dialogMetadata: metadata)
+            pendingCSV = nil
+            try presentParsedCSV(parsed, url: url)
+        } catch let refusal as CSVImport.Refusal {
+            pendingCSV?.refusalMessage = refusal.message
+        } catch {
+            pendingCSV = nil
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Converts a parsed CSV to a WFDB record in a scratch dir, imports it, and
+    /// presents it — the same `directView` path everything else uses.
+    private func presentParsedCSV(_ parsed: CSVImport.Parsed, url: URL) throws {
+        let recordName = sanitizedRecordName(url.deletingPathExtension().lastPathComponent)
+        let workingDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("csv-import-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: workingDirectory, withIntermediateDirectories: true)
+        let heaURL = try CSVImport.writeWFDBRecord(parsed, recordName: recordName, in: workingDirectory)
+        let summary = try WFDBImporter.importRecord(heaURL: heaURL, outputDirectory: workingDirectory)
+        setAppState(.directView(directory: summary.directory, recording: summary.recording))
+    }
+
+    /// WFDB record names are bare tokens; map anything else to `_`.
+    private func sanitizedRecordName(_ name: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        let mapped = String(name.unicodeScalars.map { allowed.contains($0) ? Character($0) : "_" })
+        return mapped.isEmpty ? "csv" : mapped
+    }
+
+    // MARK: - Native .mur session open
+
+    /// Reads a `.mur` document package into a scratch working directory, loads
+    /// its recording, and presents it — the same `directView` path the folder
+    /// import and sample fixture use. The working directory must outlive the
+    /// viewing session (channel binaries are read lazily from it), so it lives
+    /// under a unique temp subdirectory rather than being cleaned up here.
+    private func openMurPackage(_ url: URL) {
+        let needsScope = url.startAccessingSecurityScopedResource()
+        defer { if needsScope { url.stopAccessingSecurityScopedResource() } }
+        do {
+            let workingDirectory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("mur-session-\(UUID().uuidString)", isDirectory: true)
+            let result = try MurSessionPackage.read(packageURL: url, into: workingDirectory)
+            let recording = try RecordingStore.shared.loadManifest(at: result.recordingDirectory)
+            setAppState(.directView(directory: result.recordingDirectory, recording: recording))
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
@@ -374,6 +509,64 @@ public struct ContentView: View {
         }
         if args.contains("--ui-test-load-prepped-bundle") {
             loadPreppedLargeBundleForTesting()
+        }
+    }
+
+    /// `--ui-test-open-sample-session`: package a synthetic fixture into a
+    /// `.mur` and open it through the real loader, so an XCUI test can assert
+    /// the full read → loadManifest → present chain (the NSOpenPanel itself is
+    /// XCUI-hostile, like the folder picker).
+    private func openUITestSessionIfRequested() {
+        guard ProcessInfo.processInfo.arguments.contains("--ui-test-open-sample-session") else { return }
+        do {
+            let fixtureDir = try SyntheticRecording.makeFixture()
+            let recording = try RecordingStore.shared.loadManifest(at: fixtureDir)
+            let packageURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("ui-test-\(UUID().uuidString).mur")
+            try MurSessionPackage.write(recording: recording, recordingDirectory: fixtureDir, to: packageURL)
+            openMurPackage(packageURL)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// `--ui-test-open-sample-csv`: write a header-block CSV to a temp file and
+    /// drive the real CSV open → convert → import → present chain (the
+    /// NSOpenPanel is XCUI-hostile), so a test can assert a CSV lands in the
+    /// viewer.
+    private func openUITestCSVIfRequested() {
+        guard ProcessInfo.processInfo.arguments.contains("--ui-test-open-sample-csv") else { return }
+        let csv = """
+        # index_kind: sample_number
+        # sample_rate_hz: 250
+        # num_channels: 1
+        # lead_names: II
+        # amplitude_encoding: adc_counts
+        0,10
+        1,11
+        2,12
+        """
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ui-test-\(UUID().uuidString).csv")
+        do {
+            try Data(csv.utf8).write(to: url)
+            openCSV(url)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// `--ui-test-open-headerless-csv`: open a CSV with NO header block so the
+    /// import dialog presents — asserts the header-less → dialog routing.
+    private func openUITestHeaderlessCSVIfRequested() {
+        guard ProcessInfo.processInfo.arguments.contains("--ui-test-open-headerless-csv") else { return }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ui-test-\(UUID().uuidString).csv")
+        do {
+            try Data("0,10\n1,11\n2,12".utf8).write(to: url)
+            openCSV(url)
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 

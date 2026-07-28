@@ -230,9 +230,11 @@ struct WFDBSampleDecoderTests {
 
     @Test("Format 212: decodes two samples packed in 3 bytes")
     func decodesTwoSamplesF212() throws {
-        // A = 995 = 0x3E3, B = 1011 = 0x3F3
-        // byte[0] = 0xE3, byte[1] = 0x33, byte[2] = 0x3F
-        let rawData = Data([0xE3, 0x33, 0x3F])
+        // A = 995 = 0x3E3, B = 1011 = 0x3F3. WFDB 212: byte1 packs each
+        // sample's HIGH nibble; byte2 is B's low 8 bits.
+        // byte[0] = 0xE3, byte[1] = (B[11:8]=3)<<4 | (A[11:8]=3) = 0x33,
+        // byte[2] = B[7:0] = 0xF3
+        let rawData = Data([0xE3, 0x33, 0xF3])
         let signal = makeSignal212(gain: 200, baseline: 0)
         let result = try WFDBSampleDecoder.decodeFormat212(
             data: rawData, signals: [signal], declaredSampleCount: 2
@@ -243,13 +245,11 @@ struct WFDBSampleDecoderTests {
 
     @Test("Format 212: sign-extends negative 12-bit values correctly")
     func signExtendsNegativeF212() throws {
-        // Encode -1 as a 12-bit two's complement value = 0xFFF
-        // byte[0] = 0xFF, byte[1] = 0xF_ (low nibble = 0xF), need a second sample to fill nibble
-        // Let's encode A = -1 (0xFFF), B = 1 (0x001)
-        // byte[0] = 0xFF (A[7:0])
-        // byte[1] = B[3:0]<<4 | A[11:8] = 0x1<<4 | 0xF = 0x1F
-        // byte[2] = B[11:4] = 0x00
-        let rawData = Data([0xFF, 0x1F, 0x00])
+        // A = -1 (0xFFF two's complement), B = 1 (0x001). WFDB 212: byte1
+        // packs each sample's HIGH nibble; byte2 is B's low 8 bits.
+        // byte[0] = 0xFF (A[7:0]); byte[1] = (B[11:8]=0)<<4 | (A[11:8]=0xF) = 0x0F;
+        // byte[2] = B[7:0] = 0x01
+        let rawData = Data([0xFF, 0x0F, 0x01])
         let signal = makeSignal212(gain: 1, baseline: 0)
         let result = try WFDBSampleDecoder.decodeFormat212(
             data: rawData, signals: [signal], declaredSampleCount: 2
@@ -277,10 +277,12 @@ struct WFDBSampleDecoderTests {
 
     // MARK: Edge cases — added for fuller decoder coverage
 
-    /// Pack 12-bit signed samples into format-212 bytes. Layout per pair:
-    ///   byte[0] = A[7:0]
-    ///   byte[1] = B[3:0]<<4 | A[11:8]
-    ///   byte[2] = B[11:4]
+    /// Pack 12-bit signed samples into format-212 bytes, per the WFDB spec
+    /// (verified against wfdb-python). Layout per pair — byte[1] carries each
+    /// sample's HIGH nibble; byte[2] is the second sample's low 8 bits:
+    ///   byte[0] = s0[7:0]
+    ///   byte[1] = s1[11:8]<<4 | s0[11:8]
+    ///   byte[2] = s1[7:0]
     private func packFormat212(_ samples: [Int]) -> Data {
         var data = Data(capacity: (samples.count + 1) / 2 * 3)
         var i = 0
@@ -288,8 +290,8 @@ struct WFDBSampleDecoderTests {
             let a = UInt16(bitPattern: Int16(samples[i])) & 0xFFF
             let b = UInt16(bitPattern: Int16(samples[i + 1])) & 0xFFF
             data.append(UInt8(a & 0xFF))
-            data.append(UInt8(((b & 0xF) << 4) | ((a >> 8) & 0xF)))
-            data.append(UInt8((b >> 4) & 0xFF))
+            data.append(UInt8((((b >> 8) & 0xF) << 4) | ((a >> 8) & 0xF)))
+            data.append(UInt8(b & 0xFF))
             i += 2
         }
         if i < samples.count {

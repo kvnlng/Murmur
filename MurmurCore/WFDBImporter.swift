@@ -74,6 +74,18 @@ enum WFDBImporter {
         let totalSignals = header.signals.count
         var grandTotalSamples: Int64 = 0
 
+        // Records may reuse a label across signals — VFDB names both leads
+        // "ECG", MIT-BIH sometimes repeats a lead. The label alone therefore
+        // can't key storage: two "ECG" signals would both resolve to
+        // channel_ECG.bin and the second would clobber the first, leaving
+        // every channel pointing at the last-written signal's samples. We key
+        // storage + pyramid files by SIGNAL INDEX (always unique), and
+        // disambiguate the DISPLAY name only when a label actually repeats
+        // (LightWAVE-style "ECG:0" / "ECG:1").
+        let labelOccurrences = Dictionary(grouping: header.signals, by: \.label)
+            .mapValues(\.count)
+        var labelSeen: [String: Int] = [:]
+
         for (signalIdx, signal) in header.signals.enumerated() {
             let signalSamples = allSamples[signalIdx]
             let sampleCount = Int64(signalSamples.count)
@@ -83,7 +95,20 @@ enum WFDBImporter {
             let signalSampleRate = header.sampleRate(for: signal)
             grandTotalSamples += sampleCount
 
-            let storageFileName = "channel_\(safeFileName(signal.label)).bin"
+            // Unique per-signal key for on-disk files (index-prefixed).
+            let storageKey = "\(signalIdx)_\(safeFileName(signal.label))"
+            // Display name: bare label unless it repeats, then suffix the
+            // occurrence index so the two leads are distinguishable.
+            let displayName: String
+            if (labelOccurrences[signal.label] ?? 0) > 1 {
+                let occurrence = labelSeen[signal.label, default: 0]
+                labelSeen[signal.label] = occurrence + 1
+                displayName = "\(signal.label):\(occurrence)"
+            } else {
+                displayName = signal.label
+            }
+
+            let storageFileName = "channel_\(storageKey).bin"
             let storageURL = directory.appendingPathComponent(storageFileName)
 
             let channelHeader = BinaryRecordingHeader(
@@ -95,7 +120,7 @@ enum WFDBImporter {
             try BinaryRecordingFile.write(samples: signalSamples, header: channelHeader, to: storageURL)
 
             let builder = try PyramidBuilder(
-                channelName: signal.label,
+                channelName: storageKey,
                 baseSampleRate: signalSampleRate,
                 startTimeUnixMS: startMS,
                 directory: directory
@@ -105,7 +130,7 @@ enum WFDBImporter {
 
             channels.append(Channel(
                 id: UUID(),
-                name: signal.label,
+                name: displayName,
                 unit: signal.unit,
                 sampleRate: signalSampleRate,
                 startTimeUnixMS: startMS,

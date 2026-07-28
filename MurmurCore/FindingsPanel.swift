@@ -82,10 +82,34 @@ struct FindingsPanel: View {
     @Binding var filter: FindingFilter
     let dispositionStore: DispositionStore
     let isEditing: Bool
+    /// When true, finding jumps preserve the current zoom (the 10 s window
+    /// lock is engaged). Candidate jumps always preserve zoom regardless.
+    var lockZoom: Bool = false
+
+    /// VT/VF model candidates for the current recording, as range
+    /// annotations (source `VTVFCandidateSource.id`). Rendered as ONE
+    /// provenance-tagged group, ranked by model score WITHIN the group —
+    /// never merged into the departure ordering (different measurements).
+    /// Empty when no scan has been applied or the VT/VF IAP isn't owned.
+    var candidates: [Annotation] = []
+    /// Time-region-keyed dispositions for the candidates (survive rescan).
+    /// Distinct from `dispositionStore`, which keys on annotation id.
+    var candidateDispositionStore: VTVFCandidateDispositionStore? = nil
+    /// RUO notice shown on the candidate group header (one of the two
+    /// allowed RUO surfaces; the other is the scan dialog).
+    var regulatoryNotice: String = "RESEARCH USE ONLY — not for diagnosis"
+    /// Operating point the candidates were produced at (τ / min-dur /
+    /// merge-gap / model) — the group's subtitle + citation payload.
+    var parametersCaption: String?
+    /// Structured model provenance recorded onto a disposition when the analyst
+    /// confirms a candidate (sidecar only, never exported to WFDB). Defaulted
+    /// nil so snapshot/other callers stay unaffected.
+    var candidateProvenance: VTVFScanContext.ModelProvenance? = nil
 
     @State private var sort: FindingSort = .structural
     @State private var expandedGroups: Set<String> = []
     @State private var showNormals: Bool = false
+    @State private var candidateGroupExpanded: Bool = true
 
     /// Read of the shared fiducial store so per-annotation departure
     /// scoring can consult the per-patient normal template. Empty
@@ -448,7 +472,7 @@ struct FindingsPanel: View {
 
     @ViewBuilder
     private var queueList: some View {
-        if filtered.isEmpty {
+        if filtered.isEmpty && sortedCandidates.isEmpty {
             ContentUnavailableView(
                 "No findings",
                 systemImage: "magnifyingglass",
@@ -460,6 +484,12 @@ struct FindingsPanel: View {
         } else {
             ScrollView {
                 LazyVStack(spacing: 3) {
+                    // Model candidates lead the queue as one distinct
+                    // group — its score ranking is not comparable with the
+                    // departure ranking below, so it never interleaves.
+                    if !sortedCandidates.isEmpty {
+                        candidateGroupSection
+                    }
                     ForEach(deviationRankedGroups) { group in
                         groupRow(group)
                     }
@@ -555,7 +585,7 @@ struct FindingsPanel: View {
         // label collapses the entire subtree into one hit target.
         HStack(alignment: .center, spacing: 8) {
             Button {
-                jump(to: entry.annotation)
+                jump(to: entry.annotation, preserveZoom: lockZoom)
             } label: {
                 HStack(alignment: .center, spacing: 8) {
                     Circle()
@@ -890,17 +920,25 @@ struct FindingsPanel: View {
 
     // MARK: - Jump
 
-    private func jump(to ann: Annotation) {
-        let centerSample = (ann.sampleIndex + ann.renderEndSample) / 2
+    /// Recenter the viewport on `ann`.
+    ///
+    /// `preserveZoom` keeps the analyst's current time window (only pans,
+    /// centering on the finding's onset) — used for candidate jumps and for
+    /// any jump while the 10 s window lock is on, so the window never shifts
+    /// out from under someone thinking in fixed time spans. When false, a
+    /// range finding zooms to fit its span with lead-in context.
+    private func jump(to ann: Annotation, preserveZoom: Bool = false) {
         let total = viewport.totalSamples
         guard total > 0 else { return }
-        if ann.kind == .range, let endSample = ann.endSampleIndex {
+        if !preserveZoom, ann.kind == .range, let endSample = ann.endSampleIndex {
             let spanSamples = endSample - ann.sampleIndex
             let context = max(spanSamples * 2, Int64(sampleRate * 5))
             viewport.setWidth(spanSamples + context, anchorFraction: 0.5)
         }
-        let fraction = Double(centerSample) / Double(total)
-        viewport.animateJump(toFraction: fraction)
+        let centerSample = preserveZoom
+            ? ann.sampleIndex                              // onset
+            : (ann.sampleIndex + ann.renderEndSample) / 2  // midpoint
+        viewport.animateJump(toFraction: Double(centerSample) / Double(total))
     }
 
     private func formatTime(_ sample: Int64) -> String {
@@ -915,6 +953,275 @@ struct FindingsPanel: View {
         return String(format: "%d:%05.2f",
                       Int(s / 60),
                       s.truncatingRemainder(dividingBy: 60))
+    }
+
+    // MARK: - VT/VF candidate group
+    //
+    // Candidates enter the EXISTING queue as ONE provenance-tagged group,
+    // ranked by MODEL SCORE within the group only. Rows state COORDINATES,
+    // never conclusions — the app never composes "VT detected". All model
+    // output is NEUTRAL ink; amber appears only once a candidate is
+    // confirmed into an analyst finding. Dispositions route to the
+    // time-region store so they survive a rescan.
+    // (project_vtvf_candidate_review_flow.md)
+
+    /// Candidates ranked by model score (confidence), descending.
+    private var sortedCandidates: [Annotation] {
+        candidates.sorted { ($0.confidence ?? 0) > ($1.confidence ?? 0) }
+    }
+
+    private var candidateGroupSection: some View {
+        VStack(spacing: 0) {
+            candidateGroupHeader
+            if candidateGroupExpanded {
+                VStack(spacing: 1) {
+                    ForEach(Array(sortedCandidates.enumerated()), id: \.element.id) { index, cand in
+                        candidateRow(rank: index, candidate: cand)
+                    }
+                }
+                .padding(.leading, 28)
+                .padding(.trailing, 4)
+                .padding(.bottom, 4)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("vtvf-candidate-group")
+        // Reliable, addressable count leaf (the container id itself isn't
+        // always matchable through the ScrollView/LazyVStack — see
+        // project_swiftui_accessibility_contain).
+        .overlay(alignment: .topLeading) {
+            Color.clear
+                .frame(width: 1, height: 1)
+                .accessibilityIdentifier("vtvf-candidate-count")
+                .accessibilityLabel("\(sortedCandidates.count)")
+                .allowsHitTesting(false)
+        }
+    }
+
+    private var candidateGroupHeader: some View {
+        Button {
+            candidateGroupExpanded.toggle()
+        } label: {
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: candidateGroupExpanded ? "chevron.down" : "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 9)
+                // Neutral slate dot — model output is never painted in a
+                // caution hue (RUO).
+                Circle()
+                    .fill(Color.secondary)
+                    .frame(width: 9, height: 9)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text("Candidate VT/VF episodes")
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(.primary)
+                        ruoBadge
+                    }
+                    Text(candidateSubtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 4)
+                Text("\(sortedCandidates.count)")
+                    .font(.callout.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(
+            RoundedRectangle(cornerRadius: 7)
+                .fill(candidateGroupExpanded ? Color.secondary.opacity(0.05) : Color.clear)
+        )
+        .accessibilityIdentifier("vtvf-candidate-group-header")
+    }
+
+    /// The RUO badge — one of the two allowed surfaces (the scan dialog
+    /// header is the other). Keeping it to exactly these two is what keeps
+    /// it credible (feedback_research_use_only_framing.md).
+    private var ruoBadge: some View {
+        Text("RUO")
+            .font(.caption2.weight(.bold))
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(Capsule().fill(Color.secondary.opacity(0.15)))
+            .overlay(Capsule().stroke(Color.secondary.opacity(0.35), lineWidth: 0.5))
+            .foregroundStyle(.secondary)
+            .help(regulatoryNotice)
+            .accessibilityLabel("Research use only")
+    }
+
+    private var candidateSubtitle: String {
+        var parts = ["Ranked by model score — not comparable with departure ranking"]
+        if let caption = parametersCaption, !caption.isEmpty {
+            parts.append(caption)
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func candidateRow(rank: Int, candidate: Annotation) -> some View {
+        let start = candidate.sampleIndex
+        let end = candidate.renderEndSample
+        let state = candidateDispositionStore?.state(forStart: start, end: end)
+        let score = candidate.confidence ?? 0
+        return HStack(alignment: .center, spacing: 8) {
+            Button {
+                jump(to: candidate, preserveZoom: true)
+            } label: {
+                HStack(alignment: .center, spacing: 8) {
+                    candidateStateGlyph(state)
+                    VStack(alignment: .leading, spacing: 1) {
+                        // Coordinates, never a conclusion.
+                        Text("\(formatTime(start))–\(formatTime(end))")
+                            .font(.caption.monospaced().weight(.semibold))
+                            .foregroundStyle(.primary)
+                        Text("\(candidateDurationLabel(start: start, end: end)) · score \(String(format: "%.2f", score))")
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 4)
+                    candidateScoreBar(score)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("vtvf-candidate-row-\(rank)")
+
+            if isEditing, candidateDispositionStore != nil {
+                candidateDispositionButtons(rank: rank, start: start, end: end, hasRecord: state != nil)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .opacity(state == .dismissed ? 0.5 : 1.0)
+        // Addressable disposition state for XCUI wire-up assertions. A
+        // dedicated hidden leaf carrying the state as its accessibilityLabel
+        // reads reliably from XCUI (the ui-test-viewport-state pattern) —
+        // a value on a children:.contain container does not.
+        .overlay(alignment: .topLeading) {
+            Color.clear
+                .frame(width: 1, height: 1)
+                .accessibilityIdentifier("vtvf-candidate-state-\(rank)")
+                .accessibilityLabel(candidateStateLabel(state))
+                .allowsHitTesting(false)
+        }
+    }
+
+    /// Confirmed = amber (the only place amber is allowed for a candidate).
+    /// Unreviewed / dismissed stay neutral.
+    @ViewBuilder
+    private func candidateStateGlyph(_ state: AnnotationDisposition.State?) -> some View {
+        switch state {
+        case .confirmed:
+            Image(systemName: "checkmark.seal.fill")
+                .font(.caption2)
+                .foregroundStyle(.orange)
+        case .dismissed:
+            Image(systemName: "xmark.circle")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        case nil:
+            Circle()
+                .fill(Color.secondary)
+                .frame(width: 6, height: 6)
+        }
+    }
+
+    private func candidateStateLabel(_ state: AnnotationDisposition.State?) -> String {
+        switch state {
+        case .confirmed: return "confirmed"
+        case .dismissed: return "dismissed"
+        case nil:        return "unreviewed"
+        }
+    }
+
+    private func candidateDurationLabel(start: Int64, end: Int64) -> String {
+        guard sampleRate > 0 else { return "—" }
+        let seconds = Double(end - start) / sampleRate
+        if seconds >= 60 {
+            return String(format: "%d:%02d min", Int(seconds / 60), Int(seconds.truncatingRemainder(dividingBy: 60)))
+        }
+        return String(format: "%.1f s", seconds)
+    }
+
+    /// Neutral score bar — magnitude only, no caution colouring.
+    private func candidateScoreBar(_ score: Double) -> some View {
+        let clamped = min(1, max(0, score))
+        return ZStack(alignment: .leading) {
+            Capsule().fill(Color.secondary.opacity(0.12))
+            GeometryReader { geo in
+                Capsule()
+                    .fill(Color.secondary.opacity(0.55))
+                    .frame(width: geo.size.width * clamped)
+            }
+        }
+        .frame(width: 44, height: 5)
+    }
+
+    /// Confirms a candidate region, stamping the current model provenance onto
+    /// the disposition record (sidecar only — never exported to WFDB).
+    private func confirmCandidate(start: Int64, end: Int64, kind: AnnotationDisposition.ConfirmedKind?) {
+        candidateDispositionStore?.confirm(
+            start: start,
+            end: end,
+            kind: kind,
+            modelIdentifier: candidateProvenance?.modelIdentifier,
+            modelVersion: candidateProvenance?.modelVersion,
+            tauAtConfirmation: candidateProvenance?.tau
+        )
+    }
+
+    private func candidateDispositionButtons(rank: Int, start: Int64, end: Int64, hasRecord: Bool) -> some View {
+        HStack(spacing: 3) {
+            Menu {
+                Button("Confirm as VT") {
+                    confirmCandidate(start: start, end: end, kind: .vt)
+                }
+                Button("Confirm as VF") {
+                    confirmCandidate(start: start, end: end, kind: .vf)
+                }
+                Button("Confirm (unsure)") {
+                    confirmCandidate(start: start, end: end, kind: .unclassified)
+                }
+            } label: {
+                Image(systemName: "checkmark.circle")
+                    .foregroundStyle(.green)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Confirm this candidate as an analyst finding")
+            .accessibilityIdentifier("vtvf-candidate-confirm-\(rank)")
+
+            Button {
+                candidateDispositionStore?.dismiss(start: start, end: end)
+            } label: {
+                Image(systemName: "xmark.circle")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Dismiss this candidate as a false positive")
+            .accessibilityIdentifier("vtvf-candidate-dismiss-\(rank)")
+
+            if hasRecord {
+                Button {
+                    candidateDispositionStore?.reset(start: start, end: end)
+                } label: {
+                    Image(systemName: "arrow.uturn.backward.circle")
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Mark as unreviewed")
+                .accessibilityIdentifier("vtvf-candidate-reset-\(rank)")
+            }
+        }
+        .font(.caption)
     }
 }
 
