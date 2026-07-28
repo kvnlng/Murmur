@@ -69,6 +69,47 @@ public struct MurSessionManifest: Codable, Equatable, Sendable {
     }
 }
 
+/// The `session.json` schema — UI/session state so a reopen lands the analyst
+/// back where they were. Plain snapshot; all optional so partial/older sessions
+/// decode. The app composes/consumes it (X14-D); this is the shape it round-trips.
+public struct MurSessionState: Codable, Equatable, Sendable {
+    public var viewportStartSample: Int64?
+    public var viewportEndSample: Int64?
+    public var focusedChannelName: String?
+    public var windowLockedTo10s: Bool?
+    public var selectedTrendMetric: String?
+    public var selectedBinPreset: String?
+    /// VT/VF scan operating point in effect.
+    public var tau: Double?
+    public var minDurationSeconds: Double?
+    public var mergeGapSeconds: Double?
+    public var scanScopeWholeRecording: Bool?
+
+    public init(
+        viewportStartSample: Int64? = nil,
+        viewportEndSample: Int64? = nil,
+        focusedChannelName: String? = nil,
+        windowLockedTo10s: Bool? = nil,
+        selectedTrendMetric: String? = nil,
+        selectedBinPreset: String? = nil,
+        tau: Double? = nil,
+        minDurationSeconds: Double? = nil,
+        mergeGapSeconds: Double? = nil,
+        scanScopeWholeRecording: Bool? = nil
+    ) {
+        self.viewportStartSample = viewportStartSample
+        self.viewportEndSample = viewportEndSample
+        self.focusedChannelName = focusedChannelName
+        self.windowLockedTo10s = windowLockedTo10s
+        self.selectedTrendMetric = selectedTrendMetric
+        self.selectedBinPreset = selectedBinPreset
+        self.tau = tau
+        self.minDurationSeconds = minDurationSeconds
+        self.mergeGapSeconds = mergeGapSeconds
+        self.scanScopeWholeRecording = scanScopeWholeRecording
+    }
+}
+
 public enum MurSessionError: LocalizedError, Equatable {
     case missingManifest
     case unsupportedFormatVersion(Int)
@@ -120,6 +161,7 @@ public enum MurSessionPackage {
         recordingDirectory: URL,
         provenanceJSON: Data? = nil,
         sessionJSON: Data? = nil,
+        cacheBlobs: [String: Data] = [:],
         to packageURL: URL,
         now: Date = .now
     ) throws -> MurSessionManifest {
@@ -150,8 +192,13 @@ public enum MurSessionPackage {
 
         if let provenanceJSON { children[provenanceFile] = FileWrapper(regularFileWithContents: provenanceJSON) }
         if let sessionJSON { children[sessionFile] = FileWrapper(regularFileWithContents: sessionJSON) }
-        // cache/ — present but empty until X14-C populates it.
-        children[cacheDir] = FileWrapper(directoryWithFileWrappers: [:])
+        // cache/ — pre-encoded (stamped) blobs from the compute layer. Opaque
+        // here; each is a MurSessionCache blob carrying its own version stamp.
+        var cacheChildren: [String: FileWrapper] = [:]
+        for (key, blob) in cacheBlobs {
+            cacheChildren[key] = FileWrapper(regularFileWithContents: blob)
+        }
+        children[cacheDir] = FileWrapper(directoryWithFileWrappers: cacheChildren)
 
         let manifest = MurSessionManifest(
             formatVersion: MurSessionManifest.currentFormatVersion,
@@ -181,6 +228,10 @@ public enum MurSessionPackage {
         public let recordingDirectory: URL
         public let provenanceJSON: Data?
         public let sessionJSON: Data?
+        /// Directory holding the restored cache blobs (may be empty). Each blob
+        /// is validated + inflated via `MurSessionCache.decode(_:expected:)`
+        /// against the running app's stamp — a miss just recomputes.
+        public let cacheDirectory: URL
     }
 
     /// Reads a `.mur` package, reconstituting a working recording directory
@@ -219,11 +270,23 @@ public enum MurSessionPackage {
             try data.write(to: workingDirectory.appendingPathComponent(sidecar.file), options: .atomic)
         }
 
+        // cache/ → working cache dir, blobs verbatim (still stamped; the caller
+        // validates each stamp on use and recomputes on a miss).
+        let cacheDirectoryURL = workingDirectory.appendingPathComponent(cacheDir, isDirectory: true)
+        try fm.createDirectory(at: cacheDirectoryURL, withIntermediateDirectories: true)
+        if let cache = children[cacheDir]?.fileWrappers {
+            for (key, wrapper) in cache {
+                guard let blob = wrapper.regularFileContents else { continue }
+                try blob.write(to: cacheDirectoryURL.appendingPathComponent(key), options: .atomic)
+            }
+        }
+
         return ReadResult(
             manifest: manifest,
             recordingDirectory: workingDirectory,
             provenanceJSON: children[provenanceFile]?.regularFileContents,
-            sessionJSON: children[sessionFile]?.regularFileContents
+            sessionJSON: children[sessionFile]?.regularFileContents,
+            cacheDirectory: cacheDirectoryURL
         )
     }
 

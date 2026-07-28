@@ -103,6 +103,48 @@ struct MurSessionPackageTests {
         #expect(try Data(contentsOf: out.appendingPathComponent("ch0.bin")) == rawChannel)
     }
 
+    @Test("Session state round-trips through the package's session.json slot")
+    func sessionStateRoundTrips() throws {
+        let (dir, recording, _) = try makeBundle()
+        let pkg = try tempDir("pkg").appendingPathComponent("Session.mur")
+        let state = MurSessionState(
+            viewportStartSample: 500, viewportEndSample: 3000,
+            focusedChannelName: "II", windowLockedTo10s: true,
+            selectedTrendMetric: "QTc", selectedBinPreset: "twoMinutes",
+            tau: 0.87, minDurationSeconds: 4, mergeGapSeconds: 5,
+            scanScopeWholeRecording: true
+        )
+        let sessionJSON = try JSONEncoder().encode(state)
+        try MurSessionPackage.write(recording: recording, recordingDirectory: dir,
+                                    sessionJSON: sessionJSON, to: pkg)
+
+        let out = try tempDir("open")
+        let result = try MurSessionPackage.read(packageURL: pkg, into: out)
+        let decoded = try JSONDecoder().decode(MurSessionState.self, from: #require(result.sessionJSON))
+        #expect(decoded == state)
+    }
+
+    @Test("Cache blobs restore and honor the stamp discipline through the package")
+    func cacheRoundTripAndInvalidation() throws {
+        let (dir, recording, _) = try makeBundle()
+        let pkg = try tempDir("pkg").appendingPathComponent("Session.mur")
+        let stamp = CacheStamp(producer: "delineator", version: "v2", parametersKey: "qtc=fridericia")
+        let payload = Data([0xAA, 0xBB, 0xCC])
+        let blob = try MurSessionCache.encode(stamp: stamp, payload: payload)
+
+        try MurSessionPackage.write(recording: recording, recordingDirectory: dir,
+                                    cacheBlobs: ["fiducials.blob": blob], to: pkg)
+
+        let out = try tempDir("open")
+        let result = try MurSessionPackage.read(packageURL: pkg, into: out)
+        let restored = try Data(contentsOf: result.cacheDirectory.appendingPathComponent("fiducials.blob"))
+        // Same app stamp → cache hit.
+        #expect(MurSessionCache.decode(restored, expected: stamp) == payload)
+        // Newer delineator → cache miss → recompute.
+        let newer = CacheStamp(producer: "delineator", version: "v3", parametersKey: "qtc=fridericia")
+        #expect(MurSessionCache.decode(restored, expected: newer) == nil)
+    }
+
     @Test("Refuses a newer format version rather than misreading it")
     func refusesNewerVersion() throws {
         // Hand-build a package whose manifest claims a future format.
