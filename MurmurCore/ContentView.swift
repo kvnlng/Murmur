@@ -69,16 +69,58 @@ public struct ContentView: View {
             #if DEBUG
             loadUITestSampleIfRequested()
             openUITestSessionIfRequested()
+            openUITestCSVIfRequested()
             #endif
         }
-        // Finder double-click / `open` of a .mur routes here.
-        .onOpenURL { url in openMurPackage(url) }
-        // File → Open Session… command bridges through the coordinator.
+        // Finder double-click / `open` routes here (both .mur and .csv).
+        .onOpenURL { url in open(url) }
+        // File → Open Session… / Import CSV… bridge through the coordinator.
         .onChange(of: docCoordinator.openRequestURL) { _, url in
             guard let url else { return }
-            openMurPackage(url)
+            open(url)
             docCoordinator.openRequestURL = nil
         }
+    }
+
+    /// Dispatches an opened file by extension: `.csv` converts through the CSV
+    /// importer, everything else is treated as a `.mur` session package.
+    private func open(_ url: URL) {
+        if url.pathExtension.lowercased() == "csv" {
+            openCSV(url)
+        } else {
+            openMurPackage(url)
+        }
+    }
+
+    /// Converts a header-block CSV to a WFDB record and presents it — the free
+    /// viewer's CSV on-ramp. Header-less CSVs refuse with `.incompleteMetadata`
+    /// until the import dialog (X15-C2) collects the metadata; that message is
+    /// surfaced as-is for now.
+    private func openCSV(_ url: URL) {
+        let needsScope = url.startAccessingSecurityScopedResource()
+        defer { if needsScope { url.stopAccessingSecurityScopedResource() } }
+        do {
+            let data = try Data(contentsOf: url)
+            let parsed = try CSVImport.parse(data: data, dialogMetadata: nil)
+            let recordName = sanitizedRecordName(url.deletingPathExtension().lastPathComponent)
+            let workingDirectory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("csv-import-\(UUID().uuidString)", isDirectory: true)
+            try FileManager.default.createDirectory(at: workingDirectory, withIntermediateDirectories: true)
+            let heaURL = try CSVImport.writeWFDBRecord(parsed, recordName: recordName, in: workingDirectory)
+            let summary = try WFDBImporter.importRecord(heaURL: heaURL, outputDirectory: workingDirectory)
+            setAppState(.directView(directory: summary.directory, recording: summary.recording))
+        } catch let refusal as CSVImport.Refusal {
+            errorMessage = refusal.message
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// WFDB record names are bare tokens; map anything else to `_`.
+    private func sanitizedRecordName(_ name: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        let mapped = String(name.unicodeScalars.map { allowed.contains($0) ? Character($0) : "_" })
+        return mapped.isEmpty ? "csv" : mapped
     }
 
     // MARK: - Native .mur session open
@@ -424,6 +466,32 @@ public struct ContentView: View {
                 .appendingPathComponent("ui-test-\(UUID().uuidString).mur")
             try MurSessionPackage.write(recording: recording, recordingDirectory: fixtureDir, to: packageURL)
             openMurPackage(packageURL)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// `--ui-test-open-sample-csv`: write a header-block CSV to a temp file and
+    /// drive the real CSV open → convert → import → present chain (the
+    /// NSOpenPanel is XCUI-hostile), so a test can assert a CSV lands in the
+    /// viewer.
+    private func openUITestCSVIfRequested() {
+        guard ProcessInfo.processInfo.arguments.contains("--ui-test-open-sample-csv") else { return }
+        let csv = """
+        # index_kind: sample_number
+        # sample_rate_hz: 250
+        # num_channels: 1
+        # lead_names: II
+        # amplitude_encoding: adc_counts
+        0,10
+        1,11
+        2,12
+        """
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ui-test-\(UUID().uuidString).csv")
+        do {
+            try Data(csv.utf8).write(to: url)
+            openCSV(url)
         } catch {
             errorMessage = error.localizedDescription
         }

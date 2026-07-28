@@ -65,6 +65,7 @@ struct MurmurApp: App {
             CommandGroup(after: .newItem) {
                 Button("Open Session…") { openSessionPanel() }
                     .keyboardShortcut("o", modifiers: .command)
+                Button("Import CSV…") { importCSVPanel() }
                 Button("Save Session As…") { saveSessionPanel() }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
             }
@@ -156,6 +157,19 @@ struct MurmurApp: App {
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         if let type = Self.sessionType { panel.allowedContentTypes = [type] }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        SessionDocumentCoordinator.shared.requestOpen(url)
+    }
+
+    /// Picks a CSV and hands it to ContentView to convert + present (free
+    /// viewer's CSV on-ramp). Header-less CSVs surface an "add metadata" refusal
+    /// until the import dialog (X15-C2) lands.
+    @MainActor private func importCSVPanel() {
+        let panel = NSOpenPanel()
+        panel.title = "Import CSV"
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.commaSeparatedText]
         guard panel.runModal() == .OK, let url = panel.url else { return }
         SessionDocumentCoordinator.shared.requestOpen(url)
     }

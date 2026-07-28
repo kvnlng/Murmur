@@ -29,4 +29,16 @@ final class MurmurUISessionTests: XCTestCase {
         XCTAssertTrue(bedside.waitForExistence(timeout: 10),
                       "Opening a .mur package should reconstitute and present its recording")
     }
+
+    @MainActor
+    func testImportHeaderBlockCSVPresentsRecording() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-open-sample-csv"]
+        app.launch()
+
+        let bedside = app.descendants(matching: .any)
+            .matching(identifier: "bedside-view").firstMatch
+        XCTAssertTrue(bedside.waitForExistence(timeout: 10),
+                      "Importing a header-block CSV should convert + present the recording")
+    }
 }
