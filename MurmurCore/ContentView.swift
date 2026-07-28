@@ -13,6 +13,10 @@ public struct ContentView: View {
     @State private var errorMessage: String?
     @State private var currentImportTask: Task<Void, Never>?
     @State private var recentsStore = RecentFoldersStore()
+    /// Bridge for the File → Open Session… menu command (Scene-level, can't
+    /// reach this view's state directly). Finder double-clicks arrive via
+    /// `.onOpenURL` and share the same `openMurPackage` loader.
+    @State private var docCoordinator = SessionDocumentCoordinator.shared
 
     public init() {}
 
@@ -64,7 +68,37 @@ public struct ContentView: View {
         .task {
             #if DEBUG
             loadUITestSampleIfRequested()
+            openUITestSessionIfRequested()
             #endif
+        }
+        // Finder double-click / `open` of a .mur routes here.
+        .onOpenURL { url in openMurPackage(url) }
+        // File → Open Session… command bridges through the coordinator.
+        .onChange(of: docCoordinator.openRequestURL) { _, url in
+            guard let url else { return }
+            openMurPackage(url)
+            docCoordinator.openRequestURL = nil
+        }
+    }
+
+    // MARK: - Native .mur session open
+
+    /// Reads a `.mur` document package into a scratch working directory, loads
+    /// its recording, and presents it — the same `directView` path the folder
+    /// import and sample fixture use. The working directory must outlive the
+    /// viewing session (channel binaries are read lazily from it), so it lives
+    /// under a unique temp subdirectory rather than being cleaned up here.
+    private func openMurPackage(_ url: URL) {
+        let needsScope = url.startAccessingSecurityScopedResource()
+        defer { if needsScope { url.stopAccessingSecurityScopedResource() } }
+        do {
+            let workingDirectory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("mur-session-\(UUID().uuidString)", isDirectory: true)
+            let result = try MurSessionPackage.read(packageURL: url, into: workingDirectory)
+            let recording = try RecordingStore.shared.loadManifest(at: result.recordingDirectory)
+            setAppState(.directView(directory: result.recordingDirectory, recording: recording))
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
@@ -374,6 +408,24 @@ public struct ContentView: View {
         }
         if args.contains("--ui-test-load-prepped-bundle") {
             loadPreppedLargeBundleForTesting()
+        }
+    }
+
+    /// `--ui-test-open-sample-session`: package a synthetic fixture into a
+    /// `.mur` and open it through the real loader, so an XCUI test can assert
+    /// the full read → loadManifest → present chain (the NSOpenPanel itself is
+    /// XCUI-hostile, like the folder picker).
+    private func openUITestSessionIfRequested() {
+        guard ProcessInfo.processInfo.arguments.contains("--ui-test-open-sample-session") else { return }
+        do {
+            let fixtureDir = try SyntheticRecording.makeFixture()
+            let recording = try RecordingStore.shared.loadManifest(at: fixtureDir)
+            let packageURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("ui-test-\(UUID().uuidString).mur")
+            try MurSessionPackage.write(recording: recording, recordingDirectory: fixtureDir, to: packageURL)
+            openMurPackage(packageURL)
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
