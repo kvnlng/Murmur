@@ -526,6 +526,73 @@ public enum CSVImport {
         return false
     }
 
+    // MARK: - Dialog metadata (X15-C2)
+
+    /// Peeks the first data row (skipping a `#` header block) and returns its
+    /// column count, so the import dialog can pre-fill `num_channels` and the
+    /// lead fields. Nil when there's no parseable data row.
+    public static func detectColumnCount(data: Data) -> Int? {
+        guard let text = try? decodeUTF8(data), let lines = try? normalizedLines(text) else { return nil }
+        for line in lines where !line.hasPrefix("#") {
+            return line.components(separatedBy: ",").count
+        }
+        return nil
+    }
+
+    /// Editable fields the import dialog binds to for a header-LESS CSV. It emits
+    /// the SAME key/value shape a `#` header block would, so both metadata
+    /// sources go through one validated builder (`metadata(fromKeyValues:)`).
+    public struct Draft: Equatable, Sendable {
+        public var indexKind: IndexKind = .sampleNumber
+        public var sampleRateHz: String = ""
+        public var leadNamesCSV: String = ""
+        public var isPhysical: Bool = false
+        public var physicalUnit: String = "mV"
+        public var adcResolutionBits: String = "16"
+        public var adcGain: String = "0"
+        public var adcBaseline: String = "0"
+        public var sentinel: SentinelChoice = .none
+        public var sentinelInteger: String = ""
+
+        public enum SentinelChoice: String, CaseIterable, Sendable {
+            case none, emptyCell, nan, integer
+        }
+
+        public init() {}
+
+        /// `num_channels` is authoritative from the file's detected column count
+        /// (index + N signals), never typed — a mismatch would just refuse.
+        public func keyValues(columnCount: Int) -> [String: String] {
+            var kv: [String: String] = [
+                "index_kind": indexKind.rawValue,
+                "num_channels": String(max(0, columnCount - 1)),
+                "lead_names": leadNamesCSV,
+                "amplitude_encoding": isPhysical ? "physical" : "adc_counts",
+                "physical_unit": physicalUnit,
+            ]
+            if !sampleRateHz.trimmingCharacters(in: .whitespaces).isEmpty {
+                kv["sample_rate_hz"] = sampleRateHz.trimmingCharacters(in: .whitespaces)
+            }
+            if !isPhysical {
+                kv["adc_resolution_bits"] = adcResolutionBits
+                kv["adc_gain"] = adcGain
+                kv["adc_baseline"] = adcBaseline
+            }
+            switch sentinel {
+            case .none: break
+            case .emptyCell: kv["sentinel"] = ""
+            case .nan: kv["sentinel"] = "NaN"
+            case .integer: kv["sentinel"] = sentinelInteger
+            }
+            return kv
+        }
+
+        /// Build validated `Metadata` for a file with `columnCount` columns.
+        public func metadata(columnCount: Int) throws -> Metadata {
+            try CSVImport.metadata(fromKeyValues: keyValues(columnCount: columnCount))
+        }
+    }
+
     // MARK: - Convert to a WFDB record (X15-B)
 
     /// Writes the parsed CSV as a WFDB format-16 record (`<recordName>.hea` +

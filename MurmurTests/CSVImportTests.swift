@@ -146,6 +146,35 @@ struct CSVImportTests {
         #expect(viaHeader.gain == viaDialog.gain)
     }
 
+    // MARK: - Dialog draft (X15-C2)
+
+    @Test("Dialog draft builds metadata that parses a header-less CSV")
+    func dialogDraftParsesHeaderlessCSV() throws {
+        let data = Data("0,10,-20\n1,11,-21\n2,12,-22".utf8)
+        let columns = try #require(CSVImport.detectColumnCount(data: data))
+        #expect(columns == 3)
+
+        var draft = CSVImport.Draft()
+        draft.indexKind = .sampleNumber
+        draft.sampleRateHz = "250"
+        draft.leadNamesCSV = "II, V1"
+        draft.isPhysical = false
+        let metadata = try draft.metadata(columnCount: columns)
+        let parsed = try CSVImport.parse(data: data, dialogMetadata: metadata)
+        #expect(parsed.channelSamples == [[10, 11, 12], [-20, -21, -22]])
+        #expect(parsed.sampleRateHz == 250)
+    }
+
+    @Test("Dialog draft with the wrong lead count refuses at metadata build")
+    func dialogDraftLeadCountMismatch() {
+        var draft = CSVImport.Draft()
+        draft.sampleRateHz = "250"
+        draft.leadNamesCSV = "II"   // one name for two signal columns
+        #expect(throws: CSVImport.Refusal.self) {
+            _ = try draft.metadata(columnCount: 3)
+        }
+    }
+
     // MARK: - Sentinel
 
     @Test("Declared sentinel cells become marked-missing at the right indices")

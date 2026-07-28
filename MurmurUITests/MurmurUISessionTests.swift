@@ -41,4 +41,16 @@ final class MurmurUISessionTests: XCTestCase {
         XCTAssertTrue(bedside.waitForExistence(timeout: 10),
                       "Importing a header-block CSV should convert + present the recording")
     }
+
+    @MainActor
+    func testHeaderlessCSVPresentsImportDialog() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-open-headerless-csv"]
+        app.launch()
+
+        let dialog = app.descendants(matching: .any)
+            .matching(identifier: "csv-import-dialog").firstMatch
+        XCTAssertTrue(dialog.waitForExistence(timeout: 10),
+                      "A header-less CSV should open the metadata import dialog")
+    }
 }
