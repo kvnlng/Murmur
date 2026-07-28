@@ -54,7 +54,7 @@ struct MurSessionPackageTests {
             provenanceJSON: provenance, sessionJSON: session, to: pkg
         )
         #expect(manifest.formatVersion == MurSessionManifest.currentFormatVersion)
-        #expect(manifest.sourceStorage == .none)
+        #expect(manifest.sourceStorage == .lzfse)
         #expect(manifest.source.recordingID == recording.id)
         #expect(manifest.source.channelCount == 1)
 
@@ -83,6 +83,24 @@ struct MurSessionPackageTests {
             let readBack = try Data(contentsOf: out.appendingPathComponent(name))
             #expect(readBack == files[name])
         }
+    }
+
+    @Test("Embedded source is LZFSE-compressed on disk yet round-trips exactly")
+    func sourceIsCompressed() throws {
+        let (dir, recording, files) = try makeBundle()
+        let pkg = try tempDir("pkg").appendingPathComponent("Session.mur")
+        try MurSessionPackage.write(recording: recording, recordingDirectory: dir, to: pkg)
+
+        // The stored source blob is the compressed form, not the raw bytes.
+        let storedChannel = try Data(contentsOf: pkg.appendingPathComponent("source/ch0.bin"))
+        let rawChannel = try #require(files["ch0.bin"])
+        let inflated = try MurSessionPackage.decompress(storedChannel)
+        #expect(inflated == rawChannel)
+
+        // And a full open reconstitutes the raw bytes.
+        let out = try tempDir("open")
+        _ = try MurSessionPackage.read(packageURL: pkg, into: out)
+        #expect(try Data(contentsOf: out.appendingPathComponent("ch0.bin")) == rawChannel)
     }
 
     @Test("Refuses a newer format version rather than misreading it")

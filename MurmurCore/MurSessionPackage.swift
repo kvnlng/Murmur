@@ -126,12 +126,14 @@ public enum MurSessionPackage {
         var children: [String: FileWrapper] = [:]
 
         // source/ — the raw recording files (manifest + channel binaries +
-        // pyramids + notes). Uncompressed in Phase A.
+        // pyramids + notes), each LZFSE-compressed so the package stays
+        // portable without bloating. The manifest records `sourceStorage` so
+        // read knows to inflate.
         var sourceChildren: [String: FileWrapper] = [:]
         for name in rawSourceFileNames(for: recording) {
             let url = recordingDirectory.appendingPathComponent(name)
             guard let data = try? Data(contentsOf: url) else { continue }
-            sourceChildren[name] = FileWrapper(regularFileWithContents: data)
+            sourceChildren[name] = FileWrapper(regularFileWithContents: try compress(data))
         }
         children[sourceDir] = FileWrapper(directoryWithFileWrappers: sourceChildren)
 
@@ -157,7 +159,7 @@ public enum MurSessionPackage {
             createdAt: now,
             modifiedAt: now,
             source: sourceIdentity(for: recording),
-            sourceStorage: .none,
+            sourceStorage: .lzfse,
             contents: children.keys.sorted()
         )
         let encoder = JSONEncoder()
@@ -202,10 +204,11 @@ public enum MurSessionPackage {
         let fm = FileManager.default
         try fm.createDirectory(at: workingDirectory, withIntermediateDirectories: true)
 
-        // source/ → working root (Phase A: verbatim; X14-B inflates lzfse here).
+        // source/ → working root, inflating per `sourceStorage`.
         if let source = children[sourceDir]?.fileWrappers {
             for (name, wrapper) in source {
-                guard let data = wrapper.regularFileContents else { continue }
+                guard let stored = wrapper.regularFileContents else { continue }
+                let data = manifest.sourceStorage == .lzfse ? try decompress(stored) : stored
                 try data.write(to: workingDirectory.appendingPathComponent(name), options: .atomic)
             }
         }
@@ -253,5 +256,19 @@ public enum MurSessionPackage {
 
     static var appShortVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+    }
+
+    // MARK: - Compression (Apple-native LZFSE)
+
+    /// LZFSE-compress via Foundation's Compression bridge. An empty input has no
+    /// compressed form, so it round-trips as empty.
+    static func compress(_ data: Data) throws -> Data {
+        guard !data.isEmpty else { return data }
+        return try (data as NSData).compressed(using: .lzfse) as Data
+    }
+
+    static func decompress(_ data: Data) throws -> Data {
+        guard !data.isEmpty else { return data }
+        return try (data as NSData).decompressed(using: .lzfse) as Data
     }
 }
