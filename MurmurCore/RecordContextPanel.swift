@@ -25,6 +25,10 @@ struct RecordContextPanel: View {
     let headerComments: [String]
     let notesURL: URL?
     let isEditing: Bool
+    /// Bound to BedsideView's `@FocusState` so the bedside key commands can
+    /// disable themselves while the analyst is typing here (X22). The notes
+    /// editor is the app's only persistent text-input surface.
+    var editorFocus: FocusState<Bool>.Binding
 
     @State private var notesText: String = ""
     @State private var hasLoadedNotes: Bool = false
@@ -144,6 +148,7 @@ struct RecordContextPanel: View {
             .font(.caption.monospaced())
             .scrollContentBackground(.hidden)
             .frame(minHeight: 60)
+            .focused(editorFocus)
             .onChange(of: notesText) { _, newValue in scheduleSave(newValue) }
             .accessibilityIdentifier("context-notes-editor")
     }

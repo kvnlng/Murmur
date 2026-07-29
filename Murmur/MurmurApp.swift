@@ -75,6 +75,10 @@ struct MurmurApp: App {
                 Button("Save Session As…") { saveSessionPanel() }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
             }
+            // X22: hoist the bedside navigation / disposition keys into real
+            // menu commands so they dispatch through the responder chain
+            // (fixing the intermittent J/K defect) and become discoverable.
+            BedsideCommandMenu()
             // Window menu additions — separate from Help. `openWindow`
             // is only available inside a view scope, so we expose the
             // metrics scene ID and call it from a Button action closure.
@@ -202,5 +206,68 @@ struct MurmurApp: App {
         alert.informativeText = message
         alert.addButton(withTitle: "OK")
         alert.runModal()
+    }
+}
+
+/// The "Navigate" menu (X22). Reads the bedside actions BedsideView publishes
+/// as a focused scene value and exposes them as menu commands with their key
+/// equivalents. Dispatching through the menu/responder chain is the fix for
+/// the intermittent finding-jump keys (they previously lived on a focusable
+/// view that silently lost focus). The bare-key shortcuts are disabled while
+/// the notes editor is focused so they don't intercept typing, and the
+/// disposition commands additionally require edit mode — mirroring the
+/// existing C/D/X gate.
+struct BedsideCommandMenu: Commands {
+    @FocusedValue(\.bedsideCommands) private var commands
+
+    var body: some Commands {
+        CommandMenu("Navigate") {
+            Group {
+                Button("Next Finding") { commands?.nextFinding() }
+                    .keyboardShortcut("j", modifiers: [])
+                Button("Previous Finding") { commands?.previousFinding() }
+                    .keyboardShortcut("k", modifiers: [])
+                Divider()
+                Button("Next Departure Beat") { commands?.nextDeviationBeat() }
+                    .keyboardShortcut("]", modifiers: [])
+                Button("Previous Departure Beat") { commands?.previousDeviationBeat() }
+                    .keyboardShortcut("[", modifiers: [])
+                Divider()
+                Button("Pan Left") { commands?.panLeft() }
+                    .keyboardShortcut(.leftArrow, modifiers: [])
+                Button("Pan Right") { commands?.panRight() }
+                    .keyboardShortcut(.rightArrow, modifiers: [])
+                Button("Zoom In") { commands?.zoomIn() }
+                    .keyboardShortcut("+", modifiers: [])
+                Button("Zoom Out") { commands?.zoomOut() }
+                    .keyboardShortcut("-", modifiers: [])
+            }
+            .disabled(navigationDisabled)
+
+            Divider()
+
+            Group {
+                Button("Confirm Finding") { commands?.confirm() }
+                    .keyboardShortcut("c", modifiers: [])
+                Button("Dismiss Finding") { commands?.dismiss() }
+                    .keyboardShortcut("d", modifiers: [])
+                Button("Reset Finding") { commands?.reset() }
+                    .keyboardShortcut("x", modifiers: [])
+            }
+            .disabled(dispositionDisabled)
+        }
+    }
+
+    /// Pan / zoom / jump: available once a recording is loaded, suppressed
+    /// while the analyst is typing in the notes editor.
+    private var navigationDisabled: Bool {
+        guard let commands else { return true }
+        return commands.textEntryActive
+    }
+
+    /// Disposition additionally requires the recording to be unlocked.
+    private var dispositionDisabled: Bool {
+        guard let commands else { return true }
+        return commands.textEntryActive || !commands.isEditing
     }
 }

@@ -73,6 +73,10 @@ struct BedsideView: View {
     /// interval, bin length, show mode). The lane hides itself when
     /// `markingsContext` has no beats.
     @State private var trendLaneContext = IntervalTrendLaneContext.shared
+    /// True while the notes editor is the first responder. Published into
+    /// `BedsideCommands.textEntryActive` so the App disables the bedside key
+    /// commands during note typing and the editor keeps its keystrokes (X22).
+    @FocusState private var notesEditorFocused: Bool
     /// Analyst-placed threshold guides on the interval trend lane —
     /// user-set only, never built-in clinical cutoffs. Persists to
     /// `<bundle>/interval_guides.json`.
@@ -202,6 +206,29 @@ struct BedsideView: View {
     private func clockString(_ seconds: Double) -> String {
         let total = max(0, Int(seconds.rounded()))
         return String(format: "%d:%02d", total / 60, total % 60)
+    }
+
+    /// The menu-command bridge (X22). Closures mirror the onKeyPress handlers
+    /// exactly — same actions, all operating on reference-type state
+    /// (viewport / markings / disposition store), so they're safe to invoke
+    /// from the menu. `textEntryActive`/`isEditing` are read each body pass so
+    /// the App can disable the shortcuts during note entry / outside editing.
+    private var bedsideCommands: BedsideCommands {
+        BedsideCommands(
+            panLeft: { panByOneViewport(direction: .left) },
+            panRight: { panByOneViewport(direction: .right) },
+            zoomIn: { zoom(factor: 0.8) },
+            zoomOut: { zoom(factor: 1.25) },
+            nextFinding: { jumpToNextFinding() },
+            previousFinding: { jumpToPreviousFinding() },
+            nextDeviationBeat: { jumpToNextDeviationBeat() },
+            previousDeviationBeat: { jumpToPreviousDeviationBeat() },
+            confirm: { _ = dispositionFocused(.confirm) },
+            dismiss: { _ = dispositionFocused(.dismiss) },
+            reset: { _ = dispositionFocused(.reset) },
+            textEntryActive: notesEditorFocused,
+            isEditing: isEditing
+        )
     }
 
     /// VT/VF candidate scan toolbar item — only surfaces when the VT/VF
@@ -345,6 +372,12 @@ struct BedsideView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("bedside-view")
+        // X22: publish the bedside actions as a focused SCENE value so the
+        // "Navigate" menu can drive them through the responder chain (fixes
+        // the intermittent J/K defect) and expose them + their shortcuts in
+        // the menu bar. The onKeyPress handlers above stay as a trace-focused
+        // fallback; the menu is the reliable path.
+        .focusedSceneValue(\.bedsideCommands, bedsideCommands)
         // Invisible accessibility-only element exposing the current
         // viewport range as a label. Lets XCUI tests assert "did a
         // drag/click change the viewport?" without trying to read
@@ -1483,7 +1516,8 @@ struct BedsideView: View {
                     notesURL: recording.notesFileName.map {
                         recordingDirectory.appendingPathComponent($0)
                     },
-                    isEditing: isEditing
+                    isEditing: isEditing,
+                    editorFocus: $notesEditorFocused
                 )
                 // AX2: contain the panel's children so it stops collapsing to
                 // a single element that speaks the decorative doc.text symbol
