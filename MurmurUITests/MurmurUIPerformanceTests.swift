@@ -47,7 +47,7 @@ final class MurmurUIPerformanceTests: XCTestCase {
     /// machine, so we skip them on CI rather than burn the runner budget.
     private func skipSignpostMetricsOnCI() throws {
         if ProcessInfo.processInfo.environment["CI"] != nil {
-            throw XCTSkip("Signpost-based perf metrics skipped on CI — custom-subsystem signposts don't surface cross-process on the Cloud runner and stall the measure block; run locally with Instruments.")
+            throw XCTSkip("Signpost perf metrics skipped on CI — signposts don't surface cross-process on the Cloud runner and stall the measure block; run locally with Instruments.")
         }
     }
 
