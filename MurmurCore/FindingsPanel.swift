@@ -176,11 +176,48 @@ struct FindingsPanel: View {
                     .foregroundStyle(.tertiary)
             }
             triageTally
+            ectopyBurdenLine
             filterChips
             departureUnlockSeam
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
+    }
+
+    /// C7/X29: ventricular-ectopy burden + run grouping over the annotation
+    /// stream — factual counts, never a verdict. Recording-level, so it reads
+    /// the full annotation set (not the filtered subset).
+    private var ectopySummary: EctopyRunSummary {
+        EctopyAnalyzer.summarize(annotations)
+    }
+
+    @ViewBuilder
+    private var ectopyBurdenLine: some View {
+        let summary = ectopySummary
+        if summary.hasEctopy {
+            Text(ectopyBurdenText(summary))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("ectopy-burden-line")
+        }
+    }
+
+    private func ectopyBurdenText(_ summary: EctopyRunSummary) -> String {
+        var parts = [String(format: "Ventricular ectopy: %.1f%% of %d beats",
+                            summary.burdenPercent, summary.totalBeatCount)]
+        var runs: [String] = []
+        if summary.coupletCount > 0 {
+            runs.append("\(summary.coupletCount) couplet\(summary.coupletCount == 1 ? "" : "s")")
+        }
+        if summary.tripletCount > 0 {
+            runs.append("\(summary.tripletCount) triplet\(summary.tripletCount == 1 ? "" : "s")")
+        }
+        if summary.longRunCount > 0 {
+            runs.append("\(summary.longRunCount) run\(summary.longRunCount == 1 ? "" : "s") of ≥4")
+        }
+        if !runs.isEmpty { parts.append(runs.joined(separator: " · ")) }
+        return parts.joined(separator: " · ")
     }
 
     /// The review workload = FLAGGED (non-normal) annotations only. The

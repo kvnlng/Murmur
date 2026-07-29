@@ -3692,6 +3692,79 @@ struct SnapshotExporterTests {
     }
 }
 
+// MARK: - Ectopy burden + runs (C7 / X29)
+
+@Suite("Ectopy burden + consecutive-run grouping")
+struct EctopyAnalyzerTests {
+    private func beat(_ category: String, at sample: Int64) -> Annotation {
+        Annotation(kind: .point, sampleIndex: sample, category: category, source: "wfdb.atr")
+    }
+
+    @Test("Empty input yields the empty summary")
+    func emptyInput() {
+        let s = EctopyAnalyzer.summarize([])
+        #expect(s == .empty)
+        #expect(!s.hasEctopy)
+    }
+
+    @Test("Burden is ectopic beats over total BEATS — non-beat markers excluded")
+    func burdenExcludesNonBeatMarkers() {
+        // 3 V + 5 N = 8 beats; the +, ~, | markers must not inflate the
+        // denominator.
+        let anns = [
+            beat("N", at: 0), beat("V", at: 100), beat("N", at: 200),
+            beat("+", at: 210), beat("~", at: 220), beat("|", at: 230),
+            beat("V", at: 300), beat("N", at: 400), beat("N", at: 500),
+            beat("V", at: 600), beat("N", at: 700)
+        ]
+        let s = EctopyAnalyzer.summarize(anns)
+        #expect(s.totalBeatCount == 8)
+        #expect(s.ectopicBeatCount == 3)
+        #expect(abs(s.burdenFraction - 3.0 / 8.0) < 1e-9)
+    }
+
+    @Test("Consecutive V beats group into couplet / triplet / run-of-N")
+    func consecutiveRunsGroup() {
+        // isolated V, then a couplet, then a run of 4.
+        let anns = [
+            beat("N", at: 0),
+            beat("V", at: 100), beat("N", at: 200),          // isolated
+            beat("V", at: 300), beat("V", at: 400), beat("N", at: 500),  // couplet
+            beat("V", at: 600), beat("V", at: 700), beat("V", at: 800), beat("V", at: 900) // run of 4
+        ]
+        let s = EctopyAnalyzer.summarize(anns)
+        #expect(s.ectopicBeatCount == 7)
+        #expect(s.isolatedCount == 1)
+        #expect(s.coupletCount == 1)
+        #expect(s.tripletCount == 0)
+        #expect(s.longRunCount == 1)
+        #expect(s.runs.count == 2)
+        #expect(s.runs.first?.length == 2)
+        #expect(s.runs.first?.startSampleIndex == 300)
+        #expect(s.runs.last?.kindLabel == "run of 4")
+    }
+
+    @Test("Non-beat markers interspersed in a run do not split it")
+    func markersDontSplitRuns() {
+        let anns = [
+            beat("V", at: 100), beat("+", at: 150), beat("V", at: 200), beat("~", at: 250), beat("V", at: 300)
+        ]
+        let s = EctopyAnalyzer.summarize(anns)
+        #expect(s.runs.count == 1)
+        #expect(s.runs.first?.length == 3)
+        #expect(s.tripletCount == 1)
+    }
+
+    @Test("Escape (E) and fusion (F) are beats but not ventricular ectopy")
+    func escapeAndFusionNotEctopic() {
+        let anns = [beat("E", at: 0), beat("F", at: 100), beat("V", at: 200), beat("N", at: 300)]
+        let s = EctopyAnalyzer.summarize(anns)
+        #expect(s.totalBeatCount == 4)       // E, F, V, N all count as beats
+        #expect(s.ectopicBeatCount == 1)     // only V is ventricular ectopy
+        #expect(s.isolatedCount == 1)
+    }
+}
+
 // MARK: - Annotation clustering
 
 @Suite("Annotation clustering for overlay decimation")
