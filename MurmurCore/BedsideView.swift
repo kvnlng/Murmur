@@ -1047,12 +1047,43 @@ struct BedsideView: View {
     /// P / QRS / T fiducials for QT vs. conduction studies.
     private var dockedBeatInspector: some View {
         VStack(alignment: .leading, spacing: 6) {
+            viewportIndicator
             dockedBeatCard
             if !markingsContext.beats.isEmpty {
                 fiducialLayersChip
             }
         }
         .frame(width: 220, alignment: .topLeading)
+    }
+
+    /// X33: a VISIBLE, always-present readout of the current window against
+    /// the whole recording ("6:52–7:02 of 30:05"). The beat card below is
+    /// hover-driven and empty once the pointer leaves the trace; in a long
+    /// record the analyst otherwise has no on-screen sense of where they are.
+    /// The machine-format `ui-test-viewport-state` element stays the XCUI
+    /// endpoint; this is the human-facing one.
+    private var viewportIndicator: some View {
+        let sr = viewport.sampleRate > 0 ? viewport.sampleRate : 250
+        let start = clockString(Double(viewport.startSample) / sr)
+        let end = clockString(Double(viewport.endSample) / sr)
+        let total = clockString(Double(viewport.totalSamples) / sr)
+        return HStack(spacing: 4) {
+            Image(systemName: "scope")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
+            Text("\(start)–\(end)")
+                .font(.caption.monospacedDigit().weight(.semibold))
+            Text("of \(total)")
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("viewport-indicator")
     }
 
     @ViewBuilder
