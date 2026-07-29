@@ -1,13 +1,13 @@
 {
-  "originHash" : "a535925aa4126ab27a1bbbf10cdf1175c40d7c21c1758ccb154c47e6a00b96dd",
+  "originHash" : "aba6d3f5edd5a9db986c1969094eb7d45ce096a52519e4cd61de227ebb2b3946",
   "pins" : [
     {
       "identity" : "murmur-extensions",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/kvnlng/Murmur-Extensions.git",
       "state" : {
-        "revision" : "a219bc153a6ae949ff8cbc7cc3ecdd617063aeb6",
-        "version" : "0.11.0"
+        "revision" : "0b38d13dedb3c11eed97137e938d1ebfb62e4129",
+        "version" : "0.12.0"
       }
     },
     {
