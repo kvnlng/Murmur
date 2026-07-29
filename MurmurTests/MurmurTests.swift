@@ -4649,6 +4649,7 @@ struct IntervalTrendComputerTests {
         prMs: Double? = 155,
         qrsMs: Double? = 92,
         qtMs: Double? = 380,
+        precedingRRMs: Double? = 800,
         fragileConfidence: Double = 0.9
     ) -> MarkingsBeat {
         MarkingsBeat(
@@ -4660,7 +4661,7 @@ struct IntervalTrendComputerTests {
             qrsOffset: MarkingsFiducial(kind: .qrsOffset, sampleIndex: rPeak + 15, confidence: fragileConfidence),
             tOnset:    MarkingsFiducial(kind: .tOnset,    sampleIndex: rPeak + 40, confidence: fragileConfidence),
             tOffset:   MarkingsFiducial(kind: .tOffset,   sampleIndex: rPeak + 80, confidence: fragileConfidence),
-            prMs: prMs, qrsMs: qrsMs, qtMs: qtMs, qtcMs: qtcMs, precedingRRMs: 800
+            prMs: prMs, qrsMs: qrsMs, qtMs: qtMs, qtcMs: qtcMs, precedingRRMs: precedingRRMs
         )
     }
 
@@ -4673,6 +4674,28 @@ struct IntervalTrendComputerTests {
             qtcFormulaName: "Fridericia",
             medianQTcMs: 420, iqrQTcMs: 16
         )
+    }
+
+    @Test("QTc bin surfaces the R–R coefficient of variation (C8), no threshold applied")
+    func binSurfacesRRDispersion() throws {
+        // Five beats ~1 s apart (all inside the first 120-s bin) with varying
+        // preceding R–R: mean 800 ms, population SD ≈ 70.71 → CV ≈ 8.84%.
+        let rrs: [Double] = [800, 900, 700, 850, 750]
+        let beats = rrs.enumerated().map { idx, rr in
+            beat(rPeak: Int64(idx + 1) * 250, precedingRRMs: rr)
+        }
+        let out = IntervalTrendComputer.compute(
+            beats: beats,
+            template: template(),
+            sampleRate: 250,
+            metric: .qtc,
+            binSeconds: 120,
+            templateBeatCount: nil,
+            qtcFormulaName: "Fridericia"
+        )
+        let bin = try #require(out.bins.first)
+        let cv = try #require(bin.rrCVPercent)
+        #expect(abs(cv - 8.8388) < 0.01)
     }
 
     @Test("Empty beats yields empty bins")

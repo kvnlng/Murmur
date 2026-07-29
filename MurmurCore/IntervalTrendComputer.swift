@@ -105,6 +105,12 @@ public struct IntervalTrendBin: Sendable, Equatable, Identifiable {
     /// per-beat scatter show-mode. Ineligible bins carry an empty
     /// array.
     public let perBeatValues: [Double]
+    /// Coefficient of variation of the beat-to-beat R–R interval in the bin
+    /// (SD/mean × 100), or nil when there are too few R–R samples. Surfaced
+    /// next to QTc as the R–R steadiness the rate correction ASSUMES — a
+    /// factual input measurement, never a validity verdict, and NO threshold
+    /// is applied (the analyst judges). C8 / X30.
+    public let rrCVPercent: Double?
 
     public init(
         startSeconds: Double,
@@ -117,7 +123,8 @@ public struct IntervalTrendBin: Sendable, Equatable, Identifiable {
         hasCensoredBeats: Bool,
         isEligible: Bool,
         beatCount: Int,
-        perBeatValues: [Double]
+        perBeatValues: [Double],
+        rrCVPercent: Double? = nil
     ) {
         self.startSeconds = startSeconds
         self.endSeconds = endSeconds
@@ -130,6 +137,7 @@ public struct IntervalTrendBin: Sendable, Equatable, Identifiable {
         self.isEligible = isEligible
         self.beatCount = beatCount
         self.perBeatValues = perBeatValues
+        self.rrCVPercent = rrCVPercent
     }
 
     public var id: Double { (startSeconds + endSeconds) / 2 }
@@ -241,6 +249,7 @@ public enum IntervalTrendComputer {
             let binEnd = binStart + binSeconds
 
             var values: [Double] = []
+            var rrValues: [Double] = []
             var confidenceHits = 0
             var totalBeatsInBin = 0
             var censoredHit = false
@@ -253,6 +262,9 @@ public enum IntervalTrendComputer {
                 totalBeatsInBin += 1
                 if let value = value(for: metric, beat: beat) {
                     values.append(value)
+                }
+                if let rr = beat.precedingRRMs, rr.isFinite, rr > 0 {
+                    rrValues.append(rr)
                 }
                 if hasFragileFiducialsHighConfidence(beat: beat, metric: metric) {
                     confidenceHits += 1
@@ -287,7 +299,8 @@ public enum IntervalTrendComputer {
                         hasCensoredBeats: censoredHit,
                         isEligible: eligible,
                         beatCount: totalBeatsInBin,
-                        perBeatValues: eligible ? values : []
+                        perBeatValues: eligible ? values : [],
+                        rrCVPercent: coefficientOfVariationPercent(rrValues)
                     )
                 )
             }
@@ -388,6 +401,18 @@ public enum IntervalTrendComputer {
             return "\(Int(mins))-min"
         }
         return String(format: "%.1f-min", mins)
+    }
+
+    /// Coefficient of variation (%) of a sample — SD/mean × 100 — or nil for
+    /// fewer than 3 values or a non-positive mean. Population SD (÷N): a
+    /// descriptive spread of the bin's R–R intervals, not an inferential
+    /// estimate. Used to surface how steady the R–R was (C8), no threshold.
+    private static func coefficientOfVariationPercent(_ values: [Double]) -> Double? {
+        guard values.count >= 3 else { return nil }
+        let mean = values.reduce(0, +) / Double(values.count)
+        guard mean > 0 else { return nil }
+        let variance = values.reduce(0) { $0 + ($1 - mean) * ($1 - mean) } / Double(values.count)
+        return (variance.squareRoot() / mean) * 100
     }
 
     // MARK: - Bootstrap CI on the median

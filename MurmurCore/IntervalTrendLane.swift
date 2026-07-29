@@ -216,6 +216,7 @@ struct IntervalTrendLane: View {
         VStack(alignment: .leading, spacing: 4) {
             captionRow
             chart
+            rrAssumptionNote
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -406,11 +407,33 @@ struct IntervalTrendLane: View {
         .background(Color.secondary.opacity(0.12), in: Capsule())
     }
 
+    /// C8: persistent neutral note stating the rate-correction assumption,
+    /// paired with the per-bin R–R CV surfaced on hover. States what the
+    /// formula assumes about its INPUT; it is NOT a verdict about the QTc or
+    /// the patient, applies no threshold, and reserves no amber. QTc-only.
+    @ViewBuilder
+    private var rrAssumptionNote: some View {
+        if metric == .qtc, !data.bins.isEmpty {
+            Text("Rate-corrected QTc assumes a steady R–R interval — per-bin R–R variability (CV) shown on hover.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("interval-trend-lane-rr-assumption-note")
+        }
+    }
+
     private func hoverValueString(_ bin: IntervalTrendBin) -> String {
         if !bin.isEligible {
             return "low conf."
         }
-        return String(format: "%.0f", bin.median)
+        var text = String(format: "%.0f", bin.median)
+        // C8: on the QTc lane, surface the bin's R–R variability (the
+        // steadiness the rate correction assumes) next to the value — a
+        // factual measurement, no verdict, no threshold.
+        if metric == .qtc, let cv = bin.rrCVPercent {
+            text += String(format: " · RR CV %.0f%%", cv)
+        }
+        return text
     }
 
     // MARK: - Chart
