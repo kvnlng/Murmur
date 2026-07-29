@@ -103,10 +103,12 @@ struct ECGMetricsSurface: View {
             return nil
         }
         let beats = recording.normalBeatSampleIndices()
-        guard let intervals = ECGMetricsExtractor.rrIntervalsMs(
+        // Use the time-anchored RR series so the report carries frequency-
+        // domain HRV (Lomb-Scargle) in addition to the time-domain metrics.
+        guard let series = ECGMetricsExtractor.rrSeries(
             fromBeatSampleIndices: beats,
             sampleRate: sampleRate
         ) else { return nil }
-        return ECGMetricsService.compute(fromRRIntervalsMs: intervals)
+        return ECGMetricsService.compute(from: series)
     }
 }
