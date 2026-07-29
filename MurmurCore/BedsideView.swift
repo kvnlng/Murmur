@@ -1467,9 +1467,15 @@ struct BedsideView: View {
     private var summaryDetail: String {
         let channelCount = recording.channels.count
         let duration = Self.formatDuration(seconds: totalDurationSeconds)
-        let start = recording.channels.first?.startDate
-            .formatted(date: .numeric, time: .standard) ?? "—"
-        var detail = "\(channelCount) channels  •  \(duration)  •  starts \(start)"
+        var detail = "\(channelCount) channels  •  \(duration)"
+        // X32: only show a start time when the source genuinely carried one.
+        // WFDB records without a base date/time (MIT-BIH) must not display a
+        // fabricated start — the origin is elapsed-time-only.
+        if recording.hasAbsoluteStartTime, let start = recording.channels.first?.startDate {
+            detail += "  •  starts \(start.formatted(date: .numeric, time: .standard))"
+        } else {
+            detail += "  •  no absolute start time"
+        }
         if !recording.annotations.isEmpty {
             detail += "  •  \(recording.annotations.count) annotations"
         }

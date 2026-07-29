@@ -63,6 +63,11 @@ enum WFDBImporter {
 
         let allSamples = try WFDBSampleDecoder.decode(datURL: firstDatURL, header: header)
 
+        // X32: only the header's genuine base date/time counts as an absolute
+        // start. When absent (MIT-BIH omits it), we still synthesise a base so
+        // relative sample↔time math has an origin, but flag it non-absolute so
+        // the UI never displays it as a real start time.
+        let hasAbsoluteStartTime = header.startDate != nil
         let startDate = header.startDate ?? Date()
         let startMS = Int64(startDate.timeIntervalSince1970 * 1000)
 
@@ -172,7 +177,8 @@ enum WFDBImporter {
             channels: channels,
             annotations: annotations,
             headerComments: header.comments,
-            notesFileName: notesFileName
+            notesFileName: notesFileName,
+            hasAbsoluteStartTime: hasAbsoluteStartTime
         )
         try writeManifest(recording, into: directory)
         // Write the bundle-side annotations sidecar. From here on, this file

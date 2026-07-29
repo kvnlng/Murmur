@@ -27,6 +27,14 @@ public struct Recording: Codable, Equatable, Sendable {
     /// nor the analyst has saved anything yet).
     public let notesFileName: String?
 
+    /// True only when the SOURCE carried a genuine base date/time (X32).
+    /// WFDB headers make the base optional and MIT-BIH omits it, so the
+    /// channels' `startTimeUnixMS` is then a synthetic value used purely for
+    /// relative sample↔time math — it must NOT be shown as an absolute start.
+    /// Defaults false so any constructor that doesn't set it is treated as
+    /// "no absolute time base" (conservative — never fabricate a start).
+    public let hasAbsoluteStartTime: Bool
+
     public static let currentVersion = 1
 
     public init(
@@ -38,7 +46,8 @@ public struct Recording: Codable, Equatable, Sendable {
         channels: [Channel],
         annotations: [Annotation] = [],
         headerComments: [String] = [],
-        notesFileName: String? = nil
+        notesFileName: String? = nil,
+        hasAbsoluteStartTime: Bool = false
     ) {
         self.version = version
         self.id = id
@@ -49,6 +58,7 @@ public struct Recording: Codable, Equatable, Sendable {
         self.annotations = annotations
         self.headerComments = headerComments
         self.notesFileName = notesFileName
+        self.hasAbsoluteStartTime = hasAbsoluteStartTime
     }
 
     /// Custom decoder so older manifests still load:
@@ -76,6 +86,9 @@ public struct Recording: Codable, Equatable, Sendable {
 
         self.headerComments = (try? c.decodeIfPresent([String].self, forKey: .headerComments)) ?? []
         self.notesFileName  = try? c.decodeIfPresent(String.self,    forKey: .notesFileName)
+        // Absent in pre-X32 manifests → false (don't retroactively assert an
+        // absolute start for records saved before the distinction existed).
+        self.hasAbsoluteStartTime = (try? c.decodeIfPresent(Bool.self, forKey: .hasAbsoluteStartTime)) ?? false
     }
 }
 

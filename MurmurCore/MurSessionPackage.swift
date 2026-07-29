@@ -323,10 +323,10 @@ public enum MurSessionPackage {
             sampleRate: primary?.sampleRate ?? 0,
             channelCount: recording.channels.count,
             sampleCount: primary?.sampleCount ?? 0,
-            // No current source carries genuine wall-clock time (C6); reserved
-            // for a future source that does. Not derived from the synthetic
-            // WFDB start time, which would be misleading.
-            absoluteStartUnixMillis: nil
+            // C6 / X32 (same seam): carry the absolute base ONLY when the
+            // source genuinely had one. WFDB records without a base date/time
+            // stay nil — never the synthetic import-time value.
+            absoluteStartUnixMillis: recording.hasAbsoluteStartTime ? primary?.startTimeUnixMS : nil
         )
     }
 
