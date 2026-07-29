@@ -37,6 +37,20 @@ final class MurmurUIPerformanceTests: XCTestCase {
         continueAfterFailure = false
     }
 
+    /// The `XCTOSSignpostMetric` tests below read custom-subsystem signposts
+    /// emitted from the launched app process. On the Xcode Cloud macOS runner
+    /// those cross-process signposts don't surface in the runner's metric
+    /// collection, and the `measure` block stalls waiting for trace data that
+    /// never arrives — the test runs to the 10-minute execution-time limit and
+    /// is killed. These are diagnostic trend-line tests (not pass/fail
+    /// correctness), meant to be read with Instruments attached on a developer
+    /// machine, so we skip them on CI rather than burn the runner budget.
+    private func skipSignpostMetricsOnCI() throws {
+        if ProcessInfo.processInfo.environment["CI"] != nil {
+            throw XCTSkip("Signpost-based perf metrics skipped on CI — custom-subsystem signposts don't surface cross-process on the Cloud runner and stall the measure block; run locally with Instruments.")
+        }
+    }
+
     // MARK: - Launch & load
 
     @MainActor
@@ -167,6 +181,7 @@ final class MurmurUIPerformanceTests: XCTestCase {
         // If burst_test_avg ≈ cold_test_avg, every tick is paying cold
         // cost — the display link isn't staying spun up between ticks and
         // the warm-on-hover wiring isn't keeping the canvas warm.
+        try skipSignpostMetricsOnCI()
         let measureOptions = XCTMeasureOptions()
         measureOptions.iterationCount = 5
         measure(
@@ -227,6 +242,7 @@ final class MurmurUIPerformanceTests: XCTestCase {
         // SwiftUI view-diff cost or MarkingsBeat filter allocation).
         // If they scale with N, the render path itself is O(N total
         // beats) somewhere.
+        try skipSignpostMetricsOnCI()
         let measureOptions = XCTMeasureOptions()
         measureOptions.iterationCount = 3
         measure(
@@ -284,6 +300,7 @@ final class MurmurUIPerformanceTests: XCTestCase {
         // culprit. If RendererDraw dominates, the GPU command commit or the
         // display-link wakeup is the culprit. If neither, look upstream at
         // SwiftUI body re-evaluation cost.
+        try skipSignpostMetricsOnCI()
         let measureOptions = XCTMeasureOptions()
         measureOptions.iterationCount = 5
         measure(
