@@ -101,11 +101,21 @@ public struct ContentView: View {
         }
     }
 
-    /// Dispatches an opened file by extension: `.csv` converts through the CSV
-    /// importer, everything else is treated as a `.mur` session package.
+    /// Dispatches an opened URL: `.csv` converts through the CSV importer, a
+    /// `.mur` package reopens as a session, and a plain directory is treated
+    /// as a WFDB record folder (the File → Open Record… path). Anything else
+    /// falls back to the `.mur` reader, unchanged.
     private func open(_ url: URL) {
-        if url.pathExtension.lowercased() == "csv" {
+        let ext = url.pathExtension.lowercased()
+        if ext == "csv" {
             openCSV(url)
+        } else if ext == "mur" {
+            openMurPackage(url)
+        } else if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+            // A `.mur` package is also a directory on disk, but it carries the
+            // `mur` extension and is handled above; a bare directory here is a
+            // folder of WFDB records.
+            openFolder(url)
         } else {
             openMurPackage(url)
         }

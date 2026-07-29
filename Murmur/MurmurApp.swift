@@ -63,8 +63,14 @@ struct MurmurApp: App {
             // and writes a portable Murmur session package. OPEN routes the
             // picked package to ContentView via the coordinator.
             CommandGroup(after: .newItem) {
-                Button("Open Session…") { openSessionPanel() }
+                // AX7: the primary open action (a WFDB record folder) existed
+                // only as a toolbar button — an empty File menu reads as
+                // "prototype". It's the main document type, so it takes ⌘O;
+                // Open Session (reopen a .mur) moves to ⌘⇧O.
+                Button("Open Record…") { openRecordPanel() }
                     .keyboardShortcut("o", modifiers: .command)
+                Button("Open Session…") { openSessionPanel() }
+                    .keyboardShortcut("o", modifiers: [.command, .shift])
                 Button("Import CSV…") { importCSVPanel() }
                 Button("Save Session As…") { saveSessionPanel() }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
@@ -146,6 +152,22 @@ struct MurmurApp: App {
         } catch {
             presentSessionAlert(title: "Couldn't save session", message: error.localizedDescription)
         }
+    }
+
+    /// Opens a folder of WFDB records — the primary open action, previously
+    /// reachable only from the toolbar (AX7). Routes the picked directory
+    /// through the coordinator to ContentView's folder-open path; the panel's
+    /// security scope carries the access grant. Same terminus as the toolbar
+    /// Open button and the drop delegate.
+    @MainActor private func openRecordPanel() {
+        let panel = NSOpenPanel()
+        panel.title = "Open Record"
+        panel.message = "Choose a folder containing WFDB records (.hea / .dat)."
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        SessionDocumentCoordinator.shared.requestOpen(url)
     }
 
     /// Picks a `.mur` package and hands it to ContentView (via the coordinator)
