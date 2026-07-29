@@ -66,6 +66,15 @@ public struct MurSessionManifest: Codable, Equatable, Sendable {
         public let sampleRate: Double
         public let channelCount: Int
         public let sampleCount: Int64
+        /// Optional absolute time base (Unix ms) for the first sample, present
+        /// only when the SOURCE genuinely carries wall-clock time (C6).
+        /// MIT-BIH/WFDB and the CSV importer don't, so this stays nil today —
+        /// the field exists so the format can carry an absolute base (for the
+        /// circadian / encounter-time analysis the ICU-telemetry buyer works
+        /// in) the moment a source provides one, without a format-version
+        /// bump. Never populated from a synthetic/import-derived timestamp.
+        /// Optional so older `.mur` files decode unchanged.
+        public let absoluteStartUnixMillis: Int64?
     }
 }
 
@@ -313,7 +322,11 @@ public enum MurSessionPackage {
             sourceFileName: recording.sourceFileName,
             sampleRate: primary?.sampleRate ?? 0,
             channelCount: recording.channels.count,
-            sampleCount: primary?.sampleCount ?? 0
+            sampleCount: primary?.sampleCount ?? 0,
+            // No current source carries genuine wall-clock time (C6); reserved
+            // for a future source that does. Not derived from the synthetic
+            // WFDB start time, which would be misleading.
+            absoluteStartUnixMillis: nil
         )
     }
 

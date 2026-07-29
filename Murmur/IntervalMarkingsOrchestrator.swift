@@ -67,6 +67,13 @@ struct IntervalMarkingsOrchestrator: View {
             return
         }
         let sampleRate = ecgChannel.sampleRate
+        // Reproducibility provenance (C3/C4): the lead the intervals are
+        // measured in, and the sample span the template beats span. Captured
+        // here (the orchestrator chooses the lead + feeds the beats) so no
+        // MurmurMetrics change is needed.
+        let leadName = ecgChannel.name
+        let spanStart = beatSampleIndices.min()
+        let spanEnd = beatSampleIndices.max()
         let qtcFormula = await MainActor.run { markingsContext.qtcFormula }
 
         // Delineate + measure + build template off the main actor.
@@ -130,7 +137,10 @@ struct IntervalMarkingsOrchestrator: View {
                     iqrQTMs: template.iqrQTMs,
                     qtcFormulaName: template.qtcFormula.displayName,
                     medianQTcMs: template.medianQTcMs,
-                    iqrQTcMs: template.iqrQTcMs
+                    iqrQTcMs: template.iqrQTcMs,
+                    sourceLead: leadName,
+                    spanStartSample: spanStart,
+                    spanEndSample: spanEnd
                 )
                 : nil
             return (beats, coreTemplate)

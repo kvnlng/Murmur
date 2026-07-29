@@ -211,7 +211,8 @@ public enum IntervalTrendComputer {
             metric: metric,
             binSeconds: binSeconds,
             templateBeatCount: templateBeatCount ?? template?.sampleCount,
-            qtcFormulaName: qtcFormulaName
+            qtcFormulaName: qtcFormulaName,
+            sourceLead: template?.sourceLead
         )
 
         guard sampleRate > 0, binSeconds > 0, !beats.isEmpty else {
@@ -360,17 +361,23 @@ public enum IntervalTrendComputer {
         metric: IntervalTrendMetric,
         binSeconds: Double,
         templateBeatCount: Int?,
-        qtcFormulaName: String
+        qtcFormulaName: String,
+        sourceLead: String?
     ) -> String {
         let binLabel = binLabel(seconds: binSeconds)
         let templateFragment = templateBeatCount.map { "normal template = \($0) beats" } ?? "no template"
+        // C3: disclose the lead the intervals were measured in — a methods
+        // reviewer requires it, and this caption is copied verbatim into the
+        // citation payload. Appended (not prefixed) so the metric stays the
+        // leading token the analyst scans for.
+        let leadFragment = sourceLead.map { " · measured in \($0)" } ?? ""
         switch metric {
         case .qtc:
-            return "QTc · \(qtcFormulaName) · \(binLabel) bins · \(templateFragment)"
+            return "QTc · \(qtcFormulaName) · \(binLabel) bins · \(templateFragment)\(leadFragment)"
         case .pr:
-            return "PR · \(binLabel) bins · \(templateFragment)"
+            return "PR · \(binLabel) bins · \(templateFragment)\(leadFragment)"
         case .qrs:
-            return "QRS-width · \(binLabel) bins · \(templateFragment)"
+            return "QRS-width · \(binLabel) bins · \(templateFragment)\(leadFragment)"
         }
     }
 

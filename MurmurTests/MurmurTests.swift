@@ -4723,6 +4723,30 @@ struct IntervalTrendComputerTests {
         #expect(out.reproCaption.contains("214"))
     }
 
+    @Test("Repro caption discloses the QT measurement lead when the template carries one (C3)")
+    func reproCaptionDisclosesMeasurementLead() {
+        let t = MarkingsTemplate(
+            sampleCount: 214,
+            medianPRMs: nil, iqrPRMs: nil,
+            medianQRSMs: nil, iqrQRSMs: nil,
+            medianQTMs: nil, iqrQTMs: nil,
+            qtcFormulaName: "Fridericia",
+            medianQTcMs: 410, iqrQTcMs: 20,
+            sourceLead: "MLII",
+            spanStartSample: 0, spanEndSample: 90000
+        )
+        let out = IntervalTrendComputer.compute(
+            beats: [beat(rPeak: 500)],
+            template: t,
+            sampleRate: 250,
+            metric: .qtc,
+            binSeconds: 120,
+            templateBeatCount: nil,
+            qtcFormulaName: "Fridericia"
+        )
+        #expect(out.reproCaption.contains("measured in MLII"))
+    }
+
     @Test("Bins are placed on a clock-aligned grid (0, binSeconds, 2·binSeconds, …)")
     func binsAlignToGrid() {
         // Beats spread across 0…4 minutes; expect bin starts at 0, 120.

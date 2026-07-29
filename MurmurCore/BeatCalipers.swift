@@ -84,6 +84,7 @@ struct BeatCalipers: View {
                 undefined: kind == .ectopic,
                 censored: qtIsCensored,
                 halfWidthMs: qtHalfWidthForRendering)
+            templateProvenanceFooter
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
@@ -98,6 +99,36 @@ struct BeatCalipers: View {
     private var qtIsCensored: Bool { beat.tOffsetCensored && kind != .ectopic }
     private var qtHalfWidthForRendering: Double? {
         kind == .ectopic ? nil : beat.qtCalibratedHalfWidthMs
+    }
+
+    /// C4: the per-patient normal template's provenance — how many beats
+    /// constituted it and over what stretch of the recording. On a heavily
+    /// ectopic record this is a methods choice a reviewer will interrogate,
+    /// so it's surfaced in the inspector (and persisted to `.mur`). Factual,
+    /// engineered measurement — no clinical verdict.
+    @ViewBuilder
+    private var templateProvenanceFooter: some View {
+        if let template {
+            Divider().opacity(0.4)
+            Text(templateProvenanceText(template))
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("beat-calipers-template-provenance")
+        }
+    }
+
+    private func templateProvenanceText(_ t: MarkingsTemplate) -> String {
+        var text = "Patient normal: \(t.sampleCount) beats"
+        if let start = t.spanStartSample, let end = t.spanEndSample, sampleRate > 0 {
+            text += " · \(clockString(start))–\(clockString(end))"
+        }
+        return text
+    }
+
+    private func clockString(_ sample: Int64) -> String {
+        let total = max(0, Int((Double(sample) / sampleRate).rounded()))
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 
     private var ectopicSubtitle: some View {

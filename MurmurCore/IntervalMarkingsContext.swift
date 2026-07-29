@@ -201,6 +201,16 @@ public struct MarkingsTemplate: Sendable, Equatable, Codable {
     public let medianQTcMs: Double?
     public let iqrQTcMs: Double?
 
+    /// Reproducibility provenance (C3/C4). `sourceLead` is the lead the
+    /// intervals were measured in; `spanStartSample`/`spanEndSample` bound the
+    /// stretch of recording the template beats were drawn from. All optional
+    /// so older `.mur` sessions and snapshot fixtures decode/compile
+    /// unchanged. A methods reviewer requires both — cheaper to carry now than
+    /// to retrofit after the preprint.
+    public let sourceLead: String?
+    public let spanStartSample: Int64?
+    public let spanEndSample: Int64?
+
     public init(
         sampleCount: Int,
         medianPRMs: Double?,
@@ -211,7 +221,10 @@ public struct MarkingsTemplate: Sendable, Equatable, Codable {
         iqrQTMs: Double?,
         qtcFormulaName: String,
         medianQTcMs: Double?,
-        iqrQTcMs: Double?
+        iqrQTcMs: Double?,
+        sourceLead: String? = nil,
+        spanStartSample: Int64? = nil,
+        spanEndSample: Int64? = nil
     ) {
         self.sampleCount = sampleCount
         self.medianPRMs = medianPRMs
@@ -223,6 +236,9 @@ public struct MarkingsTemplate: Sendable, Equatable, Codable {
         self.qtcFormulaName = qtcFormulaName
         self.medianQTcMs = medianQTcMs
         self.iqrQTcMs = iqrQTcMs
+        self.sourceLead = sourceLead
+        self.spanStartSample = spanStartSample
+        self.spanEndSample = spanEndSample
     }
 }
 
