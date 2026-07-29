@@ -812,7 +812,7 @@ struct FindingsPanel: View {
             FindingGroup(
                 category: category,
                 humanLabel: humanLabel(for: category),
-                subLabel: groupSubtitle(for: category),
+                subLabel: subLabel(for: category),
                 color: CategoryPalette.swiftUIColor(for: category),
                 count: entries.count,
                 aggregateDeparture: entries.compactMap(\.departure).max() ?? 0,
@@ -1005,25 +1005,12 @@ struct FindingsPanel: View {
         }
     }
 
-    /// The subtitle actually rendered under a group header. Adds the
-    /// "ranked by …" ordering claim ONLY when the departure sort is in
-    /// effect AND the category is departure-rankable, so the header never
-    /// asserts an ordering the visible rows don't exhibit (AX5). Keeps the
-    /// descriptor otherwise — the navigational framing is load-bearing.
-    private func groupSubtitle(for category: String) -> String? {
-        guard let base = subLabel(for: category) else { return nil }
-        if effectiveSort == .departure && isDepartureRanked(category) {
-            return "ranked by \(base)"
-        }
-        return base
-    }
-
-    private func isDepartureRanked(_ category: String) -> Bool {
-        switch category.trimmingCharacters(in: .whitespaces).uppercased() {
-        case "V", "PVC", "A", "APC", "F", "L", "R": return true
-        default: return false
-        }
-    }
+    // X20 (K9): the group subtitle is a stable DESCRIPTOR of what the group's
+    // departure measures ("QRS-width departure from patient normal"), never a
+    // sort-conditional "ranked by …" claim. Per K9 the ranking is made
+    // visible + falsifiable by the per-row departure magnitudes
+    // (`departureLabel`), not asserted in the header — so this superseded the
+    // Phase-B conditional-subtitle approach. subLabel(for:) is used directly.
 
     // MARK: - Jump
 
