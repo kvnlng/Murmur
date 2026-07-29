@@ -102,6 +102,14 @@ public final class PurchaseStore {
         ownedProductIDs.contains(id)
     }
 
+    /// Localised price string for `id` (e.g. "$9.99"), or nil when the
+    /// product hasn't loaded from the App Store yet (offline, not configured
+    /// in App Store Connect, or still fetching). Keeps StoreKit's `Product`
+    /// type out of the view layer — the Buy UI reads prices through this.
+    public func displayPrice(for id: ProductID) -> String? {
+        products[id]?.displayPrice
+    }
+
     // MARK: - Purchase + Restore
 
     /// Initiate a purchase for `id`. Returns true on a completed

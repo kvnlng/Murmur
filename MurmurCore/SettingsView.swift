@@ -30,6 +30,11 @@ public struct SettingsView: View {
 private struct PurchasesSettingsTab: View {
     @State private var store = PurchaseStore.shared
     @State private var isRestoring = false
+    /// The product whose purchase is currently in flight, if any — drives the
+    /// per-row spinner and disables the other buy buttons meanwhile.
+    @State private var purchasing: PurchaseStore.ProductID?
+    /// Last purchase failure, surfaced in the section footer.
+    @State private var purchaseError: String?
 
     var body: some View {
         Form {
@@ -38,22 +43,24 @@ private struct PurchasesSettingsTab: View {
                     HStack {
                         Text(displayName(for: id))
                         Spacer()
-                        if store.owns(id) {
-                            Label("Owned", systemImage: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                                .labelStyle(.titleAndIcon)
-                        } else {
-                            Text("Not purchased")
-                                .foregroundStyle(.secondary)
-                        }
+                        productControl(for: id)
                     }
                 }
             } header: {
                 Text("Research extensions")
             } footer: {
-                Text("Purchases are tied to your Apple ID and restore automatically on new devices.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                VStack(alignment: .leading, spacing: 4) {
+                    if let purchaseError {
+                        Text(purchaseError)
+                            .font(.caption2)
+                            .foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("purchase-error")
+                    }
+                    Text("Purchases are tied to your Apple ID and restore automatically on new devices.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
             }
 
             Section {
@@ -81,10 +88,10 @@ private struct PurchasesSettingsTab: View {
             }
 
             #if DEBUG
-            // Developer-only local unlock. There's no in-app Buy surface for
-            // VT/VF yet (its LockedView is still to be built), so this is the
-            // only way to exercise paid features against a StoreKit-less debug
-            // build. Compiled out of Release entirely.
+            // Developer-only local unlock. The real Buy surface above needs a
+            // StoreKit configuration to return products; this toggle lets a
+            // plain debug build (no StoreKit config loaded) exercise paid
+            // features without a purchase. Compiled out of Release entirely.
             Section {
                 ForEach(PurchaseStore.ProductID.allCases, id: \.self) { id in
                     Toggle(displayName(for: id), isOn: Binding(
@@ -108,6 +115,65 @@ private struct PurchasesSettingsTab: View {
         }
         .formStyle(.grouped)
         .padding()
+    }
+
+    /// Trailing control for a product row: Owned badge, an in-flight spinner,
+    /// a Buy button with the StoreKit price, or an Unavailable state when the
+    /// product didn't load. A row never renders inert with no explanation
+    /// (App Review Guideline 3.1.1) — "not purchasable right now" always says
+    /// why.
+    @ViewBuilder
+    private func productControl(for id: PurchaseStore.ProductID) -> some View {
+        if store.owns(id) {
+            Label("Owned", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+                .labelStyle(.titleAndIcon)
+                .accessibilityIdentifier("purchase-owned-\(id.rawValue)")
+        } else if purchasing == id {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("Purchasing…")
+            }
+            .accessibilityIdentifier("purchase-pending-\(id.rawValue)")
+        } else if let price = store.displayPrice(for: id) {
+            Button("Buy \(price)") { buy(id) }
+                .buttonStyle(.borderedProminent)
+                .disabled(purchasing != nil)
+                .accessibilityIdentifier("purchase-buy-\(id.rawValue)")
+        } else {
+            // Products didn't load — no App Store Connect product, offline, or
+            // still fetching. Say so rather than showing a dead row.
+            Text("Unavailable")
+                .foregroundStyle(.secondary)
+                .help("This purchase couldn't be loaded from the App Store. Check your connection, then reopen Settings.")
+                .accessibilityIdentifier("purchase-unavailable-\(id.rawValue)")
+        }
+    }
+
+    private func buy(_ id: PurchaseStore.ProductID) {
+        purchaseError = nil
+        purchasing = id
+        Task {
+            defer { purchasing = nil }
+            do {
+                _ = try await store.purchase(id)
+            } catch {
+                purchaseError = "\(displayName(for: id)): \(purchaseFailureMessage(error))"
+            }
+        }
+    }
+
+    private func purchaseFailureMessage(_ error: Error) -> String {
+        switch error {
+        case PurchaseStore.PurchaseError.productNotLoaded:
+            return "product isn't available from the App Store right now."
+        case PurchaseStore.PurchaseError.unverifiedTransaction:
+            return "the purchase couldn't be verified and was not applied."
+        case PurchaseStore.PurchaseError.storeKit(let underlying):
+            return underlying.localizedDescription
+        default:
+            return error.localizedDescription
+        }
     }
 
     private func displayName(for id: PurchaseStore.ProductID) -> String {
