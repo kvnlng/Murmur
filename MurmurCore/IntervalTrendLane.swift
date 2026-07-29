@@ -276,7 +276,13 @@ struct IntervalTrendLane: View {
     private var addGuideChip: some View {
         if let onAdd = onAddGuide {
             Menu {
-                Section("Add guide (\(metric.displayName), ms)") {
+                // C5: the word "guide" alone doesn't say whose norm this is.
+                // These are the ANALYST'S OWN reference lines, never a
+                // built-in population/clinical cutoff (QTc ranges are
+                // sex-specific, and the app asserts none) — say so in the
+                // header and tag each value "user-set"
+                // (project_interval_trend_lanes_design.md).
+                Section("Add your own reference line (\(metric.displayName), ms)") {
                     ForEach([300, 350, 400, 450, 500, 550, 600], id: \.self) { value in
                         Button("\(value) ms — user-set") {
                             onAdd(Double(value), "\(value) ms (user-set)")
@@ -287,7 +293,7 @@ struct IntervalTrendLane: View {
                 HStack(spacing: 2) {
                     Image(systemName: "plus")
                         .font(.system(size: 9, weight: .semibold))
-                    Text("guide")
+                    Text("your guide")
                         .font(.caption2)
                 }
                 .foregroundStyle(.secondary)
@@ -297,6 +303,8 @@ struct IntervalTrendLane: View {
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
+            .help("Add your own reference line — a user-set threshold, not a population or clinical norm")
+            .accessibilityLabel("Add your own reference line")
             .accessibilityIdentifier("interval-trend-lane-add-guide")
         }
     }
