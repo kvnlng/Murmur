@@ -171,7 +171,7 @@ struct FindingsPanel: View {
                 Text("Review queue")
                     .font(.headline)
                 Spacer()
-                Text("\(filtered.count) of \(annotations.count)")
+                Text("\(flaggedFiltered.count) of \(flaggedAnnotations.count)")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.tertiary)
             }
@@ -183,8 +183,20 @@ struct FindingsPanel: View {
         .padding(.vertical, 10)
     }
 
+    /// The review workload = FLAGGED (non-normal) annotations only. The
+    /// within-template normal mass is collapsed into its own "nothing
+    /// flagged" row, so counting it in the queue total or the "to review"
+    /// tally contradicts that row (X34). Normals are never a review task.
+    private var flaggedAnnotations: [Annotation] {
+        annotations.filter { !isNormalCategory($0.category) }
+    }
+
+    private var flaggedFiltered: [Annotation] {
+        filtered.filter { !isNormalCategory($0.category) }
+    }
+
     private var tally: DispositionStore.Tally {
-        dispositionStore.tally(for: annotations)
+        dispositionStore.tally(for: flaggedAnnotations)
     }
 
     private var triageTally: some View {
