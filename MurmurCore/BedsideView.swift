@@ -182,6 +182,28 @@ struct BedsideView: View {
         "start=\(viewport.startSample) end=\(viewport.endSample)"
     }
 
+    /// Human-readable position readout for VoiceOver (AX4). A tool whose job
+    /// is locating positions in a long signal must let a non-sighted analyst
+    /// learn where they are; the machine-format `ui-test-viewport-state`
+    /// element is for XCUI equality assertions and reads poorly aloud, so
+    /// this is a separate, spoken surface. Reports the window in clock time
+    /// and the focused beat when one is selected.
+    private var viewportPositionLabel: String {
+        let sr = viewport.sampleRate > 0 ? viewport.sampleRate : 250
+        let t0 = clockString(Double(viewport.startSample) / sr)
+        let t1 = clockString(Double(viewport.endSample) / sr)
+        var label = "Viewing \(t0) to \(t1)"
+        if let beat = markingsContext.focusedBeatSampleIndex {
+            label += ", beat selected at \(clockString(Double(beat) / sr))"
+        }
+        return label
+    }
+
+    private func clockString(_ seconds: Double) -> String {
+        let total = max(0, Int(seconds.rounded()))
+        return String(format: "%d:%02d", total / 60, total % 60)
+    }
+
     /// VT/VF candidate scan toolbar item — only surfaces when the VT/VF
     /// IAP is owned AND a recording is loaded (the App-target orchestrator
     /// sets `isScanAvailable`). The free viewer never sees it, so the model
@@ -337,6 +359,16 @@ struct BedsideView: View {
                 // separators (e.g. `1750` → `1,750`). Letter separators
                 // keep tests' equality comparisons stable.
                 .accessibilityLabel(viewportStateLabel)
+                .allowsHitTesting(false)
+        }
+        // AX4: VoiceOver-facing position readout (clock time + focused beat),
+        // separate from the machine-format element above so it can speak
+        // naturally without disturbing XCUI's equality assertions.
+        .overlay(alignment: .topLeading) {
+            Color.clear
+                .frame(width: 1, height: 1)
+                .accessibilityIdentifier("viewport-position")
+                .accessibilityLabel(viewportPositionLabel)
                 .allowsHitTesting(false)
         }
         .overlay(alignment: .topLeading) {

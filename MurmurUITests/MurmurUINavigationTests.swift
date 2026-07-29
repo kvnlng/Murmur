@@ -342,4 +342,24 @@ final class MurmurUINavigationTests: XCTestCase {
         XCTAssertTrue(confidencePicker.waitForExistence(timeout: 3),
                       "Findings confidence picker should carry an explicit sibling-style identifier, not 'chevron.down'")
     }
+
+    @MainActor
+    func testViewportPositionElementIsExposedForVoiceOver() throws {
+        // AX4: a VoiceOver user must be able to learn where they are in the
+        // recording. Assert the human-readable viewport-position element
+        // exists and speaks a clock-time window ("Viewing m:ss to m:ss…").
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "--ui-test-sample",
+            "--ui-test-initial-duration=2"
+        ]
+        app.launch()
+
+        let position = app.descendants(matching: .any)
+            .matching(identifier: "viewport-position").firstMatch
+        XCTAssertTrue(position.waitForExistence(timeout: 5),
+                      "A human-readable viewport-position element should exist for VoiceOver")
+        XCTAssertTrue(position.label.hasPrefix("Viewing "),
+                      "Viewport position should speak a clock-time window, got '\(position.label)'")
+    }
 }

@@ -763,12 +763,19 @@ private struct RecordRow: View {
         switch importState {
         case .importing:
             ProgressView().controlSize(.small)
+                .accessibilityLabel("Importing")
         case .imported:
+            // AX6: without an explicit label this checkmark speaks as
+            // "Selected", so every imported row reads "Selected" and gets
+            // confused with the list's actual single-selection state. Label
+            // it as the import status it actually is.
             Image(systemName: "checkmark.circle.fill")
                 .foregroundStyle(.green)
+                .accessibilityLabel("Imported")
         case .failed:
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.red)
+                .accessibilityLabel("Import failed")
         case .none:
             EmptyView()
         }
