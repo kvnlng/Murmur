@@ -84,6 +84,7 @@ struct RecordContextPanel: View {
             Image(systemName: "doc.text")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
             Text("Context")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)

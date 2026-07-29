@@ -336,6 +336,10 @@ struct FindingsPanel: View {
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
+        // AX2: without an explicit id this image-bearing menu falls back to
+        // its chevron symbol name ("chevron.down") in the tree. Match its
+        // siblings findings-sort-picker / findings-category-picker.
+        .accessibilityIdentifier("findings-confidence-picker")
     }
 
     private func chipLabel(key: String, value: String, highlighted: Bool = false) -> some View {
@@ -714,6 +718,9 @@ struct FindingsPanel: View {
             .menuIndicator(.hidden)
             .fixedSize()
             .help("Confirm this finding")
+            // AX2: image-only control; without a label VoiceOver reads the
+            // symbol's own description ("Selected") on every finding row.
+            .accessibilityLabel("Confirm finding")
             .accessibilityIdentifier("disposition-confirm-\(annotation.id.uuidString)")
 
             Button {
@@ -724,6 +731,9 @@ struct FindingsPanel: View {
             }
             .buttonStyle(.plain)
             .help("Dismiss this finding as a false positive")
+            // AX2: image-only control; label it so VoiceOver doesn't read the
+            // symbol name ("Close") on every finding row.
+            .accessibilityLabel("Dismiss finding")
             .accessibilityIdentifier("disposition-dismiss-\(annotation.id.uuidString)")
 
             if dispositionStore.record(for: annotation.id) != nil {

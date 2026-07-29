@@ -169,6 +169,10 @@ struct VariabilityLane: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        // AX1 (pre-emptive): same container-contains-children pairing as the
+        // interval trend lane, so the lane id won't bleed onto its dials the
+        // moment a second control lands (feedback_swiftui_accessibility_contain.md).
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("variability-lane")
     }
 

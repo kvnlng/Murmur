@@ -1422,6 +1422,11 @@ struct BedsideView: View {
                     },
                     isEditing: isEditing
                 )
+                // AX2: contain the panel's children so it stops collapsing to
+                // a single element that speaks the decorative doc.text symbol
+                // name ("Plain Text Document"); this also surfaces the `.hea`
+                // demographics + notes to VoiceOver as readable content.
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("context-panel")
             }
         }

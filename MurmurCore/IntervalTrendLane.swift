@@ -220,6 +220,12 @@ struct IntervalTrendLane: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        // AX1: mark the lane as a container that CONTAINS its children as
+        // separate elements. Without this, the container identifier bleeds
+        // onto the inner menu buttons and all four (metric/bin/mode/guide)
+        // resolve to `interval-trend-lane`, so no test can address one
+        // unambiguously (feedback_swiftui_accessibility_contain.md).
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("interval-trend-lane")
     }
 
@@ -298,23 +304,42 @@ struct IntervalTrendLane: View {
     @ViewBuilder
     private var metricPicker: some View {
         if let onPick = onPickMetric {
-            controlChip(label: metric.displayName, identifier: "interval-trend-lane-metric-picker") {
-                Menu {
-                    // `launchVisible` is the memo-locked exposed set —
-                    // QTc only at launch. Iterating `allCases` here
-                    // would surface PR + QRS-width prematurely per
-                    // project_measurement_layer_gating.md's "expose
-                    // only QTc; PR + QRS-width = Phase 4b" rule.
-                    ForEach(IntervalTrendMetric.launchVisible, id: \.self) { option in
-                        Button(option.displayName) { onPick(option) }
+            if IntervalTrendMetric.launchVisible.count <= 1 {
+                // AX8: a dropdown that opens to a single option reads as
+                // broken. QTc is the only launch-visible metric (PR +
+                // QRS-width deferred to Phase 4b per
+                // project_measurement_layer_gating.md), so render the metric
+                // name as static text; it promotes back to a picker
+                // automatically once a second metric becomes launch-visible.
+                staticMetricChip
+            } else {
+                controlChip(label: metric.displayName, identifier: "interval-trend-lane-metric-picker") {
+                    Menu {
+                        ForEach(IntervalTrendMetric.launchVisible, id: \.self) { option in
+                            Button(option.displayName) { onPick(option) }
+                        }
+                    } label: {
+                        chipContent(text: metric.displayName)
                     }
-                } label: {
-                    chipContent(text: metric.displayName)
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
                 }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
             }
         }
+    }
+
+    /// Static (non-interactive) rendering of the current metric name. Keeps
+    /// the `interval-trend-lane-metric-picker` identifier and the chip shape
+    /// so layout + tests are stable across the eventual promotion to a
+    /// dropdown, but drops the chevron so it never reads as a one-item menu.
+    private var staticMetricChip: some View {
+        Text(metric.displayName)
+            .font(.caption2.monospacedDigit())
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color.secondary.opacity(0.12), in: Capsule())
+            .accessibilityIdentifier("interval-trend-lane-metric-picker")
     }
 
     @ViewBuilder

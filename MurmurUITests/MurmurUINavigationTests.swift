@@ -303,4 +303,43 @@ final class MurmurUINavigationTests: XCTestCase {
         XCTAssertTrue(seam.waitForExistence(timeout: 3),
                       "Departure-sort unlock seam should be visible without ECG Metrics")
     }
+
+    @MainActor
+    func testDispositionControlsExposeAccessibilityLabels() throws {
+        // AX2: the confirm/dismiss disposition controls are image-only, so
+        // without explicit labels VoiceOver reads the SF Symbol descriptions
+        // ("Selected" / "Close") on every finding row. Assert the explicit
+        // labels are present, and that the findings confidence picker carries
+        // its sibling-style identifier rather than the chevron symbol name.
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "--ui-test-sample",
+            "--ui-test-expand-all-findings-groups"
+        ]
+        app.launch()
+
+        let editToggle = app.descendants(matching: .any)
+            .matching(identifier: "edit-mode-toggle").firstMatch
+        XCTAssertTrue(editToggle.waitForExistence(timeout: 5))
+        editToggle.click()
+
+        let confirms = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'disposition-confirm-'"))
+        let appeared = NSPredicate(format: "count > 0")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: appeared, object: confirms)], timeout: 3),
+                       .completed, "Disposition confirm controls should appear in edit mode")
+        XCTAssertEqual(confirms.firstMatch.label, "Confirm finding",
+                       "Confirm control should expose an explicit accessibility label, not the SF Symbol name")
+
+        let dismiss = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'disposition-dismiss-'")).firstMatch
+        XCTAssertTrue(dismiss.waitForExistence(timeout: 3))
+        XCTAssertEqual(dismiss.label, "Dismiss finding",
+                       "Dismiss control should expose an explicit accessibility label, not the SF Symbol name")
+
+        let confidencePicker = app.descendants(matching: .any)
+            .matching(identifier: "findings-confidence-picker").firstMatch
+        XCTAssertTrue(confidencePicker.waitForExistence(timeout: 3),
+                      "Findings confidence picker should carry an explicit sibling-style identifier, not 'chevron.down'")
+    }
 }
