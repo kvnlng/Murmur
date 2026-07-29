@@ -394,24 +394,35 @@ struct FindingsPanel: View {
     /// tokens ("AFIB", "VT", "…") so the analyst can see at a glance
     /// which rhythms the annotator flagged over the recording.
     private var atrRhythmTokens: [String] {
-        let rhythmCategories: Set<String> = [
-            "+", "AFIB", "AFL", "SVTA", "SBR", "BII", "BI", "NOD", "VT", "VF", "VFL"
-        ]
+        // WFDB `+` rhythm-change markers carry the annotator's rhythm label in
+        // their AUX field, decoded into `note` at import (C2). Surface the
+        // distinct labels VERBATIM, in time order. Displayed as-is (the app
+        // never translates "AFIB" into "atrial fibrillation" in this row — the
+        // label is the annotator's, not the app's reading).
         var seen = Set<String>()
         var ordered: [String] = []
-        for ann in annotations {
-            let normalized = ann.category.trimmingCharacters(in: .whitespaces).uppercased()
-            guard rhythmCategories.contains(normalized) else { continue }
-            // Rhythm-change markers (WFDB `+`) don't render on their
-            // own — they mark a boundary but carry the next rhythm in
-            // their note. Skip the raw `+` tag; the specific rhythm
-            // annotations carry the useful signal.
-            guard normalized != "+" else { continue }
-            if seen.insert(normalized).inserted {
-                ordered.append(humanLabel(for: ann.category))
-            }
+        for ann in rhythmMarkers where ann.note != nil {
+            guard let note = ann.note, !note.isEmpty else { continue }
+            if seen.insert(note).inserted { ordered.append(note) }
         }
         return ordered
+    }
+
+    /// `+` rhythm-change markers in time order.
+    private var rhythmMarkers: [Annotation] {
+        annotations
+            .filter { $0.category.trimmingCharacters(in: .whitespaces) == "+" }
+            .sorted { $0.sampleIndex < $1.sampleIndex }
+    }
+
+    /// The rhythm label prevailing at the current viewport start — the last
+    /// `+` marker at or before it, since a `+` sets the rhythm until the next
+    /// one. Gives the analyst the "which rhythm am I in right now" context the
+    /// review queue otherwise can't answer (C2). Verbatim annotator label.
+    private var prevailingRhythm: String? {
+        let start = viewport.startSample
+        let labelled = rhythmMarkers.filter { $0.note?.isEmpty == false }
+        return (labelled.last { $0.sampleIndex <= start } ?? labelled.first)?.note
     }
 
     private var rhythmContextBanner: some View {
@@ -426,6 +437,13 @@ struct FindingsPanel: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Rhythm context")
                     .font(.caption.weight(.semibold))
+                if let prevailing = prevailingRhythm {
+                    provenanceLine(
+                        label: "At viewport",
+                        detail: prevailing,
+                        source: "prevailing `.atr` rhythm marker at the current view"
+                    )
+                }
                 if !atrRhythmTokens.isEmpty {
                     provenanceLine(
                         label: "Rhythms",
@@ -602,6 +620,16 @@ struct FindingsPanel: View {
                             .font(.caption2.monospaced())
                             .foregroundStyle(.tertiary)
                     }
+                    if let note = entry.annotation.note, !note.isEmpty {
+                        // Annotator's verbatim label — e.g. a `+` marker's
+                        // rhythm string ("AFIB") decoded from the .atr AUX
+                        // field (C2). Never reworded into clinical prose;
+                        // provenance is the .atr.
+                        Text(note)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                     Spacer(minLength: 4)
                     if let departureLabel = entry.departureLabel {
                         // Neutral ink per the ratified 2026-07-05 B-RUO
@@ -772,7 +800,7 @@ struct FindingsPanel: View {
             FindingGroup(
                 category: category,
                 humanLabel: humanLabel(for: category),
-                subLabel: subLabel(for: category),
+                subLabel: groupSubtitle(for: category),
                 color: CategoryPalette.swiftUIColor(for: category),
                 count: entries.count,
                 aggregateDeparture: entries.compactMap(\.departure).max() ?? 0,
@@ -863,6 +891,14 @@ struct FindingsPanel: View {
     /// which is the common case for range findings and comments; those
     /// still sort by count/time within their group.
     private func departureScore(for ann: Annotation) -> Double? {
+        // Non-morphology markers and escape beats never carry a meaningful
+        // QRS-width / QT departure: `~` (noise) and `+`/`|`/`"` are not
+        // beats, and `E` (ventricular escape) is a LATE beat whose relevant
+        // quantity is the preceding R-R, not a width departure (C1). Without
+        // this guard a marker landing near a beat spuriously shows a
+        // departure it has no business claiming (AX audit item 5).
+        let rawCategory = ann.category.trimmingCharacters(in: .whitespaces)
+        if ["~", "+", "|", "\"", "E"].contains(rawCategory) { return nil }
         // Beat-aligned point annotations can consult the fiducial
         // store. Match beat by rPeakSampleIndex ≈ annotation's
         // sampleIndex (nearest within a small tolerance).
@@ -891,7 +927,20 @@ struct FindingsPanel: View {
     /// Unknown categories pass through as-is so this layer stays open
     /// to whatever a producer emits.
     private func humanLabel(for category: String) -> String {
-        let key = category.trimmingCharacters(in: .whitespaces).uppercased()
+        let raw = category.trimmingCharacters(in: .whitespaces)
+        // Case-sensitive WFDB codes — case is MEANINGFUL in the standard, so
+        // match the raw symbol before the case-insensitive fallback below.
+        // Verified against the WFDB ecgcodes table: `a` (4) aberrated atrial
+        // premature ≠ `A` (8) atrial premature; `E` (10) ventricular escape;
+        // `~` (14) signal-quality change. Uppercasing alone silently
+        // conflated `a` into `A` and dropped the word "aberrated".
+        switch raw {
+        case "a":  return "Aberrated atrial premature"
+        case "E":  return "Ventricular escape"
+        case "~":  return "Signal-quality change"
+        default:   break
+        }
+        let key = raw.uppercased()
         switch key {
         case "V":     return "Ventricular ectopy"
         case "PVC":   return "Ventricular ectopy — PVC"
@@ -915,16 +964,52 @@ struct FindingsPanel: View {
     /// Optional sub-label under the group title. Explains what
     /// "departure" is measuring for this category, so ranking never
     /// reads as a clinical verdict.
+    /// Base measurement/descriptor for a group, WITHOUT any ordering claim.
+    /// The "ranked by …" prefix is added conditionally by `groupSubtitle`
+    /// only when the departure sort is actually in effect (AX5) — otherwise
+    /// the header would assert an order the rows (chronological) don't show.
     private func subLabel(for category: String) -> String? {
-        let key = category.trimmingCharacters(in: .whitespaces).uppercased()
+        let raw = category.trimmingCharacters(in: .whitespaces)
+        // Case-sensitive WFDB codes first (see humanLabel).
+        switch raw {
+        case "a":  return "coupling-interval departure"
+        // `E` is a LATE beat (the sinus/AV node failed to deliver), the
+        // opposite mechanism to ectopy — the meaningful quantity is the
+        // preceding R-R (how long the pause was), never a QRS-width
+        // departure. departureScore is suppressed for `E` accordingly.
+        case "E":  return "preceding R-R interval"
+        case "~":  return "annotator quality transitions"
+        default:   break
+        }
+        let key = raw.uppercased()
         switch key {
-        case "V", "PVC":  return "ranked by QRS-width departure from patient normal"
+        case "V", "PVC":  return "QRS-width departure from patient normal"
         case "A", "APC":  return "coupling-interval departure"
         case "+":         return "annotator rhythm transitions"
         case "|":         return "non-beat deflections flagged for exclusion"
         case "\"":        return "original database notes — verbatim"
         case "NOISE":     return "interval stats suppressed inside"
         default:          return nil
+        }
+    }
+
+    /// The subtitle actually rendered under a group header. Adds the
+    /// "ranked by …" ordering claim ONLY when the departure sort is in
+    /// effect AND the category is departure-rankable, so the header never
+    /// asserts an ordering the visible rows don't exhibit (AX5). Keeps the
+    /// descriptor otherwise — the navigational framing is load-bearing.
+    private func groupSubtitle(for category: String) -> String? {
+        guard let base = subLabel(for: category) else { return nil }
+        if effectiveSort == .departure && isDepartureRanked(category) {
+            return "ranked by \(base)"
+        }
+        return base
+    }
+
+    private func isDepartureRanked(_ category: String) -> Bool {
+        switch category.trimmingCharacters(in: .whitespaces).uppercased() {
+        case "V", "PVC", "A", "APC", "F", "L", "R": return true
+        default: return false
         }
     }
 

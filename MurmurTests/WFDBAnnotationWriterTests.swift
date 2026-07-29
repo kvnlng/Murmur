@@ -74,4 +74,43 @@ struct WFDBAnnotationWriterTests {
         ])
         #expect(hex(out) == "64 58 01 fc 50 00 00 ec 00 00 78 05 00 58 01 fc 51 00 00 00")
     }
+
+    // MARK: - AUX capture on read-back (C2)
+
+    @Test("Reader captures the AUX payload verbatim on read-back")
+    func readerCapturesAux() {
+        let events = [
+            WFDBAnnotationWriter.Event(sampleIndex: 250, aux: "confirmed VT 1.0-16.0s"),
+            WFDBAnnotationWriter.Event(sampleIndex: 4000, aux: "PVC couplet"),
+        ]
+        let decoded = WFDBAnnotationParser.parse(data: WFDBAnnotationWriter.encode(events))
+        #expect(decoded.map(\.aux) == ["confirmed VT 1.0-16.0s", "PVC couplet"])
+    }
+
+    @Test("`+` rhythm-marker AUX decodes to a verbatim note, minus the leading (")
+    func rhythmMarkerAuxBecomesNote() {
+        // Hand-built .atr stream: a `+` (code 28) at sample 10, then an AUX
+        // frame carrying "(AFIB" (5 bytes, padded to 6), then EOF.
+        var bytes: [UInt8] = []
+        func word(_ w: UInt16) {
+            bytes.append(UInt8(w & 0xff))
+            bytes.append(UInt8(w >> 8))
+        }
+        word((28 << 10) | 10)
+        let payload = Array("(AFIB".utf8)
+        word((63 << 10) | UInt16(payload.count))
+        bytes.append(contentsOf: payload)
+        bytes.append(0)          // pad to even length
+        word(0)                  // EOF
+
+        let decoded = WFDBAnnotationParser.parse(data: Data(bytes))
+        #expect(decoded.count == 1)
+        #expect(decoded.first?.label == "+")
+        #expect(decoded.first?.aux == "(AFIB")
+
+        // Import strips only the syntactic leading `(`; the rest is verbatim.
+        let ann = Annotation(fromWFDB: decoded[0])
+        #expect(ann.category == "+")
+        #expect(ann.note == "AFIB")
+    }
 }

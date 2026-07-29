@@ -34,6 +34,12 @@ struct WFDBAnnotation: Codable, Equatable, Sendable {
     let sampleIndex: Int64
     let code: UInt8        // raw WFDB type code (1–58 for emitted events)
     let label: String      // single-letter symbol (e.g. "N", "V", "L")
+    // Decoded AUX payload attached to the PRECEDING annotation, when present.
+    // For `+` rhythm-change markers this carries the annotator's rhythm label
+    // (e.g. "(AFIB"). `var` (with a default) so the parser can attach it after
+    // emitting the annotation the AUX frame follows, and so existing
+    // three-argument callers keep compiling.
+    var aux: String? = nil
 }
 
 enum WFDBAnnotationError: LocalizedError {
@@ -117,9 +123,26 @@ enum WFDBAnnotationParser {
                 }
                 if typeCode == aux {
                     // The 10-bit field is the byte length of the aux string,
-                    // padded to even. Skip those bytes.
+                    // padded to even. Decode it and attach to the annotation
+                    // it follows — for `+` markers this is the rhythm label
+                    // (e.g. "(AFIB"), the richest clinical content in the file.
                     let length = delta
                     let padded = length + (length & 1)
+                    if length > 0, offset + length <= count, !annotations.isEmpty {
+                        var auxBytes = [UInt8]()
+                        auxBytes.reserveCapacity(length)
+                        for i in 0..<length { auxBytes.append(bytes[offset + i]) }
+                        // Some writers prefix a Pascal-style length byte; drop
+                        // any leading non-printable bytes, and stop at the
+                        // first NUL/control so trailing pad bytes are excluded.
+                        let printable = auxBytes
+                            .drop(while: { $0 < 0x20 })
+                            .prefix(while: { $0 >= 0x20 })
+                        if let decoded = String(bytes: printable, encoding: .utf8),
+                           !decoded.isEmpty {
+                            annotations[annotations.count - 1].aux = decoded
+                        }
+                    }
                     offset += padded
                     continue
                 }

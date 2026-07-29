@@ -301,13 +301,22 @@ extension Annotation {
     /// Converts a beat-style WFDB annotation into the rich finding model.
     /// All `.atr` events become `point` annotations sourced from `wfdb.atr`.
     init(fromWFDB wfdb: WFDBAnnotation) {
+        // The AUX payload on a `+` rhythm marker carries the annotator's
+        // rhythm label (e.g. "(AFIB"). Preserve it VERBATIM as the note,
+        // stripping only MIT-BIH's syntactic leading `(` — never translated
+        // into clinical prose (RUO: transcription, not interpretation). The
+        // provenance stays wfdb.atr.
+        let note: String? = wfdb.aux.map { raw in
+            raw.hasPrefix("(") ? String(raw.dropFirst()) : raw
+        }
         self.init(
             id: UUID(),
             kind: .point,
             sampleIndex: wfdb.sampleIndex,
             category: wfdb.label,
             label: wfdb.label,
-            source: "wfdb.atr"
+            source: "wfdb.atr",
+            note: note
         )
     }
 }
