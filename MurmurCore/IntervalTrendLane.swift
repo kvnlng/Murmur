@@ -294,6 +294,17 @@ struct IntervalTrendLane: View {
                     .font(.caption2.monospacedDigit().weight(.semibold))
                     .foregroundStyle(.primary)
                     .accessibilityIdentifier("interval-trend-lane-hover-value")
+            } else if let clock = qtClockText {
+                // QT clock (X46) — percent of beats above the analyst's guide
+                // over qualifying windows. Shown when not hovering a specific
+                // bin, so it doesn't fight the per-bin readout. Neutral.
+                Text("·")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                Text(clock)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("interval-trend-lane-qt-clock")
             }
 
             Spacer()
@@ -512,6 +523,11 @@ struct IntervalTrendLane: View {
         if bin.isEligible, let departure = Self.baselineDepartureText(median: bin.median, baseline: data.baselineMedian) {
             text += " · \(departure)"
         }
+        // X46: per-bin percent above the analyst's guide, for qualifying bins.
+        if bin.isQualifying, let guide = qtClockGuide,
+           let pct = Self.percentAbove(perBeatValues: bin.perBeatValues, guideMs: guide.valueMs) {
+            text += String(format: " · %.0f%% > %.0f", pct, guide.valueMs)
+        }
         return text
     }
 
@@ -526,6 +542,46 @@ struct IntervalTrendLane: View {
         let rounded = d.rounded()
         let sign = rounded < 0 ? "−" : "+"
         return "Δ\(sign)\(String(format: "%.0f", abs(rounded))) ms"
+    }
+
+    /// Percent (0…100) of `perBeatValues` strictly above `guideMs`, or nil for
+    /// an empty bin. Pure — the "QT clock" read (X46) is just a count, and the
+    /// analyst supplies the line (X27), so the app never picks a threshold.
+    static func percentAbove(perBeatValues: [Double], guideMs: Double) -> Double? {
+        guard !perBeatValues.isEmpty else { return nil }
+        let above = perBeatValues.reduce(0) { $0 + ($1 > guideMs ? 1 : 0) }
+        return 100 * Double(above) / Double(perBeatValues.count)
+    }
+
+    /// The guide the QT-clock read is computed against — the analyst's lowest
+    /// line for this metric (deterministic; guides are value-sorted).
+    private var qtClockGuide: IntervalTrendGuide? { guides.first }
+
+    /// "QT clock" aggregate (X46): the percentage of beats above the analyst's
+    /// guide, over QUALIFYING windows only (eligible + rate-stable), with the
+    /// excluded fraction stated when the paid layer computed it. nil when there
+    /// is no guide or no qualifying beats — the app never supplies the line.
+    private var qtClockText: String? {
+        guard let guide = qtClockGuide else { return nil }
+        var above = 0
+        var total = 0
+        var excludedSum = 0.0
+        var excludedCount = 0
+        for bin in data.bins where bin.isQualifying {
+            for v in bin.perBeatValues where v > guide.valueMs { above += 1 }
+            total += bin.perBeatValues.count
+            if let ex = bin.excludedBeatFraction {
+                excludedSum += ex
+                excludedCount += 1
+            }
+        }
+        guard total > 0 else { return nil }
+        let pct = 100 * Double(above) / Double(total)
+        var text = String(format: "%.0f%% > %.0f (qualifying)", pct, guide.valueMs)
+        if excludedCount > 0 {
+            text += String(format: " · %.0f%% excl", 100 * excludedSum / Double(excludedCount))
+        }
+        return text
     }
 
     // MARK: - Chart

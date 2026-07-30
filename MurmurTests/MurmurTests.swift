@@ -1402,6 +1402,28 @@ struct BaselineDepartureTests {
     }
 }
 
+@Suite("Percent-above-guide / QT clock (X46)")
+@MainActor
+struct PercentAboveGuideTests {
+
+    @Test("Counts beats strictly above the analyst's line")
+    func countsAbove() {
+        // 460 is above 450; 450 is not (strict); 3 of 5 above.
+        let v = [440.0, 455, 448, 470, 452]
+        #expect(IntervalTrendLane.percentAbove(perBeatValues: v, guideMs: 450) == 60)
+    }
+
+    @Test("Empty bin yields nil, never a spurious 0%")
+    func emptyIsNil() {
+        #expect(IntervalTrendLane.percentAbove(perBeatValues: [], guideMs: 450) == nil)
+    }
+
+    @Test("Boundary is strict — a beat exactly on the line is not above it")
+    func strictBoundary() {
+        #expect(IntervalTrendLane.percentAbove(perBeatValues: [450, 450], guideMs: 450) == 0)
+    }
+}
+
 @Suite("Rate-stability marker (X43)")
 struct RateStabilityMarkerTests {
 

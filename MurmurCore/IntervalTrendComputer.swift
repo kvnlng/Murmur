@@ -168,6 +168,16 @@ public struct IntervalTrendBin: Sendable, Equatable, Identifiable {
     /// The ±bpm tolerance the stability boolean was taken against (echoed for
     /// the marker text + provenance). Default is Malik 2008's ±2 bpm.
     public let rateStabilityToleranceBpm: Double
+    /// Fraction (0…1) of beats in the bin excluded as artifact/ectopic (X42),
+    /// or nil when not computed (free viewer). Stated alongside the
+    /// percent-above-guide read (X46) so a fraction is never reported blind.
+    public let excludedBeatFraction: Double?
+
+    /// A bin qualifies for rate-sensitive reads (X46 percent-above, X47 QTVI)
+    /// when it's eligible and its preceding-rate was stable. In the free viewer
+    /// (no rate compute) `rateStable` defaults true, so every eligible bin
+    /// qualifies until the paid layer narrows it.
+    public var isQualifying: Bool { isEligible && rateStable }
 
     /// The rate-stability validity marker (X43) shows only when the rate was
     /// evaluated AND found unstable — never on unknown history.
@@ -190,7 +200,8 @@ public struct IntervalTrendBin: Sendable, Equatable, Identifiable {
         rrCVPercent: Double? = nil,
         rateMaxDeviationBpm: Double? = nil,
         rateStable: Bool = true,
-        rateStabilityToleranceBpm: Double = 2
+        rateStabilityToleranceBpm: Double = 2,
+        excludedBeatFraction: Double? = nil
     ) {
         self.startSeconds = startSeconds
         self.endSeconds = endSeconds
@@ -207,6 +218,7 @@ public struct IntervalTrendBin: Sendable, Equatable, Identifiable {
         self.rateMaxDeviationBpm = rateMaxDeviationBpm
         self.rateStable = rateStable
         self.rateStabilityToleranceBpm = rateStabilityToleranceBpm
+        self.excludedBeatFraction = excludedBeatFraction
     }
 
     public var id: Double { (startSeconds + endSeconds) / 2 }
