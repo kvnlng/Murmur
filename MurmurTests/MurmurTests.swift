@@ -1397,6 +1397,43 @@ struct CalibrationMathTests {
         #expect(CalibrationMath.windowSamples(millimetersPerSecond: 25, canvasWidthPoints: 1250, millimetersPerPoint: 0.2, sampleRate: 0) == nil)
     }
 
+    @Test("Fit-to-window gain fills the height with the observed excursion")
+    func fitGain() {
+        // Excursion ±1.8 mV onto a 360 pt canvas at 5 pt/mm → 100 pt/mV → 20 mm/mV.
+        let gain = CalibrationMath.fitGain(
+            extentMillivolts: 1.8, canvasHeightPoints: 360, millimetersPerPoint: 0.2
+        )
+        #expect(gain != nil)
+        #expect(abs((gain ?? 0) - 20) < 1e-9)
+        #expect(CalibrationMath.fitGain(extentMillivolts: 0, canvasHeightPoints: 360, millimetersPerPoint: 0.2) == nil)
+    }
+
+    /// §8 REPORT (not a fix): at a typical ~5 pt/mm display, the red amplitude
+    /// grid tiers (0.1 mV fine / 0.5 mV coarse) sit at FIXED spacing once gain
+    /// is fixed. This documents which tiers land in the 3–7 pt fade band —
+    /// where a tier is permanently half-lit — per gain preset. The decision on
+    /// what (if anything) to do about the ×1 case is Kevin's, not the agent's.
+    @Test("Amplitude tier spacing per gain preset at 5 pt/mm (X40 §8 report)")
+    func amplitudeTierSpacingReport() {
+        let mmPerPoint = 0.2   // 5 pt/mm, the spec's reference display
+        func spacing(gain: Double, tierMv: Double) -> Double { tierMv * gain / mmPerPoint }
+        func band(_ pts: Double) -> String {
+            if pts < GridLadder.cullPoints { return "culled" }
+            if pts < GridLadder.fullPoints { return "half-lit" }
+            return "full"
+        }
+        // ×½ = 5 mm/mV: 0.1 mV → 2.5 pt (culled), 0.5 mV → 12.5 pt (full).
+        #expect(band(spacing(gain: 5, tierMv: 0.1)) == "culled")
+        #expect(band(spacing(gain: 5, tierMv: 0.5)) == "full")
+        // ×1 = 10 mm/mV (STANDARD): 0.1 mV → 5 pt — squarely mid-ramp,
+        // i.e. permanently half-lit. This is the case the spec flagged.
+        #expect(abs(spacing(gain: 10, tierMv: 0.1) - 5) < 1e-9)
+        #expect(band(spacing(gain: 10, tierMv: 0.1)) == "half-lit")
+        #expect(band(spacing(gain: 10, tierMv: 0.5)) == "full")
+        // ×2 = 20 mm/mV: 0.1 mV → 10 pt (full), 0.5 mV → 50 pt (full).
+        #expect(band(spacing(gain: 20, tierMv: 0.1)) == "full")
+    }
+
     @Test("Standard View math round-trips to a standard readout")
     func standardRoundTrips() {
         // Applying the standard gain + speed math to a canvas, then reading it

@@ -874,6 +874,28 @@ struct BedsideView: View {
         viewport.setWidth(samples, anchorFraction: 0.5)   // preserves centre time
     }
 
+    /// Set the shared amplitude gain to a preset (X40 §5: 5 / 10 / 20 mm/mV).
+    /// Shared across leads by clinical convention; the panels' displayRange
+    /// derives from it reactively.
+    private func setGain(millimetersPerMillivolt gain: Double) {
+        calibration.gainMillimetersPerMillivolt = gain
+    }
+
+    /// Set the timebase to a preset (X40 §5: 25 / 50 mm/s) by snapping the
+    /// viewport width, preserving centre time. No-op when the display's
+    /// physical size can't be trusted (the X32 honesty rule).
+    private func setSpeed(millimetersPerSecond speed: Double) {
+        guard let mmPerPoint = DisplayMetrics.millimetersPerPoint(),
+              let samples = CalibrationMath.windowSamples(
+                  millimetersPerSecond: speed,
+                  canvasWidthPoints: Double(calibration.canvasSize.width),
+                  millimetersPerPoint: mmPerPoint,
+                  sampleRate: viewport.sampleRate
+              ) else { return }
+        if windowLockedTo10s { windowLockedTo10s = false }
+        viewport.setWidth(samples, anchorFraction: 0.5)
+    }
+
     /// Toggle the 10-second window lock. Engaging it snaps the viewport to a
     /// 10 s window centered on the current position; the lock then holds the
     /// zoom steady through finding / candidate jumps (see FindingsPanel's
@@ -1110,6 +1132,7 @@ struct BedsideView: View {
         VStack(alignment: .leading, spacing: 6) {
             viewportIndicator
             CalibrationReadout(reading: calibrationReading)
+            calibrationControls
             dockedBeatCard
             if !markingsContext.beats.isEmpty {
                 fiducialLayersChip
@@ -1136,6 +1159,51 @@ struct BedsideView: View {
             visibleMillivoltSpan: calibration.visibleMillivoltSpan,
             millimetersPerPoint: DisplayMetrics.millimetersPerPoint()
         )
+    }
+
+    /// The clinical preset ladder (X40 §5) + the inline Standard View
+    /// affordance (§2's toolbar path). Gain and speed are the standard ECG
+    /// idiom, not arbitrary numbers; gain buttons highlight the active preset.
+    private var calibrationControls: some View {
+        let activeGain = calibration.gainMillimetersPerMillivolt
+        return VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 4) {
+                Text("Gain").font(.caption2).foregroundStyle(.secondary).frame(width: 38, alignment: .leading)
+                ForEach([5.0, 10.0, 20.0], id: \.self) { value in
+                    Button("\(Int(value))") { setGain(millimetersPerMillivolt: value) }
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                        .tint(activeGain == value ? Color.accentColor : nil)
+                        .accessibilityIdentifier("gain-\(Int(value))")
+                }
+                Text("mm/mV").font(.caption2).foregroundStyle(.tertiary)
+            }
+            HStack(spacing: 4) {
+                Text("Speed").font(.caption2).foregroundStyle(.secondary).frame(width: 38, alignment: .leading)
+                ForEach([25.0, 50.0], id: \.self) { value in
+                    Button("\(Int(value))") { setSpeed(millimetersPerSecond: value) }
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                        .accessibilityIdentifier("speed-\(Int(value))")
+                }
+                Text("mm/s").font(.caption2).foregroundStyle(.tertiary)
+            }
+            Button {
+                applyStandardView()
+            } label: {
+                Label("Standard View", systemImage: "ruler")
+                    .font(.caption2)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .accessibilityIdentifier("standard-view-button")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("calibration-controls")
     }
 
     private var viewportIndicator: some View {
@@ -1806,12 +1874,6 @@ private struct ChannelPanel: View {
     /// finishes (or empty for zero-sample channels). Drives both the
     /// header range badge and the per-channel Y-axis autoscale.
     @State private var sampleRange: MinMaxScanner.Range?
-    /// When true, the canvas's display range fits the scanned signal
-    /// (plus padding) instead of the fixed ±5 mV clinical reference.
-    /// Per-channel state because different leads in a record can have
-    /// very different amplitudes (e.g., precordial vs. limb leads).
-    @State private var autoscaleY: Bool = false
-
     /// This panel's measured canvas height in points, feeding the gain-derived
     /// amplitude window (X40). 0 until first layout → displayRange falls back
     /// to ±5 mV meanwhile.
@@ -1908,16 +1970,14 @@ private struct ChannelPanel: View {
     }
 
     /// Effective display range for the canvas + voltage axis.
-    ///   • Auto Y on → fits the scanned `sampleRange` (10% headroom).
-    ///   • A canonical gain is set (Standard View / a preset) → the mV window
-    ///     is DERIVED from that gain + this panel's height + the display's
-    ///     physical size, centred on the baseline (X40).
+    ///   • A canonical gain is set (Standard View / a preset / Fit to window)
+    ///     → the mV window is DERIVED from that gain + this panel's height +
+    ///     the display's physical size, centred on the baseline (X40).
     ///   • Otherwise → the legacy fixed ±5 mV reference (also the fallback
     ///     until the canvas is measured or when the display size is untrusted).
+    /// There is no live Auto-Y mode any more — a scale that rescaled per window
+    /// was the amplitude-ruler incoherence X40 closes; fitting is now one-shot.
     private var displayRange: ClosedRange<Double> {
-        if autoscaleY, let range = sampleRange, !range.isEmpty {
-            return range.displayRange()
-        }
         if let gain = calibration.gainMillimetersPerMillivolt,
            canvasHeightPoints > 0,
            let mmPerPoint = DisplayMetrics.millimetersPerPoint(),
@@ -1929,6 +1989,24 @@ private struct ChannelPanel: View {
             return -halfSpan...halfSpan
         }
         return Self.yMin...Self.yMax
+    }
+
+    /// One-shot "Fit amplitude to window" (X40) — replaces the deleted live
+    /// Auto Y. Computes a single gain so the observed excursion fits the
+    /// baseline-centred window (10% headroom), sets the shared gain, and the
+    /// view is then in a plain non-standard gain state the readout reports.
+    /// Per-channel observed range but SHARED gain, matching the focused lead.
+    private func fitAmplitudeToWindow() {
+        guard let range = sampleRange, !range.isEmpty,
+              canvasHeightPoints > 0,
+              let mmPerPoint = DisplayMetrics.millimetersPerPoint() else { return }
+        let extent = Double(max(abs(range.min), abs(range.max))) * 1.1
+        guard let gain = CalibrationMath.fitGain(
+            extentMillivolts: extent,
+            canvasHeightPoints: Double(canvasHeightPoints),
+            millimetersPerPoint: mmPerPoint
+        ) else { return }
+        calibration.gainMillimetersPerMillivolt = gain
     }
 
     /// Publish this panel's trace geometry to the shared calibration so the
@@ -2353,16 +2431,16 @@ private struct ChannelPanel: View {
                     .foregroundStyle(.tertiary)
                     .help("Recording-wide voltage range observed on this channel")
                     .accessibilityIdentifier("channel-range-\(channel.name)")
-                Toggle(isOn: $autoscaleY) {
-                    Label("Auto Y", systemImage: "arrow.up.and.down")
+                Button {
+                    fitAmplitudeToWindow()
+                } label: {
+                    Label("Fit amplitude", systemImage: "arrow.up.and.down")
                         .labelStyle(.titleAndIcon)
                 }
-                .toggleStyle(.button)
+                .buttonStyle(.bordered)
                 .controlSize(.mini)
-                .help(autoscaleY
-                      ? "Display range fits this channel's observed amplitude (with 10% headroom). Click to fix at ±5 mV."
-                      : "Display range fixed at ±5 mV. Click to fit this channel's observed amplitude.")
-                .accessibilityIdentifier("autoscale-y-\(channel.name)")
+                .help("Set the gain once so this channel's observed amplitude fills the window (10% headroom). A one-shot fit, not a live rescale — the calibration readout then reports the resulting gain.")
+                .accessibilityIdentifier("fit-amplitude-\(channel.name)")
             }
             Spacer()
             Text(timeWindowLabel)

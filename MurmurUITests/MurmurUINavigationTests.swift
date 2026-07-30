@@ -205,19 +205,20 @@ final class MurmurUINavigationTests: XCTestCase {
                       "Lead I (focused by default) should have a min/max badge once the scan completes")
     }
 
-    /// Auto-Y toggle appears alongside the channel-range badge once the
-    /// scan completes. Guards: scanner result reaches the panel header,
-    /// Toggle is given an accessibility identifier the test can find.
+    /// The "Fit amplitude to window" button appears alongside the
+    /// channel-range badge once the scan completes (X40 replaced the live
+    /// Auto-Y toggle with this one-shot fit). Guards: scanner result reaches
+    /// the panel header, the button carries a findable accessibility id.
     @MainActor
-    func testAutoscaleYToggleAppearsForSyntheticFixture() throws {
+    func testFitAmplitudeButtonAppearsForSyntheticFixture() throws {
         let app = XCUIApplication()
         app.launchArguments += ["--ui-test-sample"]
         app.launch()
 
-        let toggle = app.descendants(matching: .any)
-            .matching(identifier: "autoscale-y-I").firstMatch
-        XCTAssertTrue(toggle.waitForExistence(timeout: 8),
-                      "Lead I (focused by default) should expose an autoscale-Y toggle once the scan completes")
+        let fit = app.descendants(matching: .any)
+            .matching(identifier: "fit-amplitude-I").firstMatch
+        XCTAssertTrue(fit.waitForExistence(timeout: 8),
+                      "Lead I (focused by default) should expose a Fit-amplitude button once the scan completes")
     }
 
     /// Toolbar button that opens the PNG-snapshot save panel. Guards

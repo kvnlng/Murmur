@@ -64,6 +64,20 @@ enum CalibrationMath {
         return halfSpan.isFinite && halfSpan > 0 ? halfSpan : nil
     }
 
+    /// Gain (mm/mV) that fits a baseline-centred window of half-height
+    /// `extent` mV onto a canvas `heightPoints` tall — the one-shot
+    /// "Fit amplitude to window". nil for degenerate input.
+    static func fitGain(
+        extentMillivolts extent: Double,
+        canvasHeightPoints heightPoints: Double,
+        millimetersPerPoint mmPerPoint: Double
+    ) -> Double? {
+        guard extent > 0, heightPoints > 0, mmPerPoint > 0 else { return nil }
+        let pointsPerMillivolt = heightPoints / (2 * extent)
+        let gain = pointsPerMillivolt * mmPerPoint
+        return gain.isFinite && gain > 0 ? gain : nil
+    }
+
     /// Viewport width in samples that renders `speed` mm/s across a canvas
     /// `widthPoints` wide. nil for degenerate input — the caller then leaves
     /// the viewport alone rather than snapping to a nonsense width.
