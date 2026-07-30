@@ -1388,6 +1388,7 @@ struct BedsideView: View {
                 binSeconds: trendLaneContext.binSeconds,
                 templateBeatCount: markingsContext.template?.sampleCount,
                 qtcFormulaName: markingsContext.qtcFormula.displayName,
+                qtcFormula: markingsContext.qtcFormula,
                 recordingTimeRange: recordingTimeRange,
                 viewportTimeRange: viewportTimeRange,
                 band: IntervalTrendRepresentation.band(
@@ -1416,6 +1417,9 @@ struct BedsideView: View {
                 },
                 onPickShowMode: { mode in
                     trendLaneContext.showMode = mode
+                },
+                onPickFormula: { formula in
+                    markingsContext.qtcFormula = formula
                 },
                 onAddGuide: { valueMs, label in
                     trendGuideStore.add(
@@ -2699,6 +2703,9 @@ private struct IntervalTrendLaneMemoizedStrip: View, Equatable {
     let binSeconds: Double
     let templateBeatCount: Int?
     let qtcFormulaName: String
+    /// The QTc formula in effect, for the X44 picker (distinct from the echoed
+    /// `qtcFormulaName` string used in the repro caption).
+    let qtcFormula: MarkingsQTcFormula
     let recordingTimeRange: ClosedRange<Double>
     /// The ECG viewport's visible window (seconds). At `.window` band it
     /// becomes the lane's x-domain so per-beat scatter is legible (X41).
@@ -2721,6 +2728,7 @@ private struct IntervalTrendLaneMemoizedStrip: View, Equatable {
     let onPickMetric: (IntervalTrendMetric) -> Void
     let onPickBinPreset: (IntervalTrendBinPreset) -> Void
     let onPickShowMode: (IntervalTrendShowMode) -> Void
+    let onPickFormula: (MarkingsQTcFormula) -> Void
     let onAddGuide: (Double, String) -> Void
     let onRemoveGuide: (UUID) -> Void
     /// Excluded from `==` (a closure rebuilt every pass); gated by
@@ -2738,6 +2746,7 @@ private struct IntervalTrendLaneMemoizedStrip: View, Equatable {
             && lhs.metric == rhs.metric
             && lhs.binSeconds == rhs.binSeconds
             && lhs.qtcFormulaName == rhs.qtcFormulaName
+            && lhs.qtcFormula == rhs.qtcFormula
             && lhs.recordingTimeRange == rhs.recordingTimeRange
             && lhs.viewportTimeRange == rhs.viewportTimeRange
             && lhs.band == rhs.band
@@ -2768,6 +2777,7 @@ private struct IntervalTrendLaneMemoizedStrip: View, Equatable {
             metric: metric,
             showMode: showMode,
             band: band,
+            qtcFormula: qtcFormula,
             selectedBinPreset: selectedBinPreset,
             guides: guides,
             events: events,
@@ -2778,6 +2788,7 @@ private struct IntervalTrendLaneMemoizedStrip: View, Equatable {
             onPickMetric: onPickMetric,
             onPickBinPreset: onPickBinPreset,
             onPickShowMode: onPickShowMode,
+            onPickFormula: onPickFormula,
             onAddGuide: onAddGuide,
             onRemoveGuide: onRemoveGuide,
             // Gate the gesture here so a locked / unentitled lane still taps +

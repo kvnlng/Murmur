@@ -124,10 +124,17 @@ struct IntervalTrendLane: View {
         showMode == .perBeatScatter && effectiveShowMode != .perBeatScatter
     }
 
+    /// The QTc rate-correction formula in effect (X44). Shown as a picker on
+    /// the QTc lane so an analyst reproducing published work can match its
+    /// formula. Ignored for non-QTc metrics.
+    let qtcFormula: MarkingsQTcFormula
+
     /// Callbacks for the control-chip menus. Nil hides the picker.
     let onPickMetric: ((IntervalTrendMetric) -> Void)?
     let onPickBinPreset: ((IntervalTrendBinPreset) -> Void)?
     let onPickShowMode: ((IntervalTrendShowMode) -> Void)?
+    /// Set the QTc formula (X44). Nil hides the formula picker.
+    let onPickFormula: ((MarkingsQTcFormula) -> Void)?
 
     /// Analyst-placed threshold guides for the current metric.
     /// Rendered as dashed horizontal lines with tags — never asserted
@@ -196,6 +203,7 @@ struct IntervalTrendLane: View {
         metric: IntervalTrendMetric,
         showMode: IntervalTrendShowMode,
         band: IntervalTrendLaneBand = .map,
+        qtcFormula: MarkingsQTcFormula = .fridericia,
         selectedBinPreset: IntervalTrendBinPreset,
         guides: [IntervalTrendGuide] = [],
         events: [IntervalTrendEvent] = [],
@@ -206,6 +214,7 @@ struct IntervalTrendLane: View {
         onPickMetric: ((IntervalTrendMetric) -> Void)? = nil,
         onPickBinPreset: ((IntervalTrendBinPreset) -> Void)? = nil,
         onPickShowMode: ((IntervalTrendShowMode) -> Void)? = nil,
+        onPickFormula: ((MarkingsQTcFormula) -> Void)? = nil,
         onAddGuide: ((Double, String) -> Void)? = nil,
         onRemoveGuide: ((UUID) -> Void)? = nil,
         onAuthorRange: ((Double, Double, String, String) -> Void)? = nil,
@@ -216,6 +225,8 @@ struct IntervalTrendLane: View {
         self.metric = metric
         self.showMode = showMode
         self.band = band
+        self.qtcFormula = qtcFormula
+        self.onPickFormula = onPickFormula
         self.selectedBinPreset = selectedBinPreset
         self.guides = guides
         self.events = events
@@ -288,6 +299,7 @@ struct IntervalTrendLane: View {
             Spacer()
 
             metricPicker
+            formulaPicker
             binPicker
             showModePicker
             // Honest coercion cue (X41): the analyst preferred per-beat scatter
@@ -394,6 +406,29 @@ struct IntervalTrendLane: View {
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
+            }
+        }
+    }
+
+    /// QTc formula picker (X44). Reproducing published work means matching its
+    /// correction, so the analyst chooses; the app presents the options and the
+    /// caveats but never arbitrates. Only on the QTc lane.
+    @ViewBuilder
+    private var formulaPicker: some View {
+        if metric == .qtc, let onPick = onPickFormula {
+            controlChip(label: qtcFormula.displayName, identifier: "interval-trend-lane-formula-picker") {
+                Menu {
+                    ForEach(MarkingsQTcFormula.allCases, id: \.self) { option in
+                        Button(option.displayName) { onPick(option) }
+                    }
+                } label: {
+                    chipContent(text: qtcFormula.displayName)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                // Regulatory divergence + the non-comparability rule, per the
+                // 2026-07-03 spec: the app states the choice, never arbitrates.
+                .help("QTc rate-correction formula. FDA/EMA favour Fridericia for drug studies; the 2009 AHA/ACCF/HRS statement preferred linear methods (Framingham, Hodges) over Bazett and Fridericia for routine monitoring. Values under different formulas are NOT comparable — don't read one against another.")
             }
         }
     }
