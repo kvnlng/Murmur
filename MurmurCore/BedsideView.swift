@@ -845,6 +845,10 @@ struct BedsideView: View {
     /// keeps whatever the analyst was looking at in the same on-screen
     /// position.
     private func zoom(factor: Double) {
+        // Calibration lock (X40 §4): while locked, zoom no-ops so the timebase
+        // calibration can't be silently changed out from under the readout.
+        // Contract (a) — the lock is a genuine hold, not a soft preference.
+        guard !calibration.locked else { return }
         // A deliberate zoom breaks the 10 s window lock — the analyst has
         // chosen a different frame.
         if windowLockedTo10s { windowLockedTo10s = false }
@@ -1188,15 +1192,35 @@ struct BedsideView: View {
                 }
                 Text("mm/s").font(.caption2).foregroundStyle(.tertiary)
             }
-            Button {
-                applyStandardView()
-            } label: {
-                Label("Standard View", systemImage: "ruler")
-                    .font(.caption2)
+            HStack(spacing: 6) {
+                Button {
+                    applyStandardView()
+                } label: {
+                    Label("Standard View", systemImage: "ruler")
+                        .font(.caption2)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .accessibilityIdentifier("standard-view-button")
+
+                // Lock to standard (X40 §4): holds calibration across zoom
+                // gestures — paging a long record on fixed paper. Pan stays
+                // free; a pinch / ⌘-wheel / ± no-ops while engaged.
+                Button {
+                    calibration.locked.toggle()
+                } label: {
+                    Image(systemName: calibration.locked ? "lock.fill" : "lock.open")
+                        .font(.caption2)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(calibration.locked ? Color.accentColor : nil)
+                .help(calibration.locked
+                      ? "Calibration locked — zoom is held so the paper scale can't change while you page. Click to unlock."
+                      : "Lock the calibration so zoom gestures don't change the paper scale while panning. Pan stays free.")
+                .accessibilityIdentifier("calibration-lock-button")
+                .accessibilityLabel(calibration.locked ? "Calibration locked" : "Calibration unlocked")
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .accessibilityIdentifier("standard-view-button")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
@@ -2565,7 +2589,8 @@ private struct ChannelPanel: View {
     /// pan shifts the window by the scrolled distance. `canvasWidth` is the
     /// live trace width in points.
     private func handleWheelScroll(_ scroll: WheelScroll, canvasWidth: CGFloat) {
-        if scroll.zoomDetents != 0 {
+        // Calibration lock (X40 §4): pan stays free, zoom is held.
+        if scroll.zoomDetents != 0, !calibration.locked {
             let factor = pow(1.35, -scroll.zoomDetents)   // detents > 0 → zoom in
             let currentWidth = viewport.endSample - viewport.startSample
             let newWidth = Int64((Double(currentWidth) * factor).rounded())
@@ -2582,6 +2607,9 @@ private struct ChannelPanel: View {
     private func zoomGesture(in canvasSize: CGSize) -> some Gesture {
         MagnifyGesture()
             .onChanged { value in
+                // Calibration lock (X40 §4): a pinch can't change the timebase
+                // calibration while locked.
+                guard !calibration.locked else { return }
                 if zoomStartWidth == nil {
                     zoomStartWidth = viewport.endSample - viewport.startSample
                 }

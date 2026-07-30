@@ -1359,6 +1359,32 @@ struct CalibrationReadingTests {
     }
 }
 
+@Suite("Calibration model")
+@MainActor
+struct CalibrationModelTests {
+
+    @Test("Defaults: no explicit gain, unlocked")
+    func defaults() {
+        let cal = Calibration()
+        #expect(cal.gainMillimetersPerMillivolt == nil)
+        #expect(cal.locked == false)
+    }
+
+    /// Lock contract (X40 §4, contract (a) chosen): the lock is a genuine
+    /// hold. The zoom entry points (`zoom(factor:)`, the pinch gesture, the
+    /// ⌘-wheel branch) each `guard !calibration.locked`; those are gesture-
+    /// bound view methods verified by hand, but the flag they read is the
+    /// single source of truth asserted here.
+    @Test("Lock toggles and is the flag the zoom guards read")
+    func lockToggles() {
+        let cal = Calibration()
+        cal.locked = true
+        #expect(cal.locked)
+        cal.locked.toggle()
+        #expect(!cal.locked)
+    }
+}
+
 @Suite("Calibration geometry math (X40 Standard View)")
 struct CalibrationMathTests {
 
