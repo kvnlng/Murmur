@@ -504,7 +504,28 @@ struct IntervalTrendLane: View {
         if metric == .qtc, bin.showsRateUnstableMarker, let dev = bin.rateMaxDeviationBpm {
             text += String(format: " · rate unstable (Δ%.0f bpm / 2 min)", dev)
         }
+        // X45: the working metric in practice is the CHANGE, not the absolute —
+        // the numeric departure from the patient's own normal, alongside the
+        // absolute. Neutral, shown only for eligible bins with a baseline;
+        // absent (blank) when there's no template, which stays visually
+        // distinct from a zero departure ("Δ+0 ms").
+        if bin.isEligible, let departure = Self.baselineDepartureText(median: bin.median, baseline: data.baselineMedian) {
+            text += " · \(departure)"
+        }
         return text
+    }
+
+    /// Signed departure of a bin from the patient-normal baseline, e.g.
+    /// "Δ+20 ms" / "Δ−15 ms" / "Δ+0 ms". `nil` when there is no baseline —
+    /// the caller shows nothing, keeping "no reference" distinct from "zero
+    /// change" (K9's blank-vs-zero rule). Pure, so it's unit-testable.
+    static func baselineDepartureText(median: Double, baseline: Double?) -> String? {
+        guard let baseline else { return nil }
+        // Use a minus glyph (not hyphen) so negatives read cleanly in the mono row.
+        let d = median - baseline
+        let rounded = d.rounded()
+        let sign = rounded < 0 ? "−" : "+"
+        return "Δ\(sign)\(String(format: "%.0f", abs(rounded))) ms"
     }
 
     // MARK: - Chart

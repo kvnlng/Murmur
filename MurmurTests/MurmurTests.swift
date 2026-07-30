@@ -1385,6 +1385,23 @@ struct IntervalTrendRepresentationTests {
     }
 }
 
+@Suite("Baseline departure (X45)")
+@MainActor
+struct BaselineDepartureTests {
+
+    @Test("Signed departure, with a real minus glyph")
+    func signed() {
+        #expect(IntervalTrendLane.baselineDepartureText(median: 460, baseline: 440) == "Δ+20 ms")
+        #expect(IntervalTrendLane.baselineDepartureText(median: 425, baseline: 440) == "Δ−15 ms")
+    }
+
+    @Test("Zero change reads Δ+0 ms; no baseline reads blank — the two differ")
+    func zeroVsBlank() {
+        #expect(IntervalTrendLane.baselineDepartureText(median: 440, baseline: 440) == "Δ+0 ms")
+        #expect(IntervalTrendLane.baselineDepartureText(median: 440, baseline: nil) == nil)
+    }
+}
+
 @Suite("Rate-stability marker (X43)")
 struct RateStabilityMarkerTests {
 
