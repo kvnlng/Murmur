@@ -34,6 +34,97 @@ let waveformRenderLog = OSLog(
     category: .pointsOfInterest
 )
 
+/// One coalesced mouse-wheel gesture, summed over a runloop turn.
+/// `panPoints` is horizontal pan intent in points along the trace;
+/// `zoomDetents` is in wheel notches (positive = zoom IN); `anchorFractionX`
+/// is the pointer's fraction across the plot so a wheel-zoom keeps whatever is
+/// under the cursor fixed.
+struct WheelScroll {
+    var panPoints: Double
+    var zoomDetents: Double
+    var anchorFractionX: Double
+}
+
+/// MTKView that turns a mouse wheel into pan/zoom (X38 /
+/// project_grid_ladder_and_wheel_navigation.md). A notched wheel is the only
+/// mouse affordance for the trace after pan/zoom moved to the trackpad's drag
+/// + pinch; this fills that gap:
+///   • bare wheel   → pan along time
+///   • ⌘ / ⌥ + wheel → zoom anchored at the pointer (never ⌃ — that is macOS
+///     accessibility screen zoom and would fight us)
+///   • ⇧ + wheel    → pan (horizontal-scroll muscle memory)
+/// Zoom is exponential and ignores natural-scroll inversion (wheel-away = zoom
+/// in, always); pan respects it. Deltas are coalesced per runloop turn so a
+/// wheel burst drives one redraw, not one per event — the canvas draws
+/// synchronously in `updateNSView`.
+final class WheelMTKView: MTKView {
+    var onScroll: ((WheelScroll) -> Void)?
+
+    /// Fraction of the viewport a single notch pans (mouse wheel only;
+    /// trackpad scroll tracks 1:1 with the fingers).
+    private static let panFractionPerNotch = 0.15
+
+    private var accumPanPoints = 0.0
+    private var accumZoomDetents = 0.0
+    private var anchorFractionX = 0.5
+    private var flushScheduled = false
+
+    override func scrollWheel(with event: NSEvent) {
+        let precise = event.hasPreciseScrollingDeltas
+        let mods = event.modifierFlags
+        let zoomMode = (mods.contains(.command) || mods.contains(.option))
+            && !mods.contains(.control)
+
+        let dx = event.scrollingDeltaX
+        let dy = event.scrollingDeltaY
+        let primary = abs(dx) > abs(dy) ? dx : dy
+        guard primary != 0 else { return }
+
+        // Anchor a zoom at the pointer's fraction across the plot width.
+        let local = convert(event.locationInWindow, from: nil)
+        let width = max(bounds.width, 1)
+        anchorFractionX = Double(max(0, min(1, local.x / width)))
+
+        if zoomMode && !precise {
+            // Ignore natural-scroll inversion for zoom. `isDirectionInverted`
+            // reports whether the OS already flipped the sign, so undo it to
+            // recover the device-frame direction; scrolling AWAY reads
+            // negative there, and away should zoom IN → negate.
+            let deviceDy = event.isDirectionInvertedFromDevice ? -dy : dy
+            accumZoomDetents += Double(-deviceDy)
+        } else if precise {
+            // Trackpad two-finger scroll: pan 1:1 with the fingers (points).
+            accumPanPoints += Double(primary)
+        } else {
+            // Notched wheel pan: each notch pans a fixed fraction of the view.
+            accumPanPoints += Double(primary) * Double(width) * Self.panFractionPerNotch
+        }
+        scheduleFlush()
+    }
+
+    /// Coalesce a burst of wheel events into one callback on the next runloop
+    /// turn, so the synchronous-draw canvas redraws once per frame, not once
+    /// per event. No synthesized momentum — a notched wheel with fake inertia
+    /// feels floaty.
+    private func scheduleFlush() {
+        guard !flushScheduled else { return }
+        flushScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.flushScheduled = false
+            let scroll = WheelScroll(
+                panPoints: self.accumPanPoints,
+                zoomDetents: self.accumZoomDetents,
+                anchorFractionX: self.anchorFractionX
+            )
+            self.accumPanPoints = 0
+            self.accumZoomDetents = 0
+            guard scroll.panPoints != 0 || scroll.zoomDetents != 0 else { return }
+            self.onScroll?(scroll)
+        }
+    }
+}
+
 struct WaveformCanvas: NSViewRepresentable {
     let channel: Channel
     let directory: URL
@@ -51,13 +142,6 @@ struct WaveformCanvas: NSViewRepresentable {
     /// no locator line rendered.
     var focusedBeatSampleIndex: Int64?
 
-    /// Semantic-zoom tier for the current viewport. Drives the
-    /// tier-conditional ECG-paper + grid rendering (pink paper + full
-    /// grid at Inspect; faint neutral, no grid at Scan; plain
-    /// background at Context). Defaulted to `.inspect` so pre-tier-wire
-    /// callers keep the original render.
-    var tier: WaveformZoomTier = .inspect
-
     /// Display range in mV. Defaults to ±5 (the clinical clipping
     /// reference). Set tighter by the caller when auto-scale is on so
     /// a low-amplitude channel uses the full canvas height. The
@@ -66,12 +150,18 @@ struct WaveformCanvas: NSViewRepresentable {
     var displayMin: Double = -5
     var displayMax: Double = 5
 
+    /// Mouse-wheel pan/zoom callback (X38). The caller owns the viewport, so
+    /// the coalesced scroll gesture is handed up rather than mutating state
+    /// here. Nil disables wheel handling.
+    var onScroll: ((WheelScroll) -> Void)? = nil
+
     func makeCoordinator() -> Coordinator {
         Coordinator()
     }
 
-    func makeNSView(context: Context) -> MTKView {
-        let view = MTKView()
+    func makeNSView(context: Context) -> WheelMTKView {
+        let view = WheelMTKView()
+        view.onScroll = onScroll
         view.colorPixelFormat = .bgra8Unorm
         view.framebufferOnly  = true
         // On-demand rendering: each SwiftUI updateNSView synchronously
@@ -108,10 +198,11 @@ struct WaveformCanvas: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ nsView: MTKView, context: Context) {
+    func updateNSView(_ nsView: WheelMTKView, context: Context) {
         let signpostID = OSSignpostID(log: waveformRenderLog)
         os_signpost(.begin, log: waveformRenderLog, name: "UpdateNSView", signpostID: signpostID)
         defer { os_signpost(.end, log: waveformRenderLog, name: "UpdateNSView", signpostID: signpostID) }
+        nsView.onScroll = onScroll
         sync(view: nsView, coordinator: context.coordinator)
         // Synchronous draw: each viewport mutation produces exactly one
         // frame, presented at the next vsync. We don't use setNeedsDisplay
@@ -140,9 +231,19 @@ struct WaveformCanvas: NSViewRepresentable {
         let samplesPerPixel = pixelWidth > 0 ? sampleCount / pixelWidth : 1
         coordinator.selectLOD(samplesPerPixel: samplesPerPixel, renderer: renderer)
 
-        // Grid spec from the time-domain duration.
+        // Grid ladder — a ruler over time + amplitude computed from the
+        // viewport's own governing metrics (points-per-second /
+        // points-per-millivolt), independent of the LOD tier (X37). Uses the
+        // view's point size, not the drawable pixel size, so the ramp reads in
+        // the same units the mockup traced against.
         let durationSeconds = sampleCount / channel.sampleRate
-        renderer.setGrid(spec: ECGGridSpec.forDuration(seconds: durationSeconds))
+        let ladder = GridLadder.compute(
+            windowSeconds: durationSeconds,
+            windowMillivolts: displayMax - displayMin,
+            plotWidthPoints: Double(view.bounds.width),
+            plotHeightPoints: Double(view.bounds.height)
+        )
+        renderer.setGridLadder(ladder)
 
         // Annotations — caller has already pre-filtered to the viewport.
         renderer.setAnnotations(annotations)
@@ -151,11 +252,6 @@ struct WaveformCanvas: NSViewRepresentable {
         // Move A. Sent AFTER uniforms so the buffer is baked with the
         // current y-range.
         renderer.setFocusedBeat(focusedBeatSampleIndex)
-
-        // Tier drives the tier-conditional paper + grid render. Set
-        // last so the next draw picks up the tier that matches the
-        // viewport we just synced.
-        renderer.tier = tier
     }
 
     // MARK: - Coordinator
@@ -270,12 +366,15 @@ struct WaveformTimeAxis: View {
     var body: some View {
         GeometryReader { geo in
             let duration = max(0.0001, endTime - startTime)
-            let spec = ECGGridSpec.forDuration(seconds: duration)
-            let majors = makeGridLines(from: startTime, to: endTime, every: spec.xMajor)
+            // Labels sit on the grid ladder's neutral major tier so they align
+            // with the major gridlines the renderer draws (X37), rather than
+            // the old ECG-paper major which drifted from wall-clock cadence.
+            let majorSpacing = GridLadder.neutralMajorSeconds(windowSeconds: duration)
+            let majors = makeGridLines(from: startTime, to: endTime, every: majorSpacing)
             let stride = Self.decimationStride(
                 viewportWidthPx: geo.size.width,
                 durationSec: duration,
-                majorSpacingSec: spec.xMajor
+                majorSpacingSec: majorSpacing
             )
             ForEach(Array(majors.enumerated()), id: \.offset) { index, t in
                 if index.isMultiple(of: stride) {

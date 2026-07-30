@@ -1925,9 +1925,9 @@ private struct ChannelPanel: View {
                         endSample: viewport.endSample,
                         annotations: visibleAnnotations,
                         focusedBeatSampleIndex: markingsContext.focusedBeatSampleIndex,
-                        tier: resolvedTier,
                         displayMin: displayRange.lowerBound,
-                        displayMax: displayRange.upperBound
+                        displayMax: displayRange.upperBound,
+                        onScroll: { handleWheelScroll($0, canvasWidth: liveSize.width) }
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -2394,6 +2394,27 @@ private struct ChannelPanel: View {
                 let velocitySamplesPerSec = -dragVelocityPx * samplesPerPixel / 0.5
                 viewport.startPanMomentum(velocitySamplesPerSec: velocitySamplesPerSec)
             }
+    }
+
+    /// Apply one coalesced mouse-wheel gesture (X38). Mirrors the pinch
+    /// `zoomGesture` and drag `panGesture` by mutating the shared viewport
+    /// directly: zoom is exponential at 1.35× per detent, anchored at the
+    /// pointer's fraction so retreat is as cheap as descent for a mouse user;
+    /// pan shifts the window by the scrolled distance. `canvasWidth` is the
+    /// live trace width in points.
+    private func handleWheelScroll(_ scroll: WheelScroll, canvasWidth: CGFloat) {
+        if scroll.zoomDetents != 0 {
+            let factor = pow(1.35, -scroll.zoomDetents)   // detents > 0 → zoom in
+            let currentWidth = viewport.endSample - viewport.startSample
+            let newWidth = Int64((Double(currentWidth) * factor).rounded())
+            viewport.setWidth(newWidth, anchorFraction: scroll.anchorFractionX)
+        }
+        if scroll.panPoints != 0, canvasWidth > 0 {
+            let span = Double(viewport.endSample - viewport.startSample)
+            let samplesPerPoint = span / Double(canvasWidth)
+            let deltaSamples = Int64((scroll.panPoints * samplesPerPoint).rounded())
+            viewport.pan(bySamples: deltaSamples)
+        }
     }
 
     private func zoomGesture(in canvasSize: CGSize) -> some Gesture {

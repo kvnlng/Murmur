@@ -1173,6 +1173,100 @@ struct ECGGridSpecTests {
     }
 }
 
+// MARK: - Grid ladder (X37)
+
+@Suite("Grid ladder — decoupled ruler")
+struct GridLadderTests {
+
+    /// ~1200 pt canvas, the width the mockup traced its table against.
+    private static let canvas = 1200.0
+
+    @Test("Opacity ramps 0 at 3 pt to full at 7 pt, then clamps")
+    func rampThresholds() {
+        #expect(GridLadder.ramp(spacingPoints: 2.9) == 0)
+        #expect(GridLadder.ramp(spacingPoints: 3.0) == 0)
+        #expect(abs(GridLadder.ramp(spacingPoints: 5.0) - 0.5) < 1e-9)
+        #expect(GridLadder.ramp(spacingPoints: 7.0) == 1)
+        #expect(GridLadder.ramp(spacingPoints: 40.0) == 1)
+    }
+
+    @Test("Neutral major is the largest tier with >= 2 divisions")
+    func neutralMajorSelection() {
+        #expect(GridLadder.neutralMajorSeconds(windowSeconds: 5) == 1)
+        #expect(GridLadder.neutralMajorSeconds(windowSeconds: 30) == 10)
+        #expect(GridLadder.neutralMajorSeconds(windowSeconds: 60) == 10)
+        #expect(GridLadder.neutralMajorSeconds(windowSeconds: 300) == 60)
+        #expect(GridLadder.neutralMajorSeconds(windowSeconds: 1800) == 600)
+        #expect(GridLadder.neutralMajorSeconds(windowSeconds: 10_800) == 3600)
+    }
+
+    /// Helper: the drawable tier for a family at a given spacing, if any.
+    private func tier(_ ladder: GridLadder, _ family: GridLadder.Family, spacing: Double) -> GridLadder.Tier? {
+        ladder.tiers.first { $0.family == family && abs($0.spacing - spacing) < 1e-9 }
+    }
+
+    @Test("5 s window: full red paper grid, paper stays pink")
+    func tightWindowInksRed() {
+        let l = GridLadder.compute(windowSeconds: 5, windowMillivolts: 5,
+                                   plotWidthPoints: Self.canvas, plotHeightPoints: 300)
+        // Red coarse (0.20 s) at 48 pt → full ink.
+        let coarse = tier(l, .redTime, spacing: 0.20)
+        #expect(coarse != nil)
+        #expect(abs((coarse?.alpha ?? 0) - 1.0) < 1e-9)
+        // Red fine (0.04 s) at 9.6 pt → full ramp × 0.55 weight.
+        let fine = tier(l, .redTime, spacing: 0.04)
+        #expect(abs((fine?.alpha ?? 0) - 0.55) < 1e-9)
+        #expect(l.majorNeutralSeconds == 1)
+        #expect(l.redPresence == 1)
+    }
+
+    @Test("60 s window: coarse red fades, fine red culled, neutral persists")
+    func handoffWindow() {
+        let l = GridLadder.compute(windowSeconds: 60, windowMillivolts: 5,
+                                   plotWidthPoints: Self.canvas, plotHeightPoints: 300)
+        let coarse = tier(l, .redTime, spacing: 0.20)   // 0.20 * 20 = 4 pt → fading
+        #expect(coarse != nil)
+        #expect((coarse?.alpha ?? 0) > 0 && (coarse?.alpha ?? 1) < 1)
+        #expect(tier(l, .redTime, spacing: 0.04) == nil)      // 0.8 pt → culled
+        #expect(tier(l, .neutralTime, spacing: 10) != nil)    // major, always inked
+        #expect(l.majorNeutralSeconds == 10)
+    }
+
+    @Test("Wide time zoom: no red time grid, but the ruler never goes empty")
+    func wideZoomNeverEmpty() {
+        let l = GridLadder.compute(windowSeconds: 1800, windowMillivolts: 5,
+                                   plotWidthPoints: Self.canvas, plotHeightPoints: 300)
+        #expect(l.tiers.contains { $0.family == .redTime } == false)
+        #expect(l.redPresence == 0)                            // paper → neutral
+        // The neutral major is always present with real ink — never a white flash.
+        let major = l.tiers.first { $0.family == .neutralTime && $0.isMajor }
+        #expect(major != nil)
+        #expect((major?.alpha ?? 0) > 0)
+    }
+
+    @Test("Amplitude red fades on its OWN metric, independent of time zoom")
+    func amplitudeIndependentOfTime() {
+        // Wide time window (time red gone) but a normal mV window → the
+        // horizontal red rules stay, and they do NOT hold the paper pink.
+        let l = GridLadder.compute(windowSeconds: 1800, windowMillivolts: 3,
+                                   plotWidthPoints: Self.canvas, plotHeightPoints: 300)
+        #expect(tier(l, .redAmplitude, spacing: 0.5) != nil)   // 0.5 mV * 100 = 50 pt
+        #expect(l.redPresence == 0)                            // time-keyed, so paper neutral
+    }
+
+    @Test("Never empty and never runaway across a full zoom sweep")
+    func boundedAcrossSweep() {
+        for window in stride(from: 2.0, through: 32_000.0, by: 137.0) {
+            let l = GridLadder.compute(windowSeconds: window, windowMillivolts: 5,
+                                       plotWidthPoints: Self.canvas, plotHeightPoints: 300)
+            #expect(!l.tiers.isEmpty, "empty ladder at \(window)s")
+            // Self-limiting: a handful of tiers at most (2 red-time, 2 red-amp,
+            // a few neutral). Comfortably under 8 across the whole range.
+            #expect(l.tiers.count <= 8, "\(l.tiers.count) tiers at \(window)s")
+        }
+    }
+}
+
 // MARK: - Annotation model + JSON ingest
 
 @Suite("Annotation JSON ingest")

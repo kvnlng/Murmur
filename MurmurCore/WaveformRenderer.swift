@@ -55,11 +55,9 @@ struct TraceUniformsCPU {
 // MARK: - Style
 
 struct WaveformStyle {
+    /// Pink ECG-paper surface, shown at full strength while the calibrated
+    /// grid is legible and crossfaded toward neutral by the grid ladder.
     var paper:        SIMD4<Float> = SIMD4(1.00, 0.93, 0.93, 1.00)
-    var gridMinor:    SIMD4<Float> = SIMD4(0.93, 0.78, 0.78, 0.65)
-    var gridMajor:    SIMD4<Float> = SIMD4(0.82, 0.50, 0.50, 0.55)
-    /// Every 5th major — the "1 s / 2.5 mV" landmark on standard ECG paper.
-    var gridLandmark: SIMD4<Float> = SIMD4(0.65, 0.25, 0.25, 0.85)
     var trace:        SIMD4<Float> = SIMD4(0.00, 0.00, 0.00, 1.00)
     /// On-screen pixel width of the trace ribbon. ECG paper convention is
     /// a thin but visible stroke; 2.5 pt reads as a confident line without
@@ -108,33 +106,26 @@ final class WaveformRenderer: NSObject, MTKViewDelegate {
     var style    = WaveformStyle()
     var useEnvelope = false
 
-    /// Semantic-zoom tier for the current viewport
-    /// (`project_waveform_zoom_lod_spec.md`). Drives the tier-conditional
-    /// ECG-paper and grid rendering: pink paper + full grid at Inspect,
-    /// faint neutral paper (no grid) at Scan, plain background (no
-    /// paper, no grid) at Context. Written by
-    /// `WaveformCanvas.sync` once per frame.
-    var tier: WaveformZoomTier = .inspect
-
     /// Sample rate of the loaded channel — needed to convert grid spacings
-    /// from seconds (the spec uses) into samples (what the shader uses).
+    /// from seconds (the ladder uses) into samples (what the shader uses).
     var channelSampleRate: Double = 1
 
-    // Rebuilt on viewport change
-    var gridMinorBuffer: MTLBuffer?
-    var gridMinorVertexCount: Int = 0
-    var gridMajorBuffer: MTLBuffer?
-    var gridMajorVertexCount: Int = 0
-    var gridLandmarkBuffer: MTLBuffer?
-    var gridLandmarkVertexCount: Int = 0
+    /// One line buffer per inked grid tier, rebuilt per frame from a
+    /// `GridLadder`. Replaces the old tier-gated minor/major/landmark grid:
+    /// the ruler now coarsens continuously and is DECOUPLED from the LOD tier
+    /// (X37). Neutral tiers are ordered before red so the calibrated red ink
+    /// wins at intersections.
+    struct GridTierBuffer {
+        let buffer: MTLBuffer
+        let vertexCount: Int
+        let color: SIMD4<Float>       // rgba, ramped alpha already folded in
+    }
+    var gridTierBuffers: [GridTierBuffer] = []
 
-    /// Scan-tier faint horizontal guides. Per the mockup at
-    /// Planning/design/waveform-zoom-lod.html, Scan drops the pink ECG
-    /// grid entirely BUT keeps 5 evenly-spaced faint horizontal lines
-    /// as a lightweight scale reference. Not rendered at Inspect
-    /// (full grid there) or Context (fully bare background).
-    var scanGuideBuffer: MTLBuffer?
-    var scanGuideVertexCount: Int = 0
+    /// Background paper colour, crossfaded pink → neutral by the ladder's
+    /// `redPresence`. Not keyed on the LOD tier — the paper hands off with the
+    /// calibrated grid rather than switching at a tier boundary.
+    var ladderPaperColor: SIMD4<Float> = WaveformStyle().paper
 
     /// One bucket per category, rebuilt when the visible-annotation set or its
     /// category breakdown changes. Each bucket renders with its own color.
@@ -292,53 +283,64 @@ final class WaveformRenderer: NSObject, MTKViewDelegate {
 
     // MARK: - Grid + annotation rebuilds
 
-    func setGrid(spec: ECGGridSpec) {
+    /// Rebuild the grid line buffers from a `GridLadder`. Each inked tier
+    /// becomes its own line buffer carrying the ramped opacity the ladder
+    /// computed; the renderer draws them all unconditionally, so the ruler
+    /// coarsens instead of switching off. Also refreshes the paper colour,
+    /// which crossfades with the calibrated red grid's presence.
+    func setGridLadder(_ ladder: GridLadder) {
         let startSec = Double(uniforms.startSample) / channelSampleRate
         let endSec   = Double(uniforms.endSample)   / channelSampleRate
         let yLo      = Double(uniforms.yMin)
         let yHi      = Double(uniforms.yMax)
+        let xRange   = (uniforms.startSample, uniforms.endSample)
+        let yRange   = (Float(yLo), Float(yHi))
 
-        let xMinor    = makeGridLines(from: startSec, to: endSec, every: spec.xMinor)
-        let xMajor    = makeGridLines(from: startSec, to: endSec, every: spec.xMajor)
-        let xLandmark = makeGridLines(from: startSec, to: endSec, every: spec.xLandmark)
-        let yMinor    = makeGridLines(from: yLo, to: yHi, every: spec.yMinor)
-        let yMajor    = makeGridLines(from: yLo, to: yHi, every: spec.yMajor)
-        let yLandmark = makeGridLines(from: yLo, to: yHi, every: spec.yLandmark)
+        // Neutral first so the calibrated red ink wins at intersections.
+        let ordered = ladder.tiers.sorted { familyRank($0.family) < familyRank($1.family) }
 
-        gridMinorBuffer = makeLineBuffer(
-            xLines: xMinor, yLines: yMinor,
-            xRange: (uniforms.startSample, uniforms.endSample),
-            yRange: (Float(yLo), Float(yHi))
-        )
-        gridMinorVertexCount = (xMinor.count + yMinor.count) * 2
+        var buffers: [GridTierBuffer] = []
+        for tier in ordered {
+            switch tier.family {
+            case .redTime, .neutralTime:
+                let xs = makeGridLines(from: startSec, to: endSec, every: tier.spacing)
+                guard !xs.isEmpty,
+                      let buf = makeLineBuffer(xLines: xs, yLines: [], xRange: xRange, yRange: yRange)
+                else { continue }
+                buffers.append(GridTierBuffer(buffer: buf, vertexCount: xs.count * 2, color: color(for: tier)))
+            case .redAmplitude:
+                let ys = makeGridLines(from: yLo, to: yHi, every: tier.spacing)
+                guard !ys.isEmpty,
+                      let buf = makeLineBuffer(xLines: [], yLines: ys, xRange: xRange, yRange: yRange)
+                else { continue }
+                buffers.append(GridTierBuffer(buffer: buf, vertexCount: ys.count * 2, color: color(for: tier)))
+            }
+        }
+        gridTierBuffers = buffers
 
-        gridMajorBuffer = makeLineBuffer(
-            xLines: xMajor, yLines: yMajor,
-            xRange: (uniforms.startSample, uniforms.endSample),
-            yRange: (Float(yLo), Float(yHi))
-        )
-        gridMajorVertexCount = (xMajor.count + yMajor.count) * 2
+        // Paper: pink ECG surface when the calibrated grid is present, fading
+        // to a plain neutral surface as red leaves. `redPresence` drives the
+        // crossfade so the handoff is continuous — no white flash, no tier snap.
+        let pink = style.paper
+        let neutral = SIMD4<Float>(0.984, 0.984, 0.992, 1.0)
+        ladderPaperColor = neutral + (pink - neutral) * Float(ladder.redPresence)
+    }
 
-        gridLandmarkBuffer = makeLineBuffer(
-            xLines: xLandmark, yLines: yLandmark,
-            xRange: (uniforms.startSample, uniforms.endSample),
-            yRange: (Float(yLo), Float(yHi))
-        )
-        gridLandmarkVertexCount = (xLandmark.count + yLandmark.count) * 2
+    /// Draw neutral before red so the calibrated ink reads on top.
+    private func familyRank(_ family: GridLadder.Family) -> Int {
+        family == .neutralTime ? 0 : 1
+    }
 
-        // Scan-tier faint horizontal guides — 5 evenly-spaced lines
-        // across the y-range, matching the mockup's "mid ± 28, ± 56"
-        // pattern at Planning/design/waveform-zoom-lod.html. Not tied
-        // to the ECGGridSpec because at Scan the mV scale is
-        // measurement scaffolding, not a mm-per-mV reading grid.
-        let guideFractions: [Double] = [0.15, 0.35, 0.50, 0.65, 0.85]
-        let guideYs: [Double] = guideFractions.map { yLo + $0 * (yHi - yLo) }
-        scanGuideBuffer = makeLineBuffer(
-            xLines: [], yLines: guideYs,
-            xRange: (uniforms.startSample, uniforms.endSample),
-            yRange: (Float(yLo), Float(yHi))
-        )
-        scanGuideVertexCount = guideYs.count * 2
+    /// Ink colour for a ladder tier — red ECG-paper `#d06b6b` or neutral
+    /// slate `#7d8894`, with the ladder's ramped opacity and a per-family
+    /// ink multiplier folded into alpha.
+    private func color(for tier: GridLadder.Tier) -> SIMD4<Float> {
+        switch tier.family {
+        case .redTime, .redAmplitude:
+            return SIMD4<Float>(0.816, 0.420, 0.420, Float(tier.alpha) * 0.85)
+        case .neutralTime:
+            return SIMD4<Float>(0.490, 0.533, 0.580, Float(tier.alpha) * 0.90)
+        }
     }
 
     /// Replaces the annotation buckets from a list of visible annotations.
@@ -440,12 +442,10 @@ final class WaveformRenderer: NSObject, MTKViewDelegate {
         guard let drawable = view.currentDrawable,
               let descriptor = view.currentRenderPassDescriptor else { return }
 
-        // Tier-conditional paper — the pink ECG paper is the correct
-        // reading surface at Inspect (individual beats readable), but
-        // at wider zooms it becomes visual noise. Per
-        // project_waveform_zoom_lod_spec.md: fade to a faint neutral
-        // at Scan, plain background at Context.
-        let paper = paperColor(for: tier)
+        // Paper colour is driven by the grid ladder's `redPresence`, not the
+        // LOD tier (X37): pink ECG surface while the calibrated grid is
+        // legible, crossfading to a plain neutral surface as red leaves.
+        let paper = ladderPaperColor
         descriptor.colorAttachments[0].clearColor = MTLClearColor(
             red:   Double(paper.x),
             green: Double(paper.y),
@@ -503,40 +503,14 @@ final class WaveformRenderer: NSObject, MTKViewDelegate {
             drawRange(encoder: encoder, bucket: bucket, uniforms: &u)
         }
 
-        // 2. Grid — minor → major → landmark (every 5th major). Drawn in that
-        // order so heavier lines win at intersections.
-        //
-        // Grid rendering is tier-conditional per
-        // project_waveform_zoom_lod_spec.md and the mockup at
-        // Planning/design/waveform-zoom-lod.html:
-        //   - Inspect: full pink ECG grid (measurement scaffold).
-        //   - Scan: 5 faint horizontal guides only — a lightweight
-        //     scale reference now that the mV grid isn't the reading.
-        //   - Context: nothing (fully bare background).
-        switch tier {
-        case .inspect:
-            if gridMinorVertexCount > 0, let buf = gridMinorBuffer {
-                drawLines(encoder: encoder, buffer: buf, vertexCount: gridMinorVertexCount,
-                          color: style.gridMinor, uniforms: &u)
-            }
-            if gridMajorVertexCount > 0, let buf = gridMajorBuffer {
-                drawLines(encoder: encoder, buffer: buf, vertexCount: gridMajorVertexCount,
-                          color: style.gridMajor, uniforms: &u)
-            }
-            if gridLandmarkVertexCount > 0, let buf = gridLandmarkBuffer {
-                drawLines(encoder: encoder, buffer: buf, vertexCount: gridLandmarkVertexCount,
-                          color: style.gridLandmark, uniforms: &u)
-            }
-        case .scan:
-            if scanGuideVertexCount > 0, let buf = scanGuideBuffer {
-                // #eef0f4 at ~50% alpha — mirrors the mockup's very
-                // faint slate-gray guide colour.
-                let guideColor = SIMD4<Float>(0.933, 0.941, 0.957, 0.55)
-                drawLines(encoder: encoder, buffer: buf, vertexCount: scanGuideVertexCount,
-                          color: guideColor, uniforms: &u)
-            }
-        case .context:
-            break
+        // 2. Grid ladder — a ruler over time + amplitude, decoupled from the
+        // LOD tier (X37 / project_grid_ladder_and_wheel_navigation.md). Each
+        // tier carries its own ramped opacity; nothing is switched off by the
+        // zoom regime. Ordered neutral-before-red in setGridLadder so the
+        // calibrated red ink wins at intersections.
+        for tier in gridTierBuffers {
+            drawLines(encoder: encoder, buffer: tier.buffer, vertexCount: tier.vertexCount,
+                      color: tier.color, uniforms: &u)
         }
 
         // 3. Trace OR envelope, with optional crossfade against the
@@ -621,22 +595,6 @@ final class WaveformRenderer: NSObject, MTKViewDelegate {
     }
 
     // MARK: - Pass helpers
-
-    /// Tier-conditional paper (background) color. Matches the mockup at
-    /// Planning/design/waveform-zoom-lod.html:
-    ///   - Inspect: `#f6e6e6` pink ECG paper (beats individually
-    ///     readable; the grid IS the measurement scaffold).
-    ///   - Scan: `#fcfcfe` near-white (paper fades — the trace itself
-    ///     carries the reading, not the grid).
-    ///   - Context: `#fbfbfd` — plain background; the trace becomes an
-    ///     overview silhouette and the paper metaphor is retired.
-    private func paperColor(for tier: WaveformZoomTier) -> SIMD4<Float> {
-        switch tier {
-        case .inspect: return style.paper
-        case .scan:    return SIMD4(0.988, 0.988, 0.996, 1.0)
-        case .context: return SIMD4(0.984, 0.984, 0.992, 1.0)
-        }
-    }
 
     private func drawLines(
         encoder: MTLRenderCommandEncoder,
