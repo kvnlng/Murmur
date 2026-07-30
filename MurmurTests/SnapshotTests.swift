@@ -842,4 +842,51 @@ extension SnapshotTests {
     }
 }
 
+// MARK: - CalibrationReadout (X40)
+// In an extension so the main class body stays under the type-body-length cap.
+@MainActor
+extension SnapshotTests {
+
+    // Rendered at the real 220 pt inspector-column width so wrapping of the
+    // "· non-standard" / fallback text is exercised, not just the happy line.
+    func testCalibrationReadout_standard() {
+        let reading = CalibrationReading.make(
+            windowSeconds: 10, canvasWidthPoints: 1250, canvasHeightPoints: 500,
+            visibleMillivoltSpan: 10, millimetersPerPoint: 0.2
+        )
+        let view = CalibrationReadout(reading: reading)
+            .frame(width: 220)
+            .padding(8)
+            .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 236, height: 44)),
+                       as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
+    func testCalibrationReadout_nonStandard() {
+        let reading = CalibrationReading.make(
+            windowSeconds: 10, canvasWidthPoints: 2500, canvasHeightPoints: 500,
+            visibleMillivoltSpan: 5, millimetersPerPoint: 0.2
+        )
+        let view = CalibrationReadout(reading: reading)
+            .frame(width: 220)
+            .padding(8)
+            .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 236, height: 64)),
+                       as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
+    func testCalibrationReadout_pointFallback() {
+        let reading = CalibrationReading.make(
+            windowSeconds: 10, canvasWidthPoints: 1250, canvasHeightPoints: 500,
+            visibleMillivoltSpan: 10, millimetersPerPoint: nil
+        )
+        let view = CalibrationReadout(reading: reading)
+            .frame(width: 220)
+            .padding(8)
+            .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 236, height: 84)),
+                       as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+}
+
 #endif // canImport(SnapshotTesting)

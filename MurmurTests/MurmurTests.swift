@@ -1267,6 +1267,98 @@ struct GridLadderTests {
     }
 }
 
+// MARK: - Calibration instrument (X40)
+
+@Suite("Display metrics — physical-size honesty guard")
+struct DisplayMetricsTests {
+
+    @Test("Normal display returns a plausible mm/point")
+    func normalDisplay() {
+        // ~286 mm wide, 1440 pt → ~0.199 mm/pt (~5 pt/mm), the spec's ballpark.
+        let mmPerPoint = DisplayMetrics.millimetersPerPoint(physicalWidthMM: 286, pointWidth: 1440)
+        #expect(mmPerPoint != nil)
+        #expect(abs((mmPerPoint ?? 0) - 0.1986) < 0.001)
+    }
+
+    @Test("Zero / negative / implausible physical size returns nil (X32-class guard)")
+    func degenerateReturnsNil() {
+        #expect(DisplayMetrics.millimetersPerPoint(physicalWidthMM: 0, pointWidth: 1440) == nil)
+        #expect(DisplayMetrics.millimetersPerPoint(physicalWidthMM: -100, pointWidth: 1440) == nil)
+        #expect(DisplayMetrics.millimetersPerPoint(physicalWidthMM: 5, pointWidth: 1440) == nil)     // < 20 mm
+        #expect(DisplayMetrics.millimetersPerPoint(physicalWidthMM: 5000, pointWidth: 1440) == nil)  // > 2000 mm
+        #expect(DisplayMetrics.millimetersPerPoint(physicalWidthMM: 286, pointWidth: 0) == nil)
+    }
+}
+
+@Suite("Calibration readout computation")
+struct CalibrationReadingTests {
+
+    /// 5 pt/mm (0.2 mm/pt), a 10 s window, and geometry chosen so the scale
+    /// lands exactly on standard paper.
+    @Test("Standard geometry reads 25 mm/s · 10 mm/mV and is standard")
+    func standard() {
+        let r = CalibrationReading.make(
+            windowSeconds: 10,
+            canvasWidthPoints: 1250,      // 125 pt/s × 0.2 = 25 mm/s
+            canvasHeightPoints: 500,      // 50 pt/mV × 0.2 = 10 mm/mV
+            visibleMillivoltSpan: 10,
+            millimetersPerPoint: 0.2
+        )
+        #expect(r.text == "25 mm/s · 10 mm/mV")
+        #expect(r.isStandard)
+        #expect(!r.usesPointFallback)
+    }
+
+    @Test("Off-standard gain reads non-standard and says so")
+    func nonStandard() {
+        let r = CalibrationReading.make(
+            windowSeconds: 10,
+            canvasWidthPoints: 1250,      // still 25 mm/s
+            canvasHeightPoints: 500,
+            visibleMillivoltSpan: 5,      // 100 pt/mV × 0.2 = 20 mm/mV
+            millimetersPerPoint: 0.2
+        )
+        #expect(r.text == "25 mm/s · 20 mm/mV · non-standard")
+        #expect(!r.isStandard)
+    }
+
+    @Test("No trustworthy physical size falls back to points, never claims standard")
+    func pointFallback() {
+        let r = CalibrationReading.make(
+            windowSeconds: 10,
+            canvasWidthPoints: 1250,
+            canvasHeightPoints: 500,
+            visibleMillivoltSpan: 10,
+            millimetersPerPoint: nil
+        )
+        #expect(r.text == "125 pt/s · 50 pt/mV · display size unavailable")
+        #expect(!r.isStandard)                 // cannot claim standard without mm
+        #expect(r.usesPointFallback)
+    }
+
+    @Test("Derived (non-round) values keep one decimal")
+    func oneDecimal() {
+        let r = CalibrationReading.make(
+            windowSeconds: 10,
+            canvasWidthPoints: 1135,      // 113.5 pt/s × 0.2 = 22.7 mm/s (off standard)
+            canvasHeightPoints: 500,
+            visibleMillivoltSpan: 10,
+            millimetersPerPoint: 0.2
+        )
+        #expect(r.text == "22.7 mm/s · 10 mm/mV · non-standard")
+    }
+
+    @Test("Degenerate geometry says nothing false")
+    func degenerate() {
+        let r = CalibrationReading.make(
+            windowSeconds: 0, canvasWidthPoints: 0, canvasHeightPoints: 0,
+            visibleMillivoltSpan: 0, millimetersPerPoint: 0.2
+        )
+        #expect(r.text == "—")
+        #expect(!r.isStandard)
+    }
+}
+
 // MARK: - Annotation model + JSON ingest
 
 @Suite("Annotation JSON ingest")

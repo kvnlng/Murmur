@@ -20,6 +20,10 @@ struct BedsideView: View {
     let recordingDirectory: URL
 
     @State private var viewport: RecordingViewport
+    /// Shared amplitude/timebase calibration (X40). Gain is shared across
+    /// leads by clinical convention, so it lives once here and threads into
+    /// every ChannelPanel, exactly like `viewport`.
+    @State private var calibration = Calibration()
     @State private var filter = FindingFilter()
     @State private var showFindings = true
     /// When on, the viewport is held at a 10-second window and finding /
@@ -982,6 +986,7 @@ struct BedsideView: View {
                             channel: channel,
                             directory: recordingDirectory,
                             viewport: viewport,
+                            calibration: calibration,
                             annotations: annotationsForChannel(channel),
                             candidates: candidatesForChannel(channel),
                             sizing: .strip
@@ -1036,6 +1041,7 @@ struct BedsideView: View {
                     channel: channel,
                     directory: recordingDirectory,
                     viewport: viewport,
+                    calibration: calibration,
                     annotations: annotationsForChannel(channel),
                     candidates: candidatesForChannel(channel),
                     sizing: .focus
@@ -1081,6 +1087,7 @@ struct BedsideView: View {
     private var dockedBeatInspector: some View {
         VStack(alignment: .leading, spacing: 6) {
             viewportIndicator
+            CalibrationReadout(reading: calibrationReading)
             dockedBeatCard
             if !markingsContext.beats.isEmpty {
                 fiducialLayersChip
@@ -1095,6 +1102,20 @@ struct BedsideView: View {
     /// record the analyst otherwise has no on-screen sense of where they are.
     /// The machine-format `ui-test-viewport-state` element stays the XCUI
     /// endpoint; this is the human-facing one.
+    /// Current calibration in clinical units, derived from the focused
+    /// panel's published geometry (X40 phase 1). Reports the ACTUAL on-screen
+    /// scale — it does not yet impose one — so until Standard View lands it
+    /// typically reads non-standard, which is the honest present state.
+    private var calibrationReading: CalibrationReading {
+        CalibrationReading.make(
+            windowSeconds: viewport.durationSeconds,
+            canvasWidthPoints: calibration.canvasSize.width,
+            canvasHeightPoints: calibration.canvasSize.height,
+            visibleMillivoltSpan: calibration.visibleMillivoltSpan,
+            millimetersPerPoint: DisplayMetrics.millimetersPerPoint()
+        )
+    }
+
     private var viewportIndicator: some View {
         let sr = viewport.sampleRate > 0 ? viewport.sampleRate : 250
         let start = clockString(Double(viewport.startSample) / sr)
@@ -1745,6 +1766,10 @@ private struct ChannelPanel: View {
     let channel: Channel
     let directory: URL
     let viewport: RecordingViewport
+    /// Shared calibration (X40). The focus-sized panel publishes its measured
+    /// canvas size + visible mV span here so the readout can convert to
+    /// clinical units; strip panels don't (the readout is a focus-mode surface).
+    let calibration: Calibration
     let annotations: [Annotation]
     /// VT/VF model candidate episodes (range annotations) to draw as
     /// translucent bands on the trace so a queue jump lands on a visible
@@ -1865,6 +1890,15 @@ private struct ChannelPanel: View {
             return Self.yMin...Self.yMax
         }
         return range.displayRange()
+    }
+
+    /// Publish this panel's trace geometry to the shared calibration so the
+    /// readout can report clinical units. Only the focus-sized panel writes —
+    /// the readout is a focus-mode surface and strip panels would clobber it.
+    private func publishCalibrationGeometry(canvasSize: CGSize) {
+        guard sizing == .focus else { return }
+        calibration.canvasSize = canvasSize
+        calibration.visibleMillivoltSpan = displayRange.upperBound - displayRange.lowerBound
     }
 
     private var canvasArea: some View {
@@ -2036,6 +2070,16 @@ private struct ChannelPanel: View {
             .contentShape(Rectangle())
             .gesture(panGesture(in: liveSize))
             .gesture(zoomGesture(in: liveSize))
+            // Publish the focused trace's geometry so the calibration readout
+            // (a level up, beside the viewport indicator) can convert points →
+            // mm. Height + mV span both feed pointsPerMillivolt; width feeds
+            // pointsPerSecond. Only the focus-sized panel writes.
+            .onChange(of: liveSize, initial: true) { _, size in
+                publishCalibrationGeometry(canvasSize: size)
+            }
+            .onChange(of: displayRange) { _, _ in
+                publishCalibrationGeometry(canvasSize: liveSize)
+            }
         }
         .frame(minHeight: sizing.canvasMinHeight, maxHeight: sizing.expands ? .infinity : nil)
     }
