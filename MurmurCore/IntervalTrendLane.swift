@@ -102,8 +102,27 @@ struct IntervalTrendLane: View {
     /// the caption + control chip.
     let metric: IntervalTrendMetric
 
-    /// Show-mode ("median + IQR", etc.). Drives the ribbon rendering.
+    /// Show-mode ("median + IQR", etc.) — the analyst's PREFERENCE from the
+    /// picker. The EFFECTIVE representation is this capped by `band` (X41):
+    /// per-beat scatter is coerced to median + IQR at map scale.
     let showMode: IntervalTrendShowMode
+
+    /// Zoom band the lane is rendering (X41). Follows the ECG viewport: `.map`
+    /// at wide zoom (whole-recording ribbon), `.window` when zoomed into
+    /// minutes (the lane's x-domain is that window; per-beat scatter is legible).
+    /// Defaults to `.map` so existing callers/tests keep the ribbon read.
+    let band: IntervalTrendLaneBand
+
+    /// The representation actually drawn — preference capped by the band.
+    private var effectiveShowMode: IntervalTrendShowMode {
+        IntervalTrendRepresentation.effectiveMode(preferred: showMode, band: band)
+    }
+
+    /// True when the analyst asked for per-beat scatter but the map-scale band
+    /// coerced it away — drives a small "zoom in" hint so the coercion is honest.
+    private var scatterCoerced: Bool {
+        showMode == .perBeatScatter && effectiveShowMode != .perBeatScatter
+    }
 
     /// Callbacks for the control-chip menus. Nil hides the picker.
     let onPickMetric: ((IntervalTrendMetric) -> Void)?
@@ -176,6 +195,7 @@ struct IntervalTrendLane: View {
         data: IntervalTrendData,
         metric: IntervalTrendMetric,
         showMode: IntervalTrendShowMode,
+        band: IntervalTrendLaneBand = .map,
         selectedBinPreset: IntervalTrendBinPreset,
         guides: [IntervalTrendGuide] = [],
         events: [IntervalTrendEvent] = [],
@@ -195,6 +215,7 @@ struct IntervalTrendLane: View {
         self.data = data
         self.metric = metric
         self.showMode = showMode
+        self.band = band
         self.selectedBinPreset = selectedBinPreset
         self.guides = guides
         self.events = events
@@ -269,6 +290,15 @@ struct IntervalTrendLane: View {
             metricPicker
             binPicker
             showModePicker
+            // Honest coercion cue (X41): the analyst preferred per-beat scatter
+            // but the map-scale band shows median + IQR instead. Only appears in
+            // that state, so it never crowds the default row.
+            if scatterCoerced {
+                Text("zoom in for per-beat")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .accessibilityIdentifier("interval-trend-lane-scatter-hint")
+            }
             addGuideChip
         }
     }
@@ -620,7 +650,7 @@ struct IntervalTrendLane: View {
                 // AreaMark per eligible run so the ribbon never bridges
                 // across ineligible / gap bins. Sits OUTSIDE the
                 // measurement band per project_qtc_trend_uncertainty_wireup_spec.md.
-                if showMode == .medianAndIQR {
+                if effectiveShowMode == .medianAndIQR {
                     ForEach(eligibleRuns.indices, id: \.self) { idx in
                         let run = eligibleRuns[idx]
                         ForEach(run) { bin in
@@ -667,10 +697,12 @@ struct IntervalTrendLane: View {
                     }
                 }
 
-                // Per-beat scatter mode — every underlying beat as a
-                // faint point. Only makes sense at moderate zoom, but
-                // the view doesn't gate — the analyst asked for it.
-                if showMode == .perBeatScatter {
+                // Per-beat scatter — every underlying beat as a faint point.
+                // Legible only at window scale, so it renders only in the
+                // `.window` band (X41), where the lane's x-domain IS the
+                // viewport window and the points fill the width. At map scale
+                // `effectiveShowMode` has already coerced this away.
+                if effectiveShowMode == .perBeatScatter {
                     ForEach(scatterPoints, id: \.id) { pt in
                         PointMark(
                             x: .value("t", pt.time),
@@ -896,7 +928,10 @@ struct IntervalTrendLane: View {
 
     private var scatterPoints: [ScatterPoint] {
         var points: [ScatterPoint] = []
-        for bin in data.bins where bin.isEligible {
+        // Only bins whose centre falls in the visible domain — at window band
+        // that is the viewport window, keeping the per-beat cloud scoped to
+        // what the analyst is actually looking at (X41).
+        for bin in data.bins where bin.isEligible && timeRangeSeconds.contains(bin.centerSeconds) {
             for (idx, v) in bin.perBeatValues.enumerated() {
                 points.append(
                     ScatterPoint(

@@ -1389,6 +1389,10 @@ struct BedsideView: View {
                 templateBeatCount: markingsContext.template?.sampleCount,
                 qtcFormulaName: markingsContext.qtcFormula.displayName,
                 recordingTimeRange: recordingTimeRange,
+                viewportTimeRange: viewportTimeRange,
+                band: IntervalTrendRepresentation.band(
+                    viewportWindowSeconds: viewport.durationSeconds
+                ),
                 showMode: trendLaneContext.showMode,
                 selectedBinPreset: trendLaneContext.binPreset,
                 guides: trendGuideStore.guides(for: trendLaneContext.metric),
@@ -2696,6 +2700,11 @@ private struct IntervalTrendLaneMemoizedStrip: View, Equatable {
     let templateBeatCount: Int?
     let qtcFormulaName: String
     let recordingTimeRange: ClosedRange<Double>
+    /// The ECG viewport's visible window (seconds). At `.window` band it
+    /// becomes the lane's x-domain so per-beat scatter is legible (X41).
+    let viewportTimeRange: ClosedRange<Double>
+    /// Zoom band derived from the viewport window — drives representation.
+    let band: IntervalTrendLaneBand
     let showMode: IntervalTrendShowMode
     let selectedBinPreset: IntervalTrendBinPreset
     let guides: [IntervalTrendGuide]
@@ -2730,6 +2739,8 @@ private struct IntervalTrendLaneMemoizedStrip: View, Equatable {
             && lhs.binSeconds == rhs.binSeconds
             && lhs.qtcFormulaName == rhs.qtcFormulaName
             && lhs.recordingTimeRange == rhs.recordingTimeRange
+            && lhs.viewportTimeRange == rhs.viewportTimeRange
+            && lhs.band == rhs.band
             && lhs.showMode == rhs.showMode
             && lhs.selectedBinPreset == rhs.selectedBinPreset
             && lhs.guides == rhs.guides
@@ -2750,10 +2761,13 @@ private struct IntervalTrendLaneMemoizedStrip: View, Equatable {
             qtcFormulaName: qtcFormulaName
         )
         IntervalTrendLane(
-            timeRangeSeconds: recordingTimeRange,
+            // Map band → whole recording ribbon; window band → the viewport
+            // window becomes the x-domain so per-beat scatter fills the lane.
+            timeRangeSeconds: band == .window ? viewportTimeRange : recordingTimeRange,
             data: data,
             metric: metric,
             showMode: showMode,
+            band: band,
             selectedBinPreset: selectedBinPreset,
             guides: guides,
             events: events,

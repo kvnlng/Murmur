@@ -67,6 +67,50 @@ public enum IntervalTrendShowMode: String, CaseIterable, Sendable, Codable {
     }
 }
 
+/// Which zoom band the trend lane is rendering (X41). The lane's
+/// representation follows the ECG viewport's zoom rather than a persisted
+/// manual mode:
+///   • `map`   — the viewport spans a wide window → the lane draws the WHOLE
+///     recording as median + band + IQR ribbon. Per-beat scatter is illegible
+///     here (a whole-recording point cloud — the "wall"), so it is coerced away.
+///   • `window` — the viewport is zoomed into minutes → the lane's x-domain
+///     follows that window and per-beat scatter fills the lane width legibly.
+public enum IntervalTrendLaneBand: String, Sendable, Equatable, CaseIterable {
+    case map
+    case window
+}
+
+/// Pure LOD policy for the trend lane (X41). Keeps the band threshold + the
+/// "picker biases within what is legible" coercion out of the view so both are
+/// testable. The `Show` picker sets a PREFERENCE; the effective representation
+/// is that preference capped by what the current band can legibly draw.
+public enum IntervalTrendRepresentation {
+    /// Longest visible window (seconds) still treated as a legible "window"
+    /// band for per-beat scatter. Above this the lane is at map scale. 5 min
+    /// matches the spec's "window (minutes)" band and the 5-min Holter segment
+    /// convention. Exposed for tests + future tuning.
+    public static let maxWindowBandSeconds: Double = 300
+
+    public static func band(viewportWindowSeconds seconds: Double) -> IntervalTrendLaneBand {
+        seconds > 0 && seconds <= maxWindowBandSeconds ? .window : .map
+    }
+
+    /// Effective mode = the analyst's preference, capped by the band. At map
+    /// scale, per-beat scatter is coerced to median + IQR (never forces an
+    /// illegible per-beat wall); the other modes render at every band.
+    public static func effectiveMode(
+        preferred: IntervalTrendShowMode,
+        band: IntervalTrendLaneBand
+    ) -> IntervalTrendShowMode {
+        switch band {
+        case .window:
+            return preferred
+        case .map:
+            return preferred == .perBeatScatter ? .medianAndIQR : preferred
+        }
+    }
+}
+
 /// One bin's worth of aggregated values.
 public struct IntervalTrendBin: Sendable, Equatable, Identifiable {
     /// Start of the bin (seconds from recording start).

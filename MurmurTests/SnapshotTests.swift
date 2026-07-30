@@ -500,6 +500,7 @@ final class SnapshotTests: XCTestCase {
             data: makeCanonicalTrendData(),
             metric: .qtc,
             showMode: .perBeatScatter,
+            band: .window,          // X41: scatter renders only at window scale
             selectedBinPreset: .twoMinute
         )
         .frame(width: 520)
@@ -885,6 +886,31 @@ extension SnapshotTests {
             .padding(8)
             .background(Color.white)
         assertSnapshot(of: render(view, size: CGSize(width: 236, height: 84)),
+                       as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+}
+
+// MARK: - Interval trend lane LOD coercion (X41)
+@MainActor
+extension SnapshotTests {
+
+    /// At map scale a per-beat-scatter PREFERENCE is coerced to median + IQR
+    /// (no whole-recording point wall) and the "zoom in for per-beat" hint
+    /// appears. Pickers are omitted (a live Menu renders as a placeholder in
+    /// the headless ImageRenderer); the hint renders independently of them.
+    func testIntervalTrendLane_scatterCoercedAtMapScale() {
+        let view = IntervalTrendLane(
+            timeRangeSeconds: 0...1800,
+            data: makeCanonicalTrendData(),
+            metric: .qtc,
+            showMode: .perBeatScatter,
+            band: .map,
+            selectedBinPreset: .twoMinute
+        )
+        .frame(width: 520)
+        .padding()
+        .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 552, height: 160)),
                        as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 }
