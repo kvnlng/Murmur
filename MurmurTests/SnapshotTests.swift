@@ -913,6 +913,43 @@ extension SnapshotTests {
         assertSnapshot(of: render(view, size: CGSize(width: 552, height: 160)),
                        as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
+
+    /// X43: bins whose preceding-2-min rate was unstable carry a thin neutral
+    /// band along the BOTTOM edge — distinct in position + ink from the
+    /// full-height low-confidence fill and the open-top censored treatment.
+    func testIntervalTrendLane_rateStabilityMarker() {
+        let bins: [IntervalTrendBin] = (0..<12).map { i in
+            let start = Double(i) * 120
+            let median = 440.0 + (i >= 5 ? 20 : 0)
+            // Bins 5–7 sit just after a rate change → rate-unstable.
+            let unstable = (5...7).contains(i)
+            return IntervalTrendBin(
+                startSeconds: start, endSeconds: start + 120,
+                median: median, q1: median - 5, q3: median + 5,
+                bandLowerMs: median - 2.5, bandUpperMs: median + 2.5,
+                hasCensoredBeats: false, isEligible: true, beatCount: 60,
+                perBeatValues: [median],
+                rateMaxDeviationBpm: unstable ? 7 : 0.5,
+                rateStable: !unstable
+            )
+        }
+        let data = IntervalTrendData(
+            bins: bins, baselineBand: 432...448, baselineMedian: 440,
+            reproCaption: "QTc · Fridericia · 2-min bins · normal template = 214 beats"
+        )
+        let view = IntervalTrendLane(
+            timeRangeSeconds: 0...1440,
+            data: data,
+            metric: .qtc,
+            showMode: .medianAndIQR,
+            selectedBinPreset: .twoMinute
+        )
+        .frame(width: 520)
+        .padding()
+        .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 552, height: 160)),
+                       as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
 }
 
 #endif // canImport(SnapshotTesting)

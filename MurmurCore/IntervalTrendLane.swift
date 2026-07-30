@@ -463,6 +463,12 @@ struct IntervalTrendLane: View {
         if metric == .qtc, let cv = bin.rrCVPercent {
             text += String(format: " · RR CV %.0f%%", cv)
         }
+        // X43: flag that the preceding-2-min rate wasn't stable — the rate
+        // correction's own input assumption. A property of the input, not a
+        // verdict on the QTc.
+        if metric == .qtc, bin.showsRateUnstableMarker, let dev = bin.rateMaxDeviationBpm {
+            text += String(format: " · rate unstable (Δ%.0f bpm / 2 min)", dev)
+        }
         return text
     }
 
@@ -643,6 +649,25 @@ struct IntervalTrendLane: View {
                         yEnd: .value("ineligible-y1", yDomain.upperBound)
                     )
                     .foregroundStyle(Color.primary.opacity(0.12))
+                }
+
+                // Rate-stability validity marker (X43) — a thin NEUTRAL band
+                // along the BOTTOM edge under bins whose preceding-2-min rate
+                // wasn't stable, i.e. the rate correction's own input assumption
+                // (a steady R–R) didn't hold. Deliberately distinct from the two
+                // existing states: it sits at the bottom (not full height like
+                // the low-confidence fill) and uses secondary ink (not the
+                // primary open-top censored treatment). A statement about the
+                // formula's INPUT — never "invalid QTc", never "AF", no amber.
+                ForEach(rateUnstableBins) { bin in
+                    RectangleMark(
+                        xStart: .value("rate-unstable-t0", bin.startSeconds),
+                        xEnd: .value("rate-unstable-t1", bin.endSeconds),
+                        yStart: .value("rate-unstable-y0", yDomain.lowerBound),
+                        yEnd: .value("rate-unstable-y1",
+                                     yDomain.lowerBound + (yDomain.upperBound - yDomain.lowerBound) * 0.05)
+                    )
+                    .foregroundStyle(Color.secondary.opacity(0.55))
                 }
 
                 // IQR ribbon (wide, ~13% opacity) — how much QT actually
@@ -909,6 +934,14 @@ struct IntervalTrendLane: View {
 
     private var ineligibleBins: [IntervalTrendBin] {
         data.bins.filter { !$0.isEligible }
+    }
+
+    /// Bins whose preceding-2-min rate was evaluated and found unstable — the
+    /// rate-stability validity marker (X43). Only meaningful for QTc, whose
+    /// correction assumes a steady rate.
+    private var rateUnstableBins: [IntervalTrendBin] {
+        guard metric == .qtc else { return [] }
+        return data.bins.filter { $0.showsRateUnstableMarker }
     }
 
     /// Bins containing at least one T-offset-censored beat. Rendered

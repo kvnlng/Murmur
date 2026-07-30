@@ -1385,6 +1385,42 @@ struct IntervalTrendRepresentationTests {
     }
 }
 
+@Suite("Rate-stability marker (X43)")
+struct RateStabilityMarkerTests {
+
+    private func bin(stable: Bool, deviation: Double?) -> IntervalTrendBin {
+        IntervalTrendBin(
+            startSeconds: 0, endSeconds: 120, median: 440, q1: 435, q3: 445,
+            bandLowerMs: 438, bandUpperMs: 442, hasCensoredBeats: false,
+            isEligible: true, beatCount: 60, perBeatValues: [440],
+            rateMaxDeviationBpm: deviation, rateStable: stable
+        )
+    }
+
+    @Test("Marker shows only when the rate was evaluated AND unstable")
+    func markerConditions() {
+        // Evaluated + unstable → marked.
+        #expect(bin(stable: false, deviation: 7).showsRateUnstableMarker)
+        // Evaluated + stable → not marked.
+        #expect(!bin(stable: true, deviation: 0.5).showsRateUnstableMarker)
+        // Unknown history (nil deviation) → NEVER marked, even if flagged
+        // not-stable — we don't assert instability we couldn't measure.
+        #expect(!bin(stable: false, deviation: nil).showsRateUnstableMarker)
+    }
+
+    @Test("Defaults leave a bin unmarked (free viewer computes no rate stability)")
+    func defaultsUnmarked() {
+        let plain = IntervalTrendBin(
+            startSeconds: 0, endSeconds: 120, median: 440, q1: 435, q3: 445,
+            bandLowerMs: 438, bandUpperMs: 442, hasCensoredBeats: false,
+            isEligible: true, beatCount: 60, perBeatValues: [440]
+        )
+        #expect(!plain.showsRateUnstableMarker)
+        #expect(plain.rateStable)
+        #expect(plain.rateMaxDeviationBpm == nil)
+    }
+}
+
 @Suite("Calibration model")
 @MainActor
 struct CalibrationModelTests {

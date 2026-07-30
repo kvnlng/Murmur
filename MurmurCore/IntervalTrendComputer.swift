@@ -156,6 +156,25 @@ public struct IntervalTrendBin: Sendable, Equatable, Identifiable {
     /// is applied (the analyst judges). C8 / X30.
     public let rrCVPercent: Double?
 
+    /// Max deviation (bpm) of heart rate from its mean over the ~2-min window
+    /// PRECEDING this bin — the QT/RR hysteresis window (X42/X43). `nil` when
+    /// there wasn't enough preceding history to judge. Populated by the paid
+    /// qualifying-window compute; the free viewer leaves it nil. A statement
+    /// about the rate-correction INPUT, never a validity verdict.
+    public let rateMaxDeviationBpm: Double?
+    /// Whether the preceding-window rate held within `rateStabilityToleranceBpm`.
+    /// Defaults true (no marker) for bins that were never evaluated.
+    public let rateStable: Bool
+    /// The ±bpm tolerance the stability boolean was taken against (echoed for
+    /// the marker text + provenance). Default is Malik 2008's ±2 bpm.
+    public let rateStabilityToleranceBpm: Double
+
+    /// The rate-stability validity marker (X43) shows only when the rate was
+    /// evaluated AND found unstable — never on unknown history.
+    public var showsRateUnstableMarker: Bool {
+        rateMaxDeviationBpm != nil && !rateStable
+    }
+
     public init(
         startSeconds: Double,
         endSeconds: Double,
@@ -168,7 +187,10 @@ public struct IntervalTrendBin: Sendable, Equatable, Identifiable {
         isEligible: Bool,
         beatCount: Int,
         perBeatValues: [Double],
-        rrCVPercent: Double? = nil
+        rrCVPercent: Double? = nil,
+        rateMaxDeviationBpm: Double? = nil,
+        rateStable: Bool = true,
+        rateStabilityToleranceBpm: Double = 2
     ) {
         self.startSeconds = startSeconds
         self.endSeconds = endSeconds
@@ -182,6 +204,9 @@ public struct IntervalTrendBin: Sendable, Equatable, Identifiable {
         self.beatCount = beatCount
         self.perBeatValues = perBeatValues
         self.rrCVPercent = rrCVPercent
+        self.rateMaxDeviationBpm = rateMaxDeviationBpm
+        self.rateStable = rateStable
+        self.rateStabilityToleranceBpm = rateStabilityToleranceBpm
     }
 
     public var id: Double { (startSeconds + endSeconds) / 2 }
