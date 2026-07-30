@@ -26,6 +26,13 @@ import Foundation
 @MainActor
 @Observable
 final class Calibration {
+    /// Canonical amplitude gain in mm/mV. `nil` means no explicit gain has
+    /// been chosen yet, so the display keeps its legacy ±5 mV / Auto-Y
+    /// behaviour; Standard View and the presets set it, and the amplitude
+    /// window is then DERIVED from it (extent is derived, calibration is
+    /// canonical). Shared across leads by clinical convention.
+    var gainMillimetersPerMillivolt: Double?
+
     /// Lock-to-standard state. Placeholder in Phase 1; wired to hold
     /// calibration across zoom gestures in a later phase.
     var locked: Bool = false
@@ -36,6 +43,43 @@ final class Calibration {
     /// per-channel state. Only the focus-sized panel writes these.
     var canvasSize: CGSize = .zero
     var visibleMillivoltSpan: Double = 0
+}
+
+/// Pure calibration ↔ geometry math, extracted so the "calibration is
+/// canonical, extent is derived" conversions are unit-testable without a
+/// display. All physical (mm) inputs; callers pass `nil` mm-per-point through
+/// to the honesty fallback rather than into these.
+enum CalibrationMath {
+    /// Half of the visible mV window that renders `gain` mm/mV on a canvas
+    /// `heightPoints` tall, centred on the baseline. nil for degenerate input.
+    static func millivoltHalfSpan(
+        gainMillimetersPerMillivolt gain: Double,
+        canvasHeightPoints heightPoints: Double,
+        millimetersPerPoint mmPerPoint: Double
+    ) -> Double? {
+        guard gain > 0, heightPoints > 0, mmPerPoint > 0 else { return nil }
+        let pointsPerMillivolt = gain / mmPerPoint
+        guard pointsPerMillivolt > 0 else { return nil }
+        let halfSpan = (heightPoints / 2) / pointsPerMillivolt
+        return halfSpan.isFinite && halfSpan > 0 ? halfSpan : nil
+    }
+
+    /// Viewport width in samples that renders `speed` mm/s across a canvas
+    /// `widthPoints` wide. nil for degenerate input — the caller then leaves
+    /// the viewport alone rather than snapping to a nonsense width.
+    static func windowSamples(
+        millimetersPerSecond speed: Double,
+        canvasWidthPoints widthPoints: Double,
+        millimetersPerPoint mmPerPoint: Double,
+        sampleRate: Double
+    ) -> Int64? {
+        guard speed > 0, widthPoints > 0, mmPerPoint > 0, sampleRate > 0 else { return nil }
+        let pointsPerSecond = speed / mmPerPoint
+        guard pointsPerSecond > 0 else { return nil }
+        let windowSeconds = widthPoints / pointsPerSecond
+        let samples = (windowSeconds * sampleRate).rounded()
+        return samples >= 1 ? Int64(samples) : nil
+    }
 }
 
 /// Pure computation of the calibration readout from primitives — no view

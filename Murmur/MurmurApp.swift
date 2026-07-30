@@ -255,6 +255,16 @@ struct BedsideCommandMenu: Commands {
                     .keyboardShortcut("x", modifiers: [])
             }
             .disabled(dispositionDisabled)
+
+            Divider()
+
+            // Standard View (X40): snap both axes back to standard ECG paper.
+            // ⌘-modified so it's safe to leave enabled during note entry, and
+            // it dispatches through the responder chain (not a focus handler),
+            // the X35 lesson.
+            Button("Standard View") { commands?.standardView() }
+                .keyboardShortcut("0", modifiers: .command)
+                .disabled(commands == nil)
         }
     }
 

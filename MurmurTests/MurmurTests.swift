@@ -1359,6 +1359,67 @@ struct CalibrationReadingTests {
     }
 }
 
+@Suite("Calibration geometry math (X40 Standard View)")
+struct CalibrationMathTests {
+
+    @Test("mV half-span renders the gain on the measured height")
+    func millivoltHalfSpan() {
+        // 10 mm/mV at 5 pt/mm → 50 pt/mV; a 360 pt canvas → ±3.6 mV.
+        let half = CalibrationMath.millivoltHalfSpan(
+            gainMillimetersPerMillivolt: 10, canvasHeightPoints: 360, millimetersPerPoint: 0.2
+        )
+        #expect(half != nil)
+        #expect(abs((half ?? 0) - 3.6) < 1e-9)
+    }
+
+    @Test("mV half-span rejects degenerate inputs")
+    func millivoltHalfSpanDegenerate() {
+        #expect(CalibrationMath.millivoltHalfSpan(gainMillimetersPerMillivolt: 0, canvasHeightPoints: 360, millimetersPerPoint: 0.2) == nil)
+        #expect(CalibrationMath.millivoltHalfSpan(gainMillimetersPerMillivolt: 10, canvasHeightPoints: 0, millimetersPerPoint: 0.2) == nil)
+        #expect(CalibrationMath.millivoltHalfSpan(gainMillimetersPerMillivolt: 10, canvasHeightPoints: 360, millimetersPerPoint: 0) == nil)
+    }
+
+    @Test("25 mm/s window width in samples for the measured canvas")
+    func windowSamples() {
+        // 25 mm/s at 5 pt/mm → 125 pt/s; 1250 pt wide → 10 s; 360 Hz → 3600.
+        let samples = CalibrationMath.windowSamples(
+            millimetersPerSecond: 25, canvasWidthPoints: 1250,
+            millimetersPerPoint: 0.2, sampleRate: 360
+        )
+        #expect(samples == 3600)
+    }
+
+    @Test("Window-samples rejects degenerate inputs")
+    func windowSamplesDegenerate() {
+        #expect(CalibrationMath.windowSamples(millimetersPerSecond: 0, canvasWidthPoints: 1250, millimetersPerPoint: 0.2, sampleRate: 360) == nil)
+        #expect(CalibrationMath.windowSamples(millimetersPerSecond: 25, canvasWidthPoints: 0, millimetersPerPoint: 0.2, sampleRate: 360) == nil)
+        #expect(CalibrationMath.windowSamples(millimetersPerSecond: 25, canvasWidthPoints: 1250, millimetersPerPoint: 0, sampleRate: 360) == nil)
+        #expect(CalibrationMath.windowSamples(millimetersPerSecond: 25, canvasWidthPoints: 1250, millimetersPerPoint: 0.2, sampleRate: 0) == nil)
+    }
+
+    @Test("Standard View math round-trips to a standard readout")
+    func standardRoundTrips() {
+        // Applying the standard gain + speed math to a canvas, then reading it
+        // back through CalibrationReading, must report standard paper.
+        let mmPerPoint = 0.2, width = 1250.0, height = 360.0, sr = 360.0
+        let samples = CalibrationMath.windowSamples(
+            millimetersPerSecond: 25, canvasWidthPoints: width,
+            millimetersPerPoint: mmPerPoint, sampleRate: sr
+        )!
+        let windowSeconds = Double(samples) / sr
+        let halfSpan = CalibrationMath.millivoltHalfSpan(
+            gainMillimetersPerMillivolt: 10, canvasHeightPoints: height, millimetersPerPoint: mmPerPoint
+        )!
+        let reading = CalibrationReading.make(
+            windowSeconds: windowSeconds,
+            canvasWidthPoints: width, canvasHeightPoints: height,
+            visibleMillivoltSpan: 2 * halfSpan, millimetersPerPoint: mmPerPoint
+        )
+        #expect(reading.isStandard)
+        #expect(reading.text == "25 mm/s · 10 mm/mV")
+    }
+}
+
 // MARK: - Annotation model + JSON ingest
 
 @Suite("Annotation JSON ingest")

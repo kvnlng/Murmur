@@ -36,6 +36,8 @@ public struct BedsideCommands {
     public var confirm: () -> Void
     public var dismiss: () -> Void
     public var reset: () -> Void
+    /// Snap both axes back to standard ECG paper (25 mm/s · 10 mm/mV) — X40.
+    public var standardView: () -> Void
 
     /// True while a text field (the notes editor) is the first responder. The
     /// App disables the bedside key commands then so typing isn't intercepted.
@@ -57,6 +59,7 @@ public struct BedsideCommands {
         confirm: @escaping () -> Void,
         dismiss: @escaping () -> Void,
         reset: @escaping () -> Void,
+        standardView: @escaping () -> Void,
         textEntryActive: Bool,
         isEditing: Bool
     ) {
@@ -71,6 +74,7 @@ public struct BedsideCommands {
         self.confirm = confirm
         self.dismiss = dismiss
         self.reset = reset
+        self.standardView = standardView
         self.textEntryActive = textEntryActive
         self.isEditing = isEditing
     }

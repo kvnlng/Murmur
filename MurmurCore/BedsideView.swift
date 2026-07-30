@@ -230,6 +230,7 @@ struct BedsideView: View {
             confirm: { _ = dispositionFocused(.confirm) },
             dismiss: { _ = dispositionFocused(.dismiss) },
             reset: { _ = dispositionFocused(.reset) },
+            standardView: { applyStandardView() },
             textEntryActive: notesEditorFocused,
             isEditing: isEditing
         )
@@ -850,6 +851,27 @@ struct BedsideView: View {
         let currentWidth = viewport.endSample - viewport.startSample
         let newWidth = Int64(Double(currentWidth) * factor)
         viewport.setWidth(newWidth, anchorFraction: 0.5)
+    }
+
+    /// Standard View (X40): snap BOTH axes back to standard ECG paper —
+    /// 10 mm/mV and 25 mm/s — the "put me back on known paper" home position.
+    /// Sets the canonical gain (which the panels' displayRange derives from)
+    /// and the viewport width for 25 mm/s, preserving the centre time so the
+    /// analyst isn't teleported. A no-op on the time axis when the display's
+    /// physical size can't be trusted (we won't assert a mm scale we can't
+    /// verify — the X32 honesty rule); the gain is still set to the nominal
+    /// standard so the amplitude returns home.
+    private func applyStandardView() {
+        calibration.gainMillimetersPerMillivolt = CalibrationReading.standardMillimetersPerMillivolt
+        guard let mmPerPoint = DisplayMetrics.millimetersPerPoint(),
+              let samples = CalibrationMath.windowSamples(
+                  millimetersPerSecond: CalibrationReading.standardMillimetersPerSecond,
+                  canvasWidthPoints: Double(calibration.canvasSize.width),
+                  millimetersPerPoint: mmPerPoint,
+                  sampleRate: viewport.sampleRate
+              ) else { return }
+        if windowLockedTo10s { windowLockedTo10s = false }
+        viewport.setWidth(samples, anchorFraction: 0.5)   // preserves centre time
     }
 
     /// Toggle the 10-second window lock. Engaging it snaps the viewport to a
@@ -1790,6 +1812,11 @@ private struct ChannelPanel: View {
     /// very different amplitudes (e.g., precordial vs. limb leads).
     @State private var autoscaleY: Bool = false
 
+    /// This panel's measured canvas height in points, feeding the gain-derived
+    /// amplitude window (X40). 0 until first layout → displayRange falls back
+    /// to ±5 mV meanwhile.
+    @State private var canvasHeightPoints: CGFloat = 0
+
     // Per-gesture starting state so each gesture is computed against the
     // viewport as it was when the gesture began, not the most recent update.
     @State private var dragStartRange: Range<Int64>?
@@ -1880,16 +1907,28 @@ private struct ChannelPanel: View {
         .task { await scanForOffScale() }
     }
 
-    /// Effective display range for the canvas + voltage axis. When
-    /// autoscale is off (the default), uses the fixed ±5 mV clinical
-    /// reference. When on, derives from the scanned `sampleRange` with
-    /// 10% headroom on each side; falls back to the fixed range until
-    /// the scan completes.
+    /// Effective display range for the canvas + voltage axis.
+    ///   • Auto Y on → fits the scanned `sampleRange` (10% headroom).
+    ///   • A canonical gain is set (Standard View / a preset) → the mV window
+    ///     is DERIVED from that gain + this panel's height + the display's
+    ///     physical size, centred on the baseline (X40).
+    ///   • Otherwise → the legacy fixed ±5 mV reference (also the fallback
+    ///     until the canvas is measured or when the display size is untrusted).
     private var displayRange: ClosedRange<Double> {
-        guard autoscaleY, let range = sampleRange, !range.isEmpty else {
-            return Self.yMin...Self.yMax
+        if autoscaleY, let range = sampleRange, !range.isEmpty {
+            return range.displayRange()
         }
-        return range.displayRange()
+        if let gain = calibration.gainMillimetersPerMillivolt,
+           canvasHeightPoints > 0,
+           let mmPerPoint = DisplayMetrics.millimetersPerPoint(),
+           let halfSpan = CalibrationMath.millivoltHalfSpan(
+               gainMillimetersPerMillivolt: gain,
+               canvasHeightPoints: Double(canvasHeightPoints),
+               millimetersPerPoint: mmPerPoint
+           ) {
+            return -halfSpan...halfSpan
+        }
+        return Self.yMin...Self.yMax
     }
 
     /// Publish this panel's trace geometry to the shared calibration so the
@@ -2075,6 +2114,7 @@ private struct ChannelPanel: View {
             // mm. Height + mV span both feed pointsPerMillivolt; width feeds
             // pointsPerSecond. Only the focus-sized panel writes.
             .onChange(of: liveSize, initial: true) { _, size in
+                canvasHeightPoints = size.height
                 publishCalibrationGeometry(canvasSize: size)
             }
             .onChange(of: displayRange) { _, _ in
