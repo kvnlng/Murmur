@@ -1402,6 +1402,49 @@ struct BaselineDepartureTests {
     }
 }
 
+@Suite("Qualifier join into trend bins (X42→X43/X46 wiring)")
+@MainActor
+struct QualifierJoinTests {
+
+    private func beat(_ sample: Int64) -> MarkingsBeat {
+        MarkingsBeat(rPeakSampleIndex: sample, rPeakConfidence: 1, qtcMs: 440, precedingRRMs: 1000)
+    }
+
+    @Test("Qualifiers stamp onto the matching bins by start time")
+    func stampsByStart() {
+        // 1000 Hz, 2 s bins → bins start at 0 s and 2 s.
+        let beats = [Int64(500), 1500, 2500, 3500].map(beat)
+        let qualifiers = [
+            IntervalBinQualifier(startSeconds: 0, rateStable: false, rateMaxDeviationBpm: 7, excludedBeatFraction: 0.1),
+            IntervalBinQualifier(startSeconds: 2, rateStable: true, rateMaxDeviationBpm: 0.5, excludedBeatFraction: 0)
+        ]
+        let data = IntervalTrendComputer.compute(
+            beats: beats, template: nil, sampleRate: 1000, metric: .qtc,
+            binSeconds: 2, templateBeatCount: nil, qtcFormulaName: "Fridericia",
+            qualifiers: qualifiers
+        )
+        #expect(data.bins.count == 2)
+        let bin0 = data.bins.first { $0.startSeconds == 0 }
+        #expect(bin0?.rateStable == false)
+        #expect(bin0?.rateMaxDeviationBpm == 7)
+        #expect(bin0?.excludedBeatFraction == 0.1)
+        #expect(bin0?.showsRateUnstableMarker == true)
+        let bin1 = data.bins.first { $0.startSeconds == 2 }
+        #expect(bin1?.rateStable == true)
+        #expect(bin1?.showsRateUnstableMarker == false)
+    }
+
+    @Test("No qualifiers → bins default to stable + unmarked (free viewer)")
+    func defaultsWithoutQualifiers() {
+        let data = IntervalTrendComputer.compute(
+            beats: [Int64(500), 1500].map(beat), template: nil, sampleRate: 1000,
+            metric: .qtc, binSeconds: 2, templateBeatCount: nil, qtcFormulaName: "Fridericia"
+        )
+        #expect(!data.bins.isEmpty)
+        #expect(data.bins.allSatisfy { $0.rateStable && !$0.showsRateUnstableMarker && $0.excludedBeatFraction == nil })
+    }
+}
+
 @Suite("Percent-above-guide / QT clock (X46)")
 @MainActor
 struct PercentAboveGuideTests {

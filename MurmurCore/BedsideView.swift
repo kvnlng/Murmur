@@ -77,6 +77,8 @@ struct BedsideView: View {
     /// interval, bin length, show mode). The lane hides itself when
     /// `markingsContext` has no beats.
     @State private var trendLaneContext = IntervalTrendLaneContext.shared
+    /// Paid per-bin qualifying facts (X42), published by the App orchestrator.
+    @State private var qualifyingContext = QualifyingWindowContext.shared
     /// True while the notes editor is the first responder. Published into
     /// `BedsideCommands.textEntryActive` so the App disables the bedside key
     /// commands during note typing and the editor keeps its keystrokes (X22).
@@ -1389,6 +1391,7 @@ struct BedsideView: View {
                 templateBeatCount: markingsContext.template?.sampleCount,
                 qtcFormulaName: markingsContext.qtcFormula.displayName,
                 qtcFormula: markingsContext.qtcFormula,
+                qualifiers: qualifyingContext.qualifiers(forBinSeconds: trendLaneContext.binSeconds),
                 recordingTimeRange: recordingTimeRange,
                 viewportTimeRange: viewportTimeRange,
                 band: IntervalTrendRepresentation.band(
@@ -2706,6 +2709,9 @@ private struct IntervalTrendLaneMemoizedStrip: View, Equatable {
     /// The QTc formula in effect, for the X44 picker (distinct from the echoed
     /// `qtcFormulaName` string used in the repro caption).
     let qtcFormula: MarkingsQTcFormula
+    /// Paid per-bin qualifying facts (X42) joined into the bins for the X43
+    /// marker + X46 gate. Empty in the free viewer.
+    let qualifiers: [IntervalBinQualifier]
     let recordingTimeRange: ClosedRange<Double>
     /// The ECG viewport's visible window (seconds). At `.window` band it
     /// becomes the lane's x-domain so per-beat scatter is legible (X41).
@@ -2747,6 +2753,7 @@ private struct IntervalTrendLaneMemoizedStrip: View, Equatable {
             && lhs.binSeconds == rhs.binSeconds
             && lhs.qtcFormulaName == rhs.qtcFormulaName
             && lhs.qtcFormula == rhs.qtcFormula
+            && lhs.qualifiers == rhs.qualifiers
             && lhs.recordingTimeRange == rhs.recordingTimeRange
             && lhs.viewportTimeRange == rhs.viewportTimeRange
             && lhs.band == rhs.band
@@ -2767,7 +2774,8 @@ private struct IntervalTrendLaneMemoizedStrip: View, Equatable {
             metric: metric,
             binSeconds: binSeconds,
             templateBeatCount: templateBeatCount,
-            qtcFormulaName: qtcFormulaName
+            qtcFormulaName: qtcFormulaName,
+            qualifiers: qualifiers
         )
         IntervalTrendLane(
             // Map band → whole recording ribbon; window band → the viewport

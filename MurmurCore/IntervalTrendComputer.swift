@@ -290,8 +290,18 @@ public enum IntervalTrendComputer {
         binSeconds: Double,
         templateBeatCount: Int?,
         qtcFormulaName: String,
+        qualifiers: [IntervalBinQualifier] = [],
         confidenceFloor: Double = 0.60
     ) -> IntervalTrendData {
+        // Join the paid per-bin qualifying facts (X42) by bin index — both the
+        // qualifiers and the bins below start at k·binSeconds, so the index is
+        // an exact key.
+        let qualifierByBinIndex: [Int: IntervalBinQualifier] = binSeconds > 0
+            ? Dictionary(
+                qualifiers.map { (Int(($0.startSeconds / binSeconds).rounded()), $0) },
+                uniquingKeysWith: { first, _ in first }
+              )
+            : [:]
         // Baseline band comes from the template independently of the
         // bins — even the empty-beats state still shows where the
         // patient's normal falls on the y-axis.
@@ -368,6 +378,8 @@ public enum IntervalTrendComputer {
                 // distinct from IQR (physiological spread). Deterministic
                 // seed derived from bin start so re-renders stay stable.
                 let ci = bootstrapMedianCI(values: values, seed: UInt64(bitPattern: Int64(binStart * 1000)))
+                // Stamp the paid qualifying facts for this bin, if present.
+                let q = qualifierByBinIndex[Int((binStart / binSeconds).rounded())]
                 bins.append(
                     IntervalTrendBin(
                         startSeconds: binStart,
@@ -381,7 +393,10 @@ public enum IntervalTrendComputer {
                         isEligible: eligible,
                         beatCount: totalBeatsInBin,
                         perBeatValues: eligible ? values : [],
-                        rrCVPercent: coefficientOfVariationPercent(rrValues)
+                        rrCVPercent: coefficientOfVariationPercent(rrValues),
+                        rateMaxDeviationBpm: q?.rateMaxDeviationBpm,
+                        rateStable: q?.rateStable ?? true,
+                        excludedBeatFraction: q?.excludedBeatFraction
                     )
                 )
             }

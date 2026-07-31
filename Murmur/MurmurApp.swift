@@ -51,6 +51,10 @@ struct MurmurApp: App {
                 // fiducials + per-patient normal template + interval readouts,
                 // publishes to IntervalMarkingsContext.
                 .background(IntervalMarkingsOrchestrator())
+                // Qualifying-window facts (X42): per-bin rate stability +
+                // excluded fraction, published for the trend lane's X43 marker
+                // + X46 gate. Depends on the delineated beats above.
+                .background(QualifyingWindowOrchestrator())
                 // Third invisible orchestrator: owns the VT/VF Core ML model +
                 // entitlement gate, presents the scan dialog, and publishes
                 // committed candidates to VTVFScanContext for the review queue.
