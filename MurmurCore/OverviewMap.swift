@@ -200,7 +200,7 @@ struct OverviewMap: View {
 
     private var axisRow: some View {
         HStack(alignment: .center, spacing: 4) {
-            Text(formatDuration(0))
+            Text(ViewportTimeFormat.elapsed(0, tenths: false))
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.tertiary)
             Spacer(minLength: 0)
@@ -213,7 +213,7 @@ struct OverviewMap: View {
                 // XCUI value); this only adds the addressable identifier.
                 .accessibilityIdentifier("overview-window-label")
             Spacer(minLength: 0)
-            Text(formatDuration(totalDurationSeconds))
+            Text(ViewportTimeFormat.elapsed(totalDurationSeconds, tenths: false))
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.tertiary)
         }
@@ -354,17 +354,9 @@ struct OverviewMap: View {
         let startSec = Double(viewport.startSample) / viewport.sampleRate
         let endSec   = Double(viewport.endSample)   / viewport.sampleRate
         let widthSec = endSec - startSec
-        return "\(formatDuration(startSec)) – \(formatDuration(endSec))  •  \(formatDuration(widthSec)) window"
-    }
-
-    private func formatDuration(_ seconds: Double) -> String {
-        if seconds < 60 {
-            return seconds < 10
-                ? String(format: "%.1f s", seconds)
-                : String(format: "%.0f s", seconds)
-        }
-        if seconds < 3600 { return String(format: "%.1f min", seconds / 60) }
-        return String(format: "%.1f hr", seconds / 3600)
+        // X49: the shared m:ss.d formatter — no more adaptive decimal minutes.
+        return "\(ViewportTimeFormat.elapsed(startSec))–\(ViewportTimeFormat.elapsed(endSec))"
+            + "  •  \(ViewportTimeFormat.elapsed(widthSec)) window"
     }
 
     // MARK: - Internal types

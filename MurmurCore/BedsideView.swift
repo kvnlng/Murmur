@@ -1234,9 +1234,10 @@ struct BedsideView: View {
 
     private var viewportIndicator: some View {
         let sr = viewport.sampleRate > 0 ? viewport.sampleRate : 250
-        let start = clockString(Double(viewport.startSample) / sr)
-        let end = clockString(Double(viewport.endSample) / sr)
-        let total = clockString(Double(viewport.totalSamples) / sr)
+        // X49: one shared m:ss.d formatter across all three viewport renderers.
+        let start = ViewportTimeFormat.elapsed(Double(viewport.startSample) / sr)
+        let end = ViewportTimeFormat.elapsed(Double(viewport.endSample) / sr)
+        let total = ViewportTimeFormat.elapsed(Double(viewport.totalSamples) / sr, tenths: false)
         return HStack(spacing: 4) {
             Image(systemName: "scope")
                 .font(.caption2)
@@ -2493,7 +2494,8 @@ private struct ChannelPanel: View {
     }
 
     private var timeWindowLabel: String {
-        String(format: "%.2f – %.2f s", startTime, endTime)
+        // X49: the shared m:ss.d formatter (raw seconds moved to the inspector).
+        ViewportTimeFormat.window(startSeconds: startTime, endSeconds: endTime)
     }
 
     /// One-time scan over the full channel at panel mount. Runs the

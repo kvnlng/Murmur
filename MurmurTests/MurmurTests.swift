@@ -1359,6 +1359,43 @@ struct CalibrationReadingTests {
     }
 }
 
+@Suite("Viewport time format (X49)")
+struct ViewportTimeFormatTests {
+
+    @Test("m:ss.d for live coordinates across the ranges")
+    func elapsedTenths() {
+        #expect(ViewportTimeFormat.elapsed(1.73) == "0:01.7")
+        #expect(ViewportTimeFormat.elapsed(8.28) == "0:08.3")
+        #expect(ViewportTimeFormat.elapsed(721.34) == "12:01.3")   // 212 example
+        #expect(ViewportTimeFormat.elapsed(3723.4) == "1:02:03.4")  // h:mm:ss.d ≥ 1 h
+    }
+
+    @Test("Rounding rolls into the next minute, never 0:60.0")
+    func minuteBoundary() {
+        #expect(ViewportTimeFormat.elapsed(59.96) == "1:00.0")
+        #expect(ViewportTimeFormat.elapsed(119.95) == "2:00.0")
+    }
+
+    @Test("Total duration keeps whole m:ss (no tenths)")
+    func elapsedWhole() {
+        #expect(ViewportTimeFormat.elapsed(1806, tenths: false) == "30:06")
+        #expect(ViewportTimeFormat.elapsed(8.3, tenths: false) == "0:08")
+        #expect(ViewportTimeFormat.elapsed(0, tenths: false) == "0:00")
+    }
+
+    @Test("Non-finite / negative clamp to 0:00.0")
+    func degenerate() {
+        #expect(ViewportTimeFormat.elapsed(-5) == "0:00.0")
+        #expect(ViewportTimeFormat.elapsed(.nan) == "0:00.0")
+    }
+
+    @Test("Window + span compose from the same formatter")
+    func composites() {
+        #expect(ViewportTimeFormat.window(startSeconds: 1.73, endSeconds: 8.28) == "0:01.7–0:08.3")
+        #expect(ViewportTimeFormat.span(startSeconds: 1.73, endSeconds: 8.28, totalSeconds: 1806) == "0:01.7–0:08.3 of 30:06")
+    }
+}
+
 @Suite("Wheel-zoom width overflow guard")
 struct WheelZoomOverflowTests {
 
