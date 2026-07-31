@@ -56,6 +56,21 @@ final class RecordingViewport {
         setStartInternal(newStart)
     }
 
+    /// Safe zoom-target width in samples for a multiplicative `factor`, clamped
+    /// to `[1, totalSamples]` so the `Double → Int64` conversion can never trap
+    /// on an extreme factor — a large wheel zoom-out burst drives
+    /// `pow(1.35, -detents)` (and the product) past `Int64.max`, and converting
+    /// that crashes at runtime. Returns nil for a non-finite input.
+    /// `setWidth` re-clamps to `minSamples`, so bounded input is behaviour-
+    /// preserving; this only guards the conversion. Pure + `nonisolated` (no
+    /// main-actor state) so tests can call it directly, like `tapFraction`.
+    nonisolated static func zoomedWidthSamples(currentWidth: Int64, factor: Double, totalSamples: Int64) -> Int64? {
+        let proposed = (Double(currentWidth) * factor).rounded()
+        guard proposed.isFinite else { return nil }
+        let upper = Double(max(1, totalSamples))
+        return Int64(min(max(proposed, 1), upper))
+    }
+
     /// Change the window width, keeping `anchorFraction` of the current viewport
     /// (0 = left edge, 0.5 = center, 1 = right edge) anchored to the same sample.
     func setWidth(_ newWidth: Int64, anchorFraction: Double) {

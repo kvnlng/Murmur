@@ -2600,18 +2600,31 @@ private struct ChannelPanel: View {
     /// pan shifts the window by the scrolled distance. `canvasWidth` is the
     /// live trace width in points.
     private func handleWheelScroll(_ scroll: WheelScroll, canvasWidth: CGFloat) {
+        // The recording span bounds every viewport figure; clamping the Double
+        // to it BEFORE the Int64 conversion is essential — a big zoom-out burst
+        // sends `factor` (and the raw product) past Int64.max, and converting
+        // that traps at runtime. setWidth / pan re-clamp anyway, so bounded
+        // input is behaviour-preserving.
+        let total = Double(max(viewport.minSamples, viewport.totalSamples))
+
         // Calibration lock (X40 §4): pan stays free, zoom is held.
         if scroll.zoomDetents != 0, !calibration.locked {
             let factor = pow(1.35, -scroll.zoomDetents)   // detents > 0 → zoom in
-            let currentWidth = viewport.endSample - viewport.startSample
-            let newWidth = Int64((Double(currentWidth) * factor).rounded())
-            viewport.setWidth(newWidth, anchorFraction: scroll.anchorFractionX)
+            if let width = RecordingViewport.zoomedWidthSamples(
+                currentWidth: viewport.endSample - viewport.startSample,
+                factor: factor,
+                totalSamples: viewport.totalSamples
+            ) {
+                viewport.setWidth(width, anchorFraction: scroll.anchorFractionX)
+            }
         }
         if scroll.panPoints != 0, canvasWidth > 0 {
             let span = Double(viewport.endSample - viewport.startSample)
             let samplesPerPoint = span / Double(canvasWidth)
-            let deltaSamples = Int64((scroll.panPoints * samplesPerPoint).rounded())
-            viewport.pan(bySamples: deltaSamples)
+            let delta = (scroll.panPoints * samplesPerPoint).rounded()
+            if delta.isFinite {
+                viewport.pan(bySamples: Int64(min(max(delta, -total), total)))
+            }
         }
     }
 

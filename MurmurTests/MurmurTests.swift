@@ -1359,6 +1359,35 @@ struct CalibrationReadingTests {
     }
 }
 
+@Suite("Wheel-zoom width overflow guard")
+struct WheelZoomOverflowTests {
+
+    @Test("An extreme zoom-out factor clamps instead of trapping Int64")
+    func extremeFactorClamps() {
+        // The exact crash: a big zoom-out burst → pow(1.35, 200) ≈ 1.9e26, times
+        // a 3600-sample window ≈ 6.9e29, far past Int64.max. Must clamp to the
+        // recording, not trap.
+        let width = RecordingViewport.zoomedWidthSamples(
+            currentWidth: 3600, factor: pow(1.35, 200), totalSamples: 650_000
+        )
+        #expect(width == 650_000)
+    }
+
+    @Test("Non-finite factors are rejected, never converted")
+    func nonFiniteRejected() {
+        #expect(RecordingViewport.zoomedWidthSamples(currentWidth: 3600, factor: .infinity, totalSamples: 650_000) == nil)
+        #expect(RecordingViewport.zoomedWidthSamples(currentWidth: 3600, factor: .nan, totalSamples: 650_000) == nil)
+    }
+
+    @Test("Normal factors pass through; sub-1-sample clamps up to 1")
+    func normalAndFloor() {
+        // One detent of zoom-in on a 3600-sample window.
+        #expect(RecordingViewport.zoomedWidthSamples(currentWidth: 3600, factor: pow(1.35, -1), totalSamples: 650_000) == 2667)
+        // Absurd zoom-in never goes below one sample.
+        #expect(RecordingViewport.zoomedWidthSamples(currentWidth: 3600, factor: 1e-10, totalSamples: 650_000) == 1)
+    }
+}
+
 @Suite("Interval trend lane LOD (X41)")
 struct IntervalTrendRepresentationTests {
 
