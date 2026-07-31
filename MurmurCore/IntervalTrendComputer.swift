@@ -290,6 +290,7 @@ public enum IntervalTrendComputer {
         binSeconds: Double,
         templateBeatCount: Int?,
         qtcFormulaName: String,
+        templateSelectionBasis: String? = nil,
         qualifiers: [IntervalBinQualifier] = [],
         confidenceFloor: Double = 0.60
     ) -> IntervalTrendData {
@@ -311,7 +312,11 @@ public enum IntervalTrendComputer {
             binSeconds: binSeconds,
             templateBeatCount: templateBeatCount ?? template?.sampleCount,
             qtcFormulaName: qtcFormulaName,
-            sourceLead: template?.sourceLead
+            sourceLead: template?.sourceLead,
+            templateSelectionBasis: templateSelectionBasis,
+            spanStartSample: template?.spanStartSample,
+            spanEndSample: template?.spanEndSample,
+            sampleRate: sampleRate
         )
 
         guard sampleRate > 0, binSeconds > 0, !beats.isEmpty else {
@@ -471,10 +476,34 @@ public enum IntervalTrendComputer {
         binSeconds: Double,
         templateBeatCount: Int?,
         qtcFormulaName: String,
-        sourceLead: String?
+        sourceLead: String?,
+        templateSelectionBasis: String?,
+        spanStartSample: Int64?,
+        spanEndSample: Int64?,
+        sampleRate: Double
     ) -> String {
         let binLabel = binLabel(seconds: binSeconds)
-        let templateFragment = templateBeatCount.map { "normal template = \($0) beats" } ?? "no template"
+        // X48 §4(b): the template figure must disclose what the beats were
+        // selected BY and over what SPAN — a departure is uninterpretable
+        // otherwise, and a bare "N beats" reads as if the app authored the
+        // grouping. No template stays "no template" (absent, not a zero).
+        let templateFragment: String
+        if let count = templateBeatCount {
+            var frag = "normal template = \(count) beats"
+            if let basis = templateSelectionBasis, !basis.isEmpty {
+                frag += " · \(basis)"
+            }
+            if let start = spanStartSample, let end = spanEndSample, sampleRate > 0 {
+                let span = ViewportTimeFormat.window(
+                    startSeconds: Double(start) / sampleRate,
+                    endSeconds: Double(end) / sampleRate
+                )
+                frag += " · spanning \(span)"
+            }
+            templateFragment = frag
+        } else {
+            templateFragment = "no template"
+        }
         // C3: disclose the lead the intervals were measured in — a methods
         // reviewer requires it, and this caption is copied verbatim into the
         // citation payload. Appended (not prefixed) so the metric stays the

@@ -2835,6 +2835,10 @@ private struct IntervalTrendLaneMemoizedStrip: View, Equatable {
             binSeconds: binSeconds,
             templateBeatCount: templateBeatCount,
             qtcFormulaName: qtcFormulaName,
+            // X48 §4(b): the template's beats are the annotator's normal-beat
+            // code (Recording.normalBeatSampleIndices), NOT an app-computed
+            // morphology cluster — state that selection basis in the caption.
+            templateSelectionBasis: template != nil ? "annotator-coded normal (N)" : nil,
             qualifiers: qualifiers
         )
         IntervalTrendLane(

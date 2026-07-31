@@ -109,6 +109,10 @@ struct FindingsPanel: View {
     @State private var sort: FindingSort = .structural
     @State private var expandedGroups: Set<String> = []
     @State private var showNormals: Bool = false
+    /// X48 §5: per-group RENDER bound (not a ranking or filter). A group shows
+    /// at most this many rows until the analyst extends it; a group with more
+    /// carries an explicit extend control. Keyed by group id; absent = default.
+    @State private var groupRenderBounds: [String: Int] = [:]
     @State private var candidateGroupExpanded: Bool = true
 
     /// Read of the shared fiducial store so per-annotation departure
@@ -644,26 +648,59 @@ struct FindingsPanel: View {
         return parts.joined(separator: ", ")
     }
 
+    /// Default per-group render bound (X48 §5). A ROW count, not a pixel
+    /// threshold — canvas-independent by construction. 1,825 rows in one group
+    /// is unusable, so a group renders at most this many in the active sort
+    /// order until the analyst extends it. Bounds RENDERING only; the ranking,
+    /// the dispositions and the header count are untouched.
+    static let defaultGroupRenderBound = 50
+
     private func exemplarRows(for group: FindingGroup) -> some View {
-        let exemplars = group.entries.prefix(6)
+        let bound = groupRenderBounds[group.id] ?? Self.defaultGroupRenderBound
+        let shown = Array(group.entries.prefix(bound))
+        let remaining = group.entries.count - shown.count
         return VStack(spacing: 1) {
-            ForEach(exemplars, id: \.annotation.id) { entry in
+            ForEach(shown, id: \.annotation.id) { entry in
                 exemplarRow(entry: entry, groupColor: group.color)
             }
-            if group.entries.count > exemplars.count {
-                HStack {
-                    Text("+ \(group.entries.count - exemplars.count) more, sorted by departure…")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                    Spacer()
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
+            if remaining > 0 {
+                extendGroupControl(group: group, remaining: remaining, currentBound: bound)
             }
         }
         .padding(.leading, 28)
         .padding(.trailing, 4)
         .padding(.bottom, 4)
+    }
+
+    /// X48 §5: raises a group's render bound. Two steps — one page more, or the
+    /// whole group. Phrased as a rendering choice ("showing N of M"), never as a
+    /// filter that dropped beats; the group header keeps the full count.
+    @ViewBuilder
+    private func extendGroupControl(group: FindingGroup, remaining: Int, currentBound: Int) -> some View {
+        HStack(spacing: 12) {
+            Text("showing \(group.count - remaining) of \(group.count)")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+            Spacer(minLength: 4)
+            Button("Show \(min(remaining, Self.defaultGroupRenderBound)) more") {
+                groupRenderBounds[group.id] = currentBound + Self.defaultGroupRenderBound
+            }
+            .buttonStyle(.plain)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(Color.accentColor)
+            .accessibilityIdentifier("group-show-more-\(group.category)")
+            if remaining > Self.defaultGroupRenderBound {
+                Button("Show all (\(group.count))") {
+                    groupRenderBounds[group.id] = group.count
+                }
+                .buttonStyle(.plain)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(Color.accentColor)
+                .accessibilityIdentifier("group-show-all-\(group.category)")
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
     }
 
     private func exemplarRow(entry: FindingEntry, groupColor: Color) -> some View {
@@ -761,14 +798,22 @@ struct FindingsPanel: View {
                     .fill(CategoryPalette.swiftUIColor(for: "N").opacity(0.55))
                     .frame(width: 9, height: 9)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("\(collapsedNormals.count) beats within this patient's template")
+                    Text(collapsedNormalsTitle)
                         .font(.callout.weight(.semibold))
                         .foregroundStyle(.primary)
-                    Text("nothing flagged — normal beats collapse here")
+                    Text("nothing flagged — these collapse here")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 4)
+                // X48 §4(a): attribute the grouping to its actual source, in the
+                // same tertiary provenance chip the flagged sibling groups use.
+                // The row is the annotator's normal-beat code, NOT an app-computed
+                // template — so it must carry `wfdb.atr` like everything else and
+                // must not speak in the app's voice ("this patient's template").
+                Text(collapsedNormalsProvenance)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.tertiary)
                 Text(showNormals ? "hide" : "show all")
                     .font(.caption)
                     .foregroundStyle(Color.accentColor)
@@ -787,7 +832,31 @@ struct FindingsPanel: View {
         .accessibilityIdentifier("collapsed-normals-row")
         // X51 §1: speak the count + source (the X48 XCUI assertion binds here).
         // Explicit label only — no `.ignore`, which would strip the button trait.
-        .accessibilityLabel("\(collapsedNormals.count) beats within this patient's template, nothing flagged")
+        .accessibilityLabel("\(collapsedNormalsTitle), \(collapsedNormalsProvenance), nothing flagged")
+    }
+
+    /// X48 §4(a): the collapse row's title states what SELECTED these beats —
+    /// the annotator's normal-beat code — rather than claiming they came from an
+    /// app-computed "patient's template" (they don't; the template's beat
+    /// membership is exactly this same annotator code, see
+    /// `Recording.normalBeatSampleIndices`). Phrased for the annotator when the
+    /// source is `wfdb.atr`; the provenance chip carries the source either way.
+    private var collapsedNormalsTitle: String {
+        let n = collapsedNormals.count
+        if collapsedNormalsProvenance.hasPrefix("wfdb.atr") {
+            return "\(n) beats the annotator coded normal"
+        }
+        return "\(n) beats coded normal"
+    }
+
+    /// Provenance for the collapsed-normals row, computed the same way the
+    /// flagged sibling groups compute theirs — so "who said normal" reads
+    /// consistently across the whole rail. (`entries` is `[Annotation]` here,
+    /// so it can't reuse the `[FindingEntry]` overload directly.)
+    private var collapsedNormalsProvenance: String {
+        let sources = Set(collapsedNormals.entries.map(\.source))
+        if sources.count == 1, let only = sources.first { return only }
+        return "mixed (\(sources.count) sources)"
     }
 
     // MARK: - Disposition buttons (inline on expanded exemplars)

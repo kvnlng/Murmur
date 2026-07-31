@@ -1396,6 +1396,44 @@ struct ViewportTimeFormatTests {
     }
 }
 
+@Suite("Patient-normal template provenance (X48)")
+struct NormalTemplateProvenanceTests {
+
+    private func ann(_ sample: Int64, category: String, source: String) -> Annotation {
+        Annotation(kind: .point, sampleIndex: sample, category: category, source: source)
+    }
+
+    private func recording(_ annotations: [Annotation]) -> Recording {
+        Recording(
+            version: Recording.currentVersion, id: UUID(), device: "test",
+            createdAt: Date(timeIntervalSince1970: 0), sourceFileName: "r.hea",
+            channels: [], annotations: annotations
+        )
+    }
+
+    @Test("Template beats ARE the annotator's wfdb.atr N code, sorted (§3.1)")
+    func selectsAtrNBeats() {
+        // Proves the 'patient's template' membership is not a computed
+        // morphology cluster — it is exactly `code == N` from the .atr.
+        let rec = recording([
+            ann(300, category: "N", source: "wfdb.atr"),
+            ann(100, category: "N", source: "wfdb.atr"),
+            ann(200, category: "V", source: "wfdb.atr"),        // not normal
+            ann(400, category: "N", source: "some-producer")    // not the annotator
+        ])
+        #expect(rec.normalBeatSampleIndices() == [100, 300])
+    }
+
+    @Test("No .atr → NO template source: empty, not a fabricated grouping (§3.2)")
+    func noAtrNoSource() {
+        // CSV import / unannotated WFDB — the stated thesis use case — carries
+        // no annotation file, so the whole template apparatus has no source.
+        let rec = recording([ann(100, category: "N", source: "some-producer")])
+        #expect(rec.normalBeatSampleIndices().isEmpty)
+        #expect(recording([]).normalBeatSampleIndices().isEmpty)
+    }
+}
+
 @Suite("Wheel-zoom width overflow guard")
 struct WheelZoomOverflowTests {
 
@@ -5391,6 +5429,48 @@ struct IntervalTrendComputerTests {
             qtcFormulaName: "Fridericia"
         )
         #expect(out.reproCaption.contains("measured in MLII"))
+    }
+
+    @Test("Repro caption states the template's selection basis and span (X48 §4b)")
+    func reproCaptionStatesBasisAndSpan() {
+        let t = MarkingsTemplate(
+            sampleCount: 923,
+            medianPRMs: nil, iqrPRMs: nil,
+            medianQRSMs: nil, iqrQRSMs: nil,
+            medianQTMs: nil, iqrQTMs: nil,
+            qtcFormulaName: "Bazett",
+            medianQTcMs: 410, iqrQTcMs: 20,
+            sourceLead: "MLII",
+            spanStartSample: 0, spanEndSample: 15_000   // 0–60 s at 250 Hz
+        )
+        let out = IntervalTrendComputer.compute(
+            beats: [beat(rPeak: 500)],
+            template: t,
+            sampleRate: 250,
+            metric: .qtc,
+            binSeconds: 120,
+            templateBeatCount: 923,
+            qtcFormulaName: "Bazett",
+            templateSelectionBasis: "annotator-coded normal (N)"
+        )
+        #expect(out.reproCaption.contains("923"))
+        #expect(out.reproCaption.contains("annotator-coded normal (N)"))
+        #expect(out.reproCaption.contains("spanning 0:00.0–1:00.0"))
+    }
+
+    @Test("No template → 'no template', never a fabricated zero (X48 §4c)")
+    func reproCaptionNoTemplateStaysAbsent() {
+        let out = IntervalTrendComputer.compute(
+            beats: [beat(rPeak: 500)],
+            template: nil,
+            sampleRate: 250,
+            metric: .qtc,
+            binSeconds: 120,
+            templateBeatCount: nil,
+            qtcFormulaName: "Bazett"
+        )
+        #expect(out.reproCaption.contains("no template"))
+        #expect(!out.reproCaption.contains("0 beats"))
     }
 
     @Test("Bins are placed on a clock-aligned grid (0, binSeconds, 2·binSeconds, …)")
