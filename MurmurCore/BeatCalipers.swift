@@ -120,6 +120,12 @@ struct BeatCalipers: View {
 
     private func templateProvenanceText(_ t: MarkingsTemplate) -> String {
         var text = "Patient normal: \(t.sampleCount) beats"
+        // X25: disclose the lead the intervals were measured in. Convention is
+        // to measure where the T offset is clearest (II / V5 commonly), so
+        // which lead was used is reproducibility-relevant.
+        if let lead = t.sourceLead, !lead.isEmpty {
+            text += " · lead \(lead)"
+        }
         if let start = t.spanStartSample, let end = t.spanEndSample, sampleRate > 0 {
             text += " · \(clockString(start))–\(clockString(end))"
         }
