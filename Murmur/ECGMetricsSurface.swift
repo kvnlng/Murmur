@@ -38,13 +38,21 @@ struct ECGMetricsSurface: View {
     /// window opens or closes a recording.
     @State private var recordingContext = CurrentRecordingContext.shared
 
+    /// Delineated beats (per-beat QT + RR) for the QT Variability Index (X47).
+    @State private var markingsContext = IntervalMarkingsContext.shared
+
     @State private var isPurchasing = false
     @State private var lastPurchaseError: String?
 
     var body: some View {
         Group {
             if store.owns(.ecgMetrics) {
-                ECGMetricsView(report: reportForCurrentRecording)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        ECGMetricsView(report: reportForCurrentRecording)
+                        qtviSection
+                    }
+                }
             } else {
                 lockedBody
             }
@@ -110,5 +118,105 @@ struct ECGMetricsSurface: View {
             sampleRate: sampleRate
         ) else { return nil }
         return ECGMetricsService.compute(from: series)
+    }
+
+    // MARK: - QT Variability Index (X47)
+
+    private struct QTVISummary {
+        let medianQTVI: Double
+        let medianSDQT: Double
+        let medianSDNN: Double
+        let medianMeanNN: Double
+        let segmentCount: Int
+    }
+
+    /// QTVI over qualifying 5-min segments of the delineated beats. A segment
+    /// qualifies when it is artifact-free (no excluded RR) AND its rate is
+    /// stable within Malik 2008's ±2 bpm — the spec's "stable rate, no ectopic
+    /// disturbance". Reported as the median across qualifying segments; nil
+    /// when none qualify.
+    private var qtviSummary: QTVISummary? {
+        let beats = markingsContext.beats
+        let sampleRate = markingsContext.sampleRate
+        guard sampleRate > 0, beats.count > 1 else { return nil }
+        let segmentSeconds = QTVarianceComputer.minSegmentSeconds
+        let tolerance = QualifyingWindowComputer.defaultStabilityToleranceBpm
+
+        // Single pass: bucket beats into non-overlapping 5-min segments.
+        var buckets: [Int: (qt: [Double], rr: [Double])] = [:]
+        for beat in beats {
+            guard let qt = beat.qtMs, let rr = beat.precedingRRMs,
+                  qt.isFinite, rr.isFinite, rr > 0 else { continue }
+            let segment = Int((Double(beat.rPeakSampleIndex) / sampleRate) / segmentSeconds)
+            buckets[segment, default: ([], [])].qt.append(qt)
+            buckets[segment, default: ([], [])].rr.append(rr)
+        }
+
+        var indices: [QTVariabilityIndex] = []
+        for (_, seg) in buckets {
+            guard RRArtifactFilter.excludedFraction(for: seg.rr) == 0,
+                  Self.rateStableWithin(rrMs: seg.rr, toleranceBpm: tolerance),
+                  let idx = QTVarianceComputer.compute(
+                      qtMs: seg.qt, rrMs: seg.rr, segmentSeconds: segmentSeconds
+                  ) else { continue }
+            indices.append(idx)
+        }
+        guard !indices.isEmpty else { return nil }
+        return QTVISummary(
+            medianQTVI: Self.median(indices.map(\.qtvi)),
+            medianSDQT: Self.median(indices.map(\.sdqtMs)),
+            medianSDNN: Self.median(indices.map(\.sdnnMs)),
+            medianMeanNN: Self.median(indices.map(\.meanNNMs)),
+            segmentCount: indices.count
+        )
+    }
+
+    @ViewBuilder
+    private var qtviSection: some View {
+        if let s = qtviSummary {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("QT Variability Index").font(.headline)
+                Text(String(format: "QTVI %.2f · SDQT %.0f ms · SDNN %.0f ms · mean NN %.0f ms",
+                            s.medianQTVI, s.medianSDQT, s.medianSDNN, s.medianMeanNN))
+                    .font(.callout.monospacedDigit())
+                // The RUO content: components always alongside, and NO reference
+                // range — QTVi tracks SDNN more tightly than mean QT, so a
+                // normal/abnormal band isn't defensible.
+                Text("Median over \(s.segmentCount) qualifying 5-min segment"
+                     + (s.segmentCount == 1 ? "" : "s")
+                     + " (stable rate, no excluded beats). No reference range — "
+                     + "QTVi tracks heart-rate variability (SDNN) more than QT duration.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("qtvi-summary")
+        } else if !markingsContext.beats.isEmpty {
+            Text("QT Variability Index — no qualifying 5-min segments (needs ≥ 5 min of stable, artifact-free rate).")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("qtvi-summary-empty")
+        }
+    }
+
+    /// Max deviation of instantaneous HR from its mean over `rrMs`, within
+    /// `toleranceBpm` — the within-segment analogue of the qualifying-window
+    /// rate-stability check, applied to the segment's own beats.
+    private static func rateStableWithin(rrMs: [Double], toleranceBpm: Double) -> Bool {
+        let hr = rrMs.compactMap { $0 > 0 ? 60_000 / $0 : nil }
+        guard !hr.isEmpty else { return false }
+        let mean = hr.reduce(0, +) / Double(hr.count)
+        let maxDev = hr.map { abs($0 - mean) }.max() ?? 0
+        return maxDev <= toleranceBpm
+    }
+
+    private static func median(_ values: [Double]) -> Double {
+        guard !values.isEmpty else { return 0 }
+        let sorted = values.sorted()
+        let mid = sorted.count / 2
+        return sorted.count.isMultiple(of: 2) ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
     }
 }
