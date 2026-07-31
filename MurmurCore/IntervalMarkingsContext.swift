@@ -129,6 +129,16 @@ public struct MarkingsBeat: Sendable, Equatable, Codable, Identifiable {
     /// than substituting a fabricated upper edge.
     public let tOffsetIsoelectricSampleIndex: Int64?
 
+    /// True when this beat's QT measurement is physically impossible
+    /// (`MurmurMetrics.QTPlausibilityFilter` — X53), so it was EXCLUDED from
+    /// every aggregate: bin medians, the patient-normal template, and the
+    /// departure baselines those feed. Surfaced so the focus-beat inspector can
+    /// state "excluded — why" rather than render an absurd number. Distinct
+    /// from `tOffsetCensored` (a known lower bound) and from a low-confidence
+    /// beat (noise): this beat is not physically measurable at all. Default
+    /// false; set by the orchestrator that owns the plausibility filter.
+    public let isImplausible: Bool
+
     public init(
         rPeakSampleIndex: Int64,
         rPeakConfidence: Double = 1.0,
@@ -145,7 +155,8 @@ public struct MarkingsBeat: Sendable, Equatable, Codable, Identifiable {
         precedingRRMs: Double? = nil,
         tOffsetCensored: Bool = false,
         qtCalibratedHalfWidthMs: Double? = nil,
-        tOffsetIsoelectricSampleIndex: Int64? = nil
+        tOffsetIsoelectricSampleIndex: Int64? = nil,
+        isImplausible: Bool = false
     ) {
         self.rPeakSampleIndex = rPeakSampleIndex
         self.rPeakConfidence = min(1.0, max(0.0, rPeakConfidence))
@@ -163,6 +174,7 @@ public struct MarkingsBeat: Sendable, Equatable, Codable, Identifiable {
         self.tOffsetCensored = tOffsetCensored
         self.qtCalibratedHalfWidthMs = qtCalibratedHalfWidthMs
         self.tOffsetIsoelectricSampleIndex = tOffsetIsoelectricSampleIndex
+        self.isImplausible = isImplausible
     }
 
     public var id: Int64 { rPeakSampleIndex }
@@ -211,6 +223,12 @@ public struct MarkingsTemplate: Sendable, Equatable, Codable {
     public let spanStartSample: Int64?
     public let spanEndSample: Int64?
 
+    /// Beats withheld from these medians because their QT measurement was
+    /// physically impossible (X53). Mirror of
+    /// `MurmurMetrics.NormalTemplate.excludedBeatCount`; `sampleCount` is the
+    /// beats that contributed, this is the beats dropped. 0 when no filter ran.
+    public let excludedBeatCount: Int
+
     public init(
         sampleCount: Int,
         medianPRMs: Double?,
@@ -224,7 +242,8 @@ public struct MarkingsTemplate: Sendable, Equatable, Codable {
         iqrQTcMs: Double?,
         sourceLead: String? = nil,
         spanStartSample: Int64? = nil,
-        spanEndSample: Int64? = nil
+        spanEndSample: Int64? = nil,
+        excludedBeatCount: Int = 0
     ) {
         self.sampleCount = sampleCount
         self.medianPRMs = medianPRMs
@@ -239,6 +258,7 @@ public struct MarkingsTemplate: Sendable, Equatable, Codable {
         self.sourceLead = sourceLead
         self.spanStartSample = spanStartSample
         self.spanEndSample = spanEndSample
+        self.excludedBeatCount = excludedBeatCount
     }
 }
 

@@ -173,6 +173,16 @@ public struct IntervalTrendBin: Sendable, Equatable, Identifiable {
     /// percent-above-guide read (X46) so a fraction is never reported blind.
     public let excludedBeatFraction: Double?
 
+    /// Fraction (0…1) of beats in the bin whose QT measurement was physically
+    /// IMPOSSIBLE (X53 / `QTPlausibilityFilter`) and therefore withheld from
+    /// this bin's median — noise cannot be allowed to drag the trend point.
+    /// Distinct from `excludedBeatFraction` (RR-artifact/ectopic, X42): that is
+    /// about beat DETECTION, this is about MEASUREMENT possibility. `nil` in the
+    /// free viewer (no delineation). A bin whose beats were ALL impossible is
+    /// carried ineligible with this = 1 rather than dropped, so "excluded" stays
+    /// distinct from "not computed" (K9).
+    public let qtImplausibleFraction: Double?
+
     /// A bin qualifies for rate-sensitive reads (X46 percent-above, X47 QTVI)
     /// when it's eligible and its preceding-rate was stable. In the free viewer
     /// (no rate compute) `rateStable` defaults true, so every eligible bin
@@ -201,7 +211,8 @@ public struct IntervalTrendBin: Sendable, Equatable, Identifiable {
         rateMaxDeviationBpm: Double? = nil,
         rateStable: Bool = true,
         rateStabilityToleranceBpm: Double = 2,
-        excludedBeatFraction: Double? = nil
+        excludedBeatFraction: Double? = nil,
+        qtImplausibleFraction: Double? = nil
     ) {
         self.startSeconds = startSeconds
         self.endSeconds = endSeconds
@@ -219,6 +230,7 @@ public struct IntervalTrendBin: Sendable, Equatable, Identifiable {
         self.rateStable = rateStable
         self.rateStabilityToleranceBpm = rateStabilityToleranceBpm
         self.excludedBeatFraction = excludedBeatFraction
+        self.qtImplausibleFraction = qtImplausibleFraction
     }
 
     public var id: Double { (startSeconds + endSeconds) / 2 }
@@ -348,6 +360,7 @@ public enum IntervalTrendComputer {
             var rrValues: [Double] = []
             var confidenceHits = 0
             var totalBeatsInBin = 0
+            var implausibleInBin = 0
             var censoredHit = false
 
             while beatIdx < beats.count {
@@ -356,6 +369,15 @@ public enum IntervalTrendComputer {
                 if beatSec < binStart { beatIdx += 1; continue }
                 if beatSec >= binEnd { break }
                 totalBeatsInBin += 1
+                // X53: a physically impossible beat is withheld from EVERY
+                // aggregate in this bin — its garbage value never reaches the
+                // median, the RR steadiness, or the confidence floor. It is
+                // counted so the excluded fraction can be surfaced.
+                if beat.isImplausible {
+                    implausibleInBin += 1
+                    beatIdx += 1
+                    continue
+                }
                 if let value = value(for: metric, beat: beat) {
                     values.append(value)
                 }
@@ -373,10 +395,21 @@ public enum IntervalTrendComputer {
                 beatIdx += 1
             }
 
+            // Surfaced per bin, never hidden. `nil` for a bin with no beats at
+            // all (so "no data" stays distinct from "0% excluded").
+            let qtImplausibleFraction: Double? = totalBeatsInBin > 0
+                ? Double(implausibleInBin) / Double(totalBeatsInBin)
+                : nil
+
             if !values.isEmpty {
                 let stats = quartiles(of: values)
-                let confidenceFraction = totalBeatsInBin > 0
-                    ? Double(confidenceHits) / Double(totalBeatsInBin)
+                // The confidence floor is measured over the CONTRIBUTING beats,
+                // not the bin total — an excluded (impossible) beat is not "low
+                // confidence", it is not used at all, so it must not drag the
+                // eligibility denominator.
+                let contributingBeats = totalBeatsInBin - implausibleInBin
+                let confidenceFraction = contributingBeats > 0
+                    ? Double(confidenceHits) / Double(contributingBeats)
                     : 0.0
                 let eligible = confidenceFraction >= confidenceFloor
                 // Bootstrap CI on the median — measurement uncertainty,
@@ -401,7 +434,26 @@ public enum IntervalTrendComputer {
                         rrCVPercent: coefficientOfVariationPercent(rrValues),
                         rateMaxDeviationBpm: q?.rateMaxDeviationBpm,
                         rateStable: q?.rateStable ?? true,
-                        excludedBeatFraction: q?.excludedBeatFraction
+                        excludedBeatFraction: q?.excludedBeatFraction,
+                        qtImplausibleFraction: qtImplausibleFraction
+                    )
+                )
+            } else if implausibleInBin > 0 {
+                // K9: a bin whose beats were ALL physically impossible is
+                // EXCLUDED, not "not computed" — carry it ineligible (a hatched
+                // region, no plotted point) with the fraction = 1, rather than
+                // dropping it to a gap the analyst would read as missing data.
+                bins.append(
+                    IntervalTrendBin(
+                        startSeconds: binStart,
+                        endSeconds: binEnd,
+                        median: .nan, q1: .nan, q3: .nan,
+                        bandLowerMs: .nan, bandUpperMs: .nan,
+                        hasCensoredBeats: false,
+                        isEligible: false,
+                        beatCount: totalBeatsInBin,
+                        perBeatValues: [],
+                        qtImplausibleFraction: qtImplausibleFraction
                     )
                 )
             }

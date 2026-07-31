@@ -99,13 +99,22 @@ struct IntervalMarkingsOrchestrator: View {
                 rPeaks: beatSampleIndices
             )
             let readouts = IntervalMeasurement.measureAll(store: store)
+            // X53: exclude physically impossible beats from the template
+            // (noise cannot be allowed to poison the patient's own normal),
+            // and carry a per-beat implausibility flag for the trend lane and
+            // the inspector. Both key off the SAME Tier-A rule set so the
+            // template's excludedBeatCount and the beat flags never disagree.
             let template = NormalTemplateBuilder.build(
-                from: readouts,
-                qtcFormula: Self.metricsFormula(from: qtcFormula)
+                from: store,
+                qtcFormula: Self.metricsFormula(from: qtcFormula),
+                excluding: QTPlausibilityFilter.defaultRules
             )
+            let implausibleMask = QTPlausibilityFilter.mask(for: store)
             let calibration = CalibrationTable.builtInTOffset
-            let beats = zip(zip(store.beats, readouts), features).map { pair, feat in
-                let (bf, ro) = pair
+            let beats = store.beats.indices.map { i -> MarkingsBeat in
+                let bf = store.beats[i]
+                let ro = readouts[i]
+                let feat = i < features.count ? features[i] : .absent
                 let ciHalfWidth = calibration.bin(forScore: feat.tOffsetRiskScore)?.p95AbsErr
                 return MarkingsBeat(
                     rPeakSampleIndex: bf.rPeakSampleIndex,
@@ -123,7 +132,8 @@ struct IntervalMarkingsOrchestrator: View {
                     precedingRRMs: ro.precedingRRMs,
                     tOffsetCensored: feat.tOffsetCensored,
                     qtCalibratedHalfWidthMs: ciHalfWidth,
-                    tOffsetIsoelectricSampleIndex: feat.tOffsetIsoelectricSampleIndex
+                    tOffsetIsoelectricSampleIndex: feat.tOffsetIsoelectricSampleIndex,
+                    isImplausible: i < implausibleMask.count ? implausibleMask[i] : false
                 )
             }
             let coreTemplate: MarkingsTemplate? = template.sampleCount > 0
@@ -140,7 +150,8 @@ struct IntervalMarkingsOrchestrator: View {
                     iqrQTcMs: template.iqrQTcMs,
                     sourceLead: leadName,
                     spanStartSample: spanStart,
-                    spanEndSample: spanEnd
+                    spanEndSample: spanEnd,
+                    excludedBeatCount: template.excludedBeatCount
                 )
                 : nil
             return (beats, coreTemplate)

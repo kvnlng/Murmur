@@ -69,19 +69,25 @@ struct BeatCalipers: View {
         VStack(alignment: .leading, spacing: 4) {
             header
             qtcFormulaSubtitle
-            if kind == .ectopic {
+            // An impossible measurement takes precedence over the ectopic note
+            // — it's the stronger statement about why the numbers are absent.
+            if beat.isImplausible {
+                excludedSubtitle
+            } else if kind == .ectopic {
                 ectopicSubtitle
             }
             Divider().opacity(0.4)
             row("PR",  value: prValueForRendering, delta: prDeltaForRendering,
-                undefined: kind == .ectopic)
-            row("QRS", value: beat.qrsMs, delta: delta(beat.qrsMs, vs: template?.medianQRSMs))
+                undefined: suppressRepolarisationIntervals)
+            row("QRS", value: beat.isImplausible ? nil : beat.qrsMs,
+                delta: beat.isImplausible ? nil : delta(beat.qrsMs, vs: template?.medianQRSMs),
+                undefined: beat.isImplausible)
             row("QT",  value: qtValueForRendering, delta: qtDeltaForRendering,
-                undefined: kind == .ectopic,
+                undefined: suppressRepolarisationIntervals,
                 censored: qtIsCensored,
                 halfWidthMs: qtHalfWidthForRendering)
             row("QTc", value: qtcValueForRendering, delta: qtcDeltaForRendering,
-                undefined: kind == .ectopic,
+                undefined: suppressRepolarisationIntervals,
                 censored: qtIsCensored,
                 halfWidthMs: qtHalfWidthForRendering)
             templateProvenanceFooter
@@ -96,7 +102,7 @@ struct BeatCalipers: View {
     /// — QT / QTc are lower bounds ("≥ X ms"), NOT confident point
     /// estimates. Ectopic beats already suppress QT/QTc as undefined so
     /// the censored treatment yields to that.
-    private var qtIsCensored: Bool { beat.tOffsetCensored && kind != .ectopic }
+    private var qtIsCensored: Bool { beat.tOffsetCensored && kind != .ectopic && !beat.isImplausible }
     private var qtHalfWidthForRendering: Double? {
         kind == .ectopic ? nil : beat.qtCalibratedHalfWidthMs
     }
@@ -144,6 +150,22 @@ struct BeatCalipers: View {
             .accessibilityIdentifier("beat-calipers-ectopic-subtitle")
     }
 
+    /// X53: this beat's QT measurement is physically impossible, so it was
+    /// excluded from the bin medians and the patient-normal template. State the
+    /// fact — a factual statement about the MEASUREMENT, never a verdict about
+    /// the patient — rather than rendering an absurd interval.
+    private var excludedSubtitle: some View {
+        Text("Excluded — QT physically impossible; withheld from aggregates")
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("beat-calipers-excluded-subtitle")
+    }
+
+    /// PR / QT / QTc are meaningless on either an ectopic OR a physically
+    /// impossible beat, so both collapse the interval to "—".
+    private var suppressRepolarisationIntervals: Bool { kind == .ectopic || beat.isImplausible }
+
     /// QTc rate-correction formula identifier, rendered once beneath
     /// the header instead of appended to the QTc row's label. Keeps
     /// the row's label column narrow enough for the docked inspector's
@@ -160,12 +182,12 @@ struct BeatCalipers: View {
     /// hitting `row(...)` so the renderer prints "—" and skips the
     /// delta — matching the existing low-confidence style used by
     /// the T-offset in FiducialOverlay / interval-markings mockup.
-    private var prValueForRendering: Double?  { kind == .ectopic ? nil : beat.prMs }
-    private var qtValueForRendering: Double?  { kind == .ectopic ? nil : beat.qtMs }
-    private var qtcValueForRendering: Double? { kind == .ectopic ? nil : beat.qtcMs }
-    private var prDeltaForRendering: Double?  { kind == .ectopic ? nil : delta(beat.prMs, vs: template?.medianPRMs) }
-    private var qtDeltaForRendering: Double?  { kind == .ectopic ? nil : delta(beat.qtMs, vs: template?.medianQTMs) }
-    private var qtcDeltaForRendering: Double? { kind == .ectopic ? nil : delta(beat.qtcMs, vs: template?.medianQTcMs) }
+    private var prValueForRendering: Double?  { suppressRepolarisationIntervals ? nil : beat.prMs }
+    private var qtValueForRendering: Double?  { suppressRepolarisationIntervals ? nil : beat.qtMs }
+    private var qtcValueForRendering: Double? { suppressRepolarisationIntervals ? nil : beat.qtcMs }
+    private var prDeltaForRendering: Double?  { suppressRepolarisationIntervals ? nil : delta(beat.prMs, vs: template?.medianPRMs) }
+    private var qtDeltaForRendering: Double?  { suppressRepolarisationIntervals ? nil : delta(beat.qtMs, vs: template?.medianQTMs) }
+    private var qtcDeltaForRendering: Double? { suppressRepolarisationIntervals ? nil : delta(beat.qtcMs, vs: template?.medianQTcMs) }
 
     // MARK: - Header
 

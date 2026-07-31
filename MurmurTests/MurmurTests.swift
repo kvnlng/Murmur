@@ -5238,7 +5238,8 @@ struct IntervalTrendComputerTests {
         qrsMs: Double? = 92,
         qtMs: Double? = 380,
         precedingRRMs: Double? = 800,
-        fragileConfidence: Double = 0.9
+        fragileConfidence: Double = 0.9,
+        isImplausible: Bool = false
     ) -> MarkingsBeat {
         MarkingsBeat(
             rPeakSampleIndex: rPeak,
@@ -5249,7 +5250,8 @@ struct IntervalTrendComputerTests {
             qrsOffset: MarkingsFiducial(kind: .qrsOffset, sampleIndex: rPeak + 15, confidence: fragileConfidence),
             tOnset:    MarkingsFiducial(kind: .tOnset,    sampleIndex: rPeak + 40, confidence: fragileConfidence),
             tOffset:   MarkingsFiducial(kind: .tOffset,   sampleIndex: rPeak + 80, confidence: fragileConfidence),
-            prMs: prMs, qrsMs: qrsMs, qtMs: qtMs, qtcMs: qtcMs, precedingRRMs: precedingRRMs
+            prMs: prMs, qrsMs: qrsMs, qtMs: qtMs, qtcMs: qtcMs, precedingRRMs: precedingRRMs,
+            isImplausible: isImplausible
         )
     }
 
@@ -5471,6 +5473,41 @@ struct IntervalTrendComputerTests {
         )
         #expect(out.reproCaption.contains("no template"))
         #expect(!out.reproCaption.contains("0 beats"))
+    }
+
+    @Test("Implausible beats are excluded from the bin median and counted (X53)")
+    func implausibleExcludedFromBinMedian() {
+        // 5 clean (QTc 420) + 5 impossible (QTc 900) in one 2-min bin. Without
+        // exclusion the median is (420+900)/2 = 660 — the shape of the 212
+        // artifact. With it, the poison never reaches the median.
+        var beats: [MarkingsBeat] = []
+        for i in 0..<5 { beats.append(beat(rPeak: Int64(500 + i * 500), qtcMs: 420)) }
+        for i in 5..<10 { beats.append(beat(rPeak: Int64(500 + i * 500), qtcMs: 900, isImplausible: true)) }
+        let out = IntervalTrendComputer.compute(
+            beats: beats, template: template(), sampleRate: 250,
+            metric: .qtc, binSeconds: 120, templateBeatCount: 200, qtcFormulaName: "Fridericia"
+        )
+        #expect(out.bins.count == 1)
+        let bin = out.bins[0]
+        #expect(bin.median == 420)                    // poison never reached the median
+        #expect(bin.beatCount == 10)                  // both counted in the denominator
+        #expect(bin.qtImplausibleFraction == 0.5)     // …and the exclusion is surfaced
+        #expect(bin.isEligible)
+    }
+
+    @Test("A bin of only impossible beats is carried excluded, not dropped (K9)")
+    func allImplausibleBinIsDistinctFromEmpty() {
+        let beats = (0..<5).map { beat(rPeak: Int64(500 + $0 * 500), qtcMs: 900, isImplausible: true) }
+        let out = IntervalTrendComputer.compute(
+            beats: beats, template: template(), sampleRate: 250,
+            metric: .qtc, binSeconds: 120, templateBeatCount: 200, qtcFormulaName: "Fridericia"
+        )
+        #expect(out.bins.count == 1)                  // NOT dropped to a gap
+        let bin = out.bins[0]
+        #expect(!bin.isEligible)
+        #expect(bin.qtImplausibleFraction == 1.0)
+        #expect(bin.median.isNaN)                     // no plottable point
+        #expect(bin.beatCount == 5)
     }
 
     @Test("Bins are placed on a clock-aligned grid (0, binSeconds, 2·binSeconds, …)")

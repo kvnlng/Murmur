@@ -28,6 +28,9 @@ import SnapshotTesting
 import MurmurMetrics
 #endif
 
+// swiftlint:disable type_body_length
+// One snapshot per rendered surface — the suite grows with the UI it guards,
+// and splitting it by view would scatter the shared render/assert helpers.
 @MainActor
 final class SnapshotTests: XCTestCase {
 
@@ -401,6 +404,40 @@ final class SnapshotTests: XCTestCase {
             template: template,
             qtcFormula: .fridericia,
             kind: .ectopic
+        )
+        .frame(width: 250)
+        .padding()
+        .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 300, height: 220)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
+    /// Physically impossible beat (X53) — QT would occupy an absurd fraction of
+    /// the cycle. The caliper states "Excluded — QT physically impossible" and
+    /// refuses to render PR / QRS / QT / QTc as numbers, since the beat was
+    /// withheld from the aggregates.
+    func testBeatCalipers_excludedBeat() {
+        let beat = MarkingsBeat(
+            rPeakSampleIndex: 12500,
+            rPeakConfidence: 1.0,
+            qrsOnset:  MarkingsFiducial(kind: .qrsOnset,  sampleIndex: 12440, confidence: 0.95),
+            qrsOffset: MarkingsFiducial(kind: .qrsOffset, sampleIndex: 12560, confidence: 0.90),
+            prMs: 150.0, qrsMs: 96.0, qtMs: 540.0, qtcMs: 664.0, precedingRRMs: 654.0,
+            isImplausible: true
+        )
+        let template = MarkingsTemplate(
+            sampleCount: 200,
+            medianPRMs: 148.0, iqrPRMs: 12.0,
+            medianQRSMs: 88.0, iqrQRSMs: 6.0,
+            medianQTMs: 395.0, iqrQTMs: 18.0,
+            qtcFormulaName: "Fridericia",
+            medianQTcMs: 428.0, iqrQTcMs: 16.0
+        )
+        let view = BeatCalipers(
+            beat: beat,
+            sampleRate: 360,
+            template: template,
+            qtcFormula: .fridericia,
+            kind: .unknown
         )
         .frame(width: 250)
         .padding()

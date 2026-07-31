@@ -1024,7 +1024,36 @@ struct IntervalTrendLane: View {
                 .foregroundStyle(.tertiary)
                 .padding(.top, 2)
                 .accessibilityIdentifier("interval-trend-lane-repro-caption")
+            // X53: state the QT-implausible excluded fraction when the paid
+            // layer computed one and any beat was withheld. Neutral ink, a
+            // factual input condition — never a verdict, never amber.
+            if let excluded = qtImplausibleSummaryText {
+                Text(excluded)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("interval-trend-lane-excluded-fraction")
+            }
         }
+    }
+
+    /// Whole-lane statement of the beats withheld because their QT was
+    /// physically impossible (X53). Beat-weighted across bins that carry a
+    /// fraction (paid delineation only); `nil` in the free viewer or when
+    /// nothing was excluded, so a zero never reads as a computed "0% excluded"
+    /// where no filter ran.
+    private var qtImplausibleSummaryText: String? {
+        var excluded = 0.0
+        var total = 0
+        for bin in data.bins {
+            guard let fraction = bin.qtImplausibleFraction else { continue }
+            excluded += fraction * Double(bin.beatCount)
+            total += bin.beatCount
+        }
+        guard total > 0, excluded >= 0.5 else { return nil }
+        let pct = 100 * excluded / Double(total)
+        return String(format: "%.0f of %d beats excluded — QT physically impossible (%.0f%%)",
+                      excluded.rounded(), total, pct)
     }
 
     private var emptyState: some View {
