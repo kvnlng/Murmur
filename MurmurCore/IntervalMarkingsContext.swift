@@ -99,6 +99,15 @@ public struct MarkingsBeat: Sendable, Equatable, Codable, Identifiable {
     public let qtcMs: Double?
     public let precedingRRMs: Double?
 
+    /// JT interval (J-point → T-offset) and its rate-corrected form, in ms —
+    /// the REPOLARISATION portion of QT with depolarisation removed (X54).
+    /// Threaded as PRIMITIVES from `MurmurMetrics.IntervalReadout` (the free
+    /// viewer does no arithmetic on measurements); nil when QT or QRS was
+    /// unavailable. Surfaced for wide-QRS beats, where QT is inflated
+    /// mechanically by the widened QRS with no repolarisation abnormality.
+    public let jtMs: Double?
+    public let jtcMs: Double?
+
     /// True when the delineator's T-offset walk clipped at the
     /// physiological search-window ceiling — true T-offset is ≥ the
     /// reported value. Drives the "open-top / QT ≥" rendering per
@@ -153,6 +162,8 @@ public struct MarkingsBeat: Sendable, Equatable, Codable, Identifiable {
         qtMs: Double? = nil,
         qtcMs: Double? = nil,
         precedingRRMs: Double? = nil,
+        jtMs: Double? = nil,
+        jtcMs: Double? = nil,
         tOffsetCensored: Bool = false,
         qtCalibratedHalfWidthMs: Double? = nil,
         tOffsetIsoelectricSampleIndex: Int64? = nil,
@@ -171,6 +182,8 @@ public struct MarkingsBeat: Sendable, Equatable, Codable, Identifiable {
         self.qtMs = qtMs
         self.qtcMs = qtcMs
         self.precedingRRMs = precedingRRMs
+        self.jtMs = jtMs
+        self.jtcMs = jtcMs
         self.tOffsetCensored = tOffsetCensored
         self.qtCalibratedHalfWidthMs = qtCalibratedHalfWidthMs
         self.tOffsetIsoelectricSampleIndex = tOffsetIsoelectricSampleIndex

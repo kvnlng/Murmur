@@ -90,6 +90,14 @@ struct BeatCalipers: View {
                 undefined: suppressRepolarisationIntervals,
                 censored: qtIsCensored,
                 halfWidthMs: qtHalfWidthForRendering)
+            // X54: on a wide-QRS beat, QT is inflated mechanically by the
+            // widened depolarisation, so also surface JT (QT − QRS) and JTc —
+            // repolarisation with depolarisation removed. Transcription of
+            // already-measured intervals, no BBB adjustment applied.
+            if showsJT {
+                row("JT",  value: beat.jtMs,  delta: nil)
+                row("JTc", value: beat.jtcMs, delta: nil)
+            }
             templateProvenanceFooter
         }
         .padding(.horizontal, 10)
@@ -165,6 +173,21 @@ struct BeatCalipers: View {
     /// PR / QT / QTc are meaningless on either an ectopic OR a physically
     /// impossible beat, so both collapse the interval to "—".
     private var suppressRepolarisationIntervals: Bool { kind == .ectopic || beat.isImplausible }
+
+    /// The QRS-duration boundary (ms) above which QRS is conventionally "wide"
+    /// — the standard ECG definition of QRS prolongation, not a Murmur-chosen
+    /// clinical cutoff. JT is surfaced only above it, where the widened
+    /// depolarisation is inflating QT enough that reading JT instead matters.
+    private static let wideQRSThresholdMs: Double = 120
+
+    /// Show JT / JTc only for a measurable, wide-QRS beat — the case the
+    /// research frames JT for. Kept off narrow-QRS beats so the common inspector
+    /// stays uncluttered; nothing is hidden that a normal beat needs.
+    private var showsJT: Bool {
+        !suppressRepolarisationIntervals
+            && beat.jtMs != nil
+            && (beat.qrsMs ?? 0) >= Self.wideQRSThresholdMs
+    }
 
     /// QTc rate-correction formula identifier, rendered once beneath
     /// the header instead of appended to the QTc row's label. Keeps

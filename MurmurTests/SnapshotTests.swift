@@ -28,7 +28,7 @@ import SnapshotTesting
 import MurmurMetrics
 #endif
 
-// swiftlint:disable type_body_length
+// swiftlint:disable type_body_length file_length
 // One snapshot per rendered surface — the suite grows with the UI it guards,
 // and splitting it by view would scatter the shared render/assert helpers.
 @MainActor
@@ -443,6 +443,39 @@ final class SnapshotTests: XCTestCase {
         .padding()
         .background(Color.white)
         assertSnapshot(of: render(view, size: CGSize(width: 300, height: 220)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
+    /// Wide-QRS beat (X54) — QRS ≥ 120 ms, so JT (QT − QRS) and JTc are
+    /// surfaced beneath QTc. Transcription of already-measured intervals; no
+    /// BBB adjustment is applied.
+    func testBeatCalipers_wideQRSWithJT() {
+        let beat = MarkingsBeat(
+            rPeakSampleIndex: 12500,
+            rPeakConfidence: 1.0,
+            qrsOnset:  MarkingsFiducial(kind: .qrsOnset,  sampleIndex: 12435, confidence: 0.95),
+            qrsOffset: MarkingsFiducial(kind: .qrsOffset, sampleIndex: 12565, confidence: 0.92),
+            prMs: 158.0, qrsMs: 130.0, qtMs: 440.0, qtcMs: 452.0, precedingRRMs: 900.0,
+            jtMs: 310.0, jtcMs: 322.0
+        )
+        let template = MarkingsTemplate(
+            sampleCount: 200,
+            medianPRMs: 150.0, iqrPRMs: 12.0,
+            medianQRSMs: 126.0, iqrQRSMs: 8.0,
+            medianQTMs: 438.0, iqrQTMs: 18.0,
+            qtcFormulaName: "Fridericia",
+            medianQTcMs: 450.0, iqrQTcMs: 16.0
+        )
+        let view = BeatCalipers(
+            beat: beat,
+            sampleRate: 360,
+            template: template,
+            qtcFormula: .fridericia,
+            kind: .unknown
+        )
+        .frame(width: 250)
+        .padding()
+        .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 300, height: 260)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 
     /// Censored beat — T-offset walk clipped at ceiling. QT / QTc render

@@ -130,6 +130,8 @@ struct IntervalMarkingsOrchestrator: View {
                     qtMs: ro.qtMs,
                     qtcMs: ro.qtcMs(formula: Self.metricsFormula(from: qtcFormula)),
                     precedingRRMs: ro.precedingRRMs,
+                    jtMs: ro.jtMs,
+                    jtcMs: ro.jtcMs(formula: Self.metricsFormula(from: qtcFormula)),
                     tOffsetCensored: feat.tOffsetCensored,
                     qtCalibratedHalfWidthMs: ciHalfWidth,
                     tOffsetIsoelectricSampleIndex: feat.tOffsetIsoelectricSampleIndex,
