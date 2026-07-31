@@ -1016,7 +1016,11 @@ struct IntervalTrendLane: View {
             // carrying the footer facts (metric · formula · bins · template ·
             // lead). Gestures on the overlay are unaffected (not AX children).
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(data.reproCaption)
+            // X52 §5: fold the value the chart actually plots (median of the
+            // eligible bin medians) INTO the label — macOS surfaces a composed
+            // element's label reliably, its value less so — so a wire-up test
+            // can assert screen == what the validated computer produced.
+            .accessibilityLabel(summaryAXLabel)
             .accessibilityIdentifier("interval-trend-lane-summary")
             // Repro caption emitted verbatim to the citation menu.
             Text(data.reproCaption)
@@ -1035,6 +1039,25 @@ struct IntervalTrendLane: View {
                     .accessibilityIdentifier("interval-trend-lane-excluded-fraction")
             }
         }
+    }
+
+    /// The single value the chart plots as "the reading": the median of the
+    /// eligible bin medians (finite only). `nil` when nothing is eligible. This
+    /// is derived straight from the `IntervalTrendData` the validated computer
+    /// produced, so asserting the rendered value against a known input catches a
+    /// units/binding slip between compute and screen (X52 §5).
+    private var laneReadingText: String? {
+        let medians = data.bins.filter { $0.isEligible && $0.median.isFinite }.map(\.median).sorted()
+        guard !medians.isEmpty else { return nil }
+        return String(format: "%.0f", medians[medians.count / 2])
+    }
+
+    /// The collapsed-chart element's spoken label: the repro caption plus the
+    /// plotted reading (X52 §5). Extracted so the view builder isn't asked to
+    /// type-check a string expression with an optional map inline.
+    private var summaryAXLabel: String {
+        guard let reading = laneReadingText else { return data.reproCaption }
+        return "\(data.reproCaption) · reading \(reading) ms"
     }
 
     /// Whole-lane statement of the beats withheld because their QT was

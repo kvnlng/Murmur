@@ -600,6 +600,37 @@ struct BedsideView: View {
         scanContext.isScanAvailable = true
     }
 
+    /// X52 §5: publish a deterministic fiducial store whose every beat carries
+    /// the SAME known QTc, so the paid trend lane's computed bin median is a
+    /// value the wire-up test knows in advance and can assert the RENDERED
+    /// number against. Entitlement is granted in `PurchaseStore.init` under the
+    /// same flag; the orchestrator skips its recompute so this store survives.
+    @MainActor
+    private func injectSyntheticQTcLane(qtcMs: Double) {
+        let sr = ecgChannels.first?.sampleRate ?? 250
+        // 30 high-confidence beats across the fixture — enough to clear the
+        // per-bin confidence floor and land a stable median.
+        let beats: [MarkingsBeat] = (0..<30).map { i in
+            let r = Int64(100 + i * 80)
+            return MarkingsBeat(
+                rPeakSampleIndex: r,
+                rPeakConfidence: 1.0,
+                qrsOnset: MarkingsFiducial(kind: .qrsOnset, sampleIndex: r - 15, confidence: 0.95),
+                tOffset:  MarkingsFiducial(kind: .tOffset,  sampleIndex: r + 90, confidence: 0.95),
+                prMs: 150, qrsMs: 90, qtMs: qtcMs * 0.9, qtcMs: qtcMs, precedingRRMs: 800
+            )
+        }
+        let template = MarkingsTemplate(
+            sampleCount: 30,
+            medianPRMs: 150, iqrPRMs: 8,
+            medianQRSMs: 90, iqrQRSMs: 6,
+            medianQTMs: qtcMs * 0.9, iqrQTMs: 10,
+            qtcFormulaName: markingsContext.qtcFormula.displayName,
+            medianQTcMs: qtcMs, iqrQTcMs: 10
+        )
+        markingsContext.set(beats: beats, sampleRate: sr, template: template)
+    }
+
     /// Confirms a fixed synthetic candidate region — shared by the export
     /// bypass and the seed-only flag so both exercise the same amber input.
     @MainActor
@@ -623,6 +654,9 @@ struct BedsideView: View {
             try? await Task.sleep(nanoseconds: 1_000_000)
             if UITestSupport.injectVTVFCandidates {
                 injectSyntheticVTVFCandidates()
+            }
+            if let qtc = UITestSupport.injectQTcLaneValue {
+                injectSyntheticQTcLane(qtcMs: qtc)
             }
             if UITestSupport.exportWFDBFindings {
                 // Confirm a synthetic candidate region so the amber filter has

@@ -76,6 +76,13 @@ public final class PurchaseStore {
         // local Manage-Transactions state. Start no listener and skip the
         // entitlement walk — ownedProductIDs stays empty for the process.
         if UITestSupport.forceNoEntitlements { return }
+        // X52 §5: grant ECG Metrics for the QTc-lane wire-up test and skip the
+        // entitlement walk, so a StoreKit-test machine (which has no metrics
+        // transaction) can't clobber the grant on the async refresh.
+        if UITestSupport.injectQTcLaneValue != nil {
+            ownedProductIDs = [.ecgMetrics]
+            return
+        }
         #endif
         // Listen for transactions forever. Must be started before any
         // purchase begins so we don't miss the resolution of in-flight

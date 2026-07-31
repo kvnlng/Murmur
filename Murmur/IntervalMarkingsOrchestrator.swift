@@ -50,6 +50,14 @@ struct IntervalMarkingsOrchestrator: View {
     }
 
     private func recompute() async {
+        #if DEBUG
+        // X52 §5: when a UI test has injected a deterministic fiducial store for
+        // the QTc-lane wire-up assertion, do NOT run real delineation over it —
+        // that would overwrite the known values the test asserts against.
+        if ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--ui-test-inject-qtc-lane") }) {
+            return
+        }
+        #endif
         // Gate on entitlement + presence of a recording; clear
         // otherwise so a mid-session unmount doesn't leave stale
         // fiducials rendering on the next recording.

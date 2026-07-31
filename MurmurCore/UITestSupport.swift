@@ -132,6 +132,21 @@ enum UITestSupport {
         ProcessInfo.processInfo.arguments.contains { $0.hasPrefix("--ui-test") }
     }
 
+    /// If `--ui-test-inject-qtc-lane=<qtcMs>` is set, returns the QTc value (ms)
+    /// to seed. It (a) grants ECG Metrics in `PurchaseStore.init` so the paid
+    /// QTc trend lane renders, and (b) has `BedsideView` inject a deterministic
+    /// fiducial store whose every beat carries this exact QTc, so the lane's
+    /// computed bin median is KNOWN. The X52 §5 wire-up test then asserts the
+    /// lane's RENDERED value equals this — catching a units/binding slip between
+    /// the validated computer and the screen that a green unit suite would miss.
+    /// The `IntervalMarkingsOrchestrator` skips its recompute under this flag so
+    /// real delineation doesn't overwrite the injected store.
+    static var injectQTcLaneValue: Double? {
+        guard let raw = value(forFlag: "ui-test-inject-qtc-lane"),
+              let n = Double(raw), n > 0 else { return nil }
+        return n
+    }
+
     /// True when `--ui-test-standard-open` is passed. Opts a UI test INTO the
     /// X50 open-state Standard-View snap (off by default under XCUI so existing
     /// tests keep their legacy open geometry). The dedicated X50 wire-up test
