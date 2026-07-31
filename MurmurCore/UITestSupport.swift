@@ -25,6 +25,14 @@
 //        fixture, so drag would otherwise clamp at sample 0 and the
 //        test would assert no visible change.
 //
+//    --ui-test-standard-open
+//        Opts a UI test into X50's open-state Standard-View snap (25 mm/s ·
+//        10 mm/mV at t=0). OFF by default under XCUI — the snapped width
+//        depends on the runner's physical display size, so leaving it off
+//        keeps every bare `--ui-test-sample` test's open geometry stable.
+//        A normal (non-test) launch always snaps; this flag just lets the
+//        dedicated X50 wire-up test verify it.
+//
 //    --ui-test-hover-at=<x>,<y>
 //        Injects a single hover update at the given canvas-local
 //        point right after first paint. Bypasses NSTrackingArea
@@ -113,6 +121,23 @@ enum UITestSupport {
         guard let raw = value(forFlag: "ui-test-initial-duration"),
               let n = Double(raw), n > 0 else { return nil }
         return n
+    }
+
+    /// True when the process was launched with ANY `--ui-test-*` argument —
+    /// i.e. it's an XCUI run, not a normal DEBUG launch from Xcode. Used to
+    /// suppress display-size-dependent open-state behaviour (X50's Standard-View
+    /// snap) that would otherwise make every bare-`--ui-test-sample` test's
+    /// initial viewport width vary by the runner's physical screen.
+    static var isRunningUITest: Bool {
+        ProcessInfo.processInfo.arguments.contains { $0.hasPrefix("--ui-test") }
+    }
+
+    /// True when `--ui-test-standard-open` is passed. Opts a UI test INTO the
+    /// X50 open-state Standard-View snap (off by default under XCUI so existing
+    /// tests keep their legacy open geometry). The dedicated X50 wire-up test
+    /// uses this to assert the readout reads standard immediately on open.
+    static var standardOpenEnabled: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-standard-open")
     }
 
     /// If `--ui-test-hover-at=X,Y` is set, returns the point in canvas

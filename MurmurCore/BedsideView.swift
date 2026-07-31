@@ -30,6 +30,16 @@ struct BedsideView: View {
     /// candidate jumps recenter without changing zoom — for analysts who
     /// read in fixed time windows. A manual zoom breaks the lock.
     @State private var windowLockedTo10s = false
+    /// X50: a raw record opens ON standard ECG paper (25 mm/s · 10 mm/mV)
+    /// rather than at whatever calibration falls out of the initial time
+    /// window. Applied once, on the first valid layout — canvasSize is `.zero`
+    /// until the focused panel lays out, so `applyStandardView()` can't run in
+    /// `init`. This latch fires it exactly once and never fights the analyst's
+    /// later manual gain/speed changes. (A restored `.mur` sets gain before
+    /// layout; the `gain == nil` guard below leaves that saved paper alone —
+    /// the open state is the default for a record the app has never seen, not
+    /// an override. `.mur` restore is gated on X14.)
+    @State private var hasAppliedOpenCalibration = false
     @State private var layoutMode: BedsideLayoutMode
     /// App-wide read/write latch. Governs the context-notes editor and the
     /// per-finding disposition trio; new annotation create/edit/delete will
@@ -529,9 +539,37 @@ struct BedsideView: View {
         } message: {
             Text(attachError ?? "")
         }
+        .onChange(of: calibration.canvasSize, initial: true) { _, _ in
+            applyOpenCalibrationIfNeeded()
+        }
         #if DEBUG
         .task { applyUITestHooks() }
         #endif
+    }
+
+    /// X50: snap a freshly opened raw record onto standard ECG paper the first
+    /// time the focused panel reports a real canvas size. `applyStandardView()`
+    /// needs `calibration.canvasSize` (published post-layout), so this can't
+    /// run in `init`. Runs exactly once, and only while gain is still unset, so
+    /// a restored `.mur` session (X14) keeps its own paper and the analyst's
+    /// subsequent manual changes are never clobbered.
+    private func applyOpenCalibrationIfNeeded() {
+        guard !hasAppliedOpenCalibration,
+              calibration.canvasSize.width > 0,
+              calibration.gainMillimetersPerMillivolt == nil else { return }
+        #if DEBUG
+        // Under XCUI the snapped width is display-size dependent, which would
+        // make every bare `--ui-test-sample` test's open geometry vary by
+        // machine. Keep the legacy open width in tests unless a test explicitly
+        // opts in (the dedicated X50 wire-up guard does). Non-test launches
+        // always snap.
+        if UITestSupport.isRunningUITest && !UITestSupport.standardOpenEnabled {
+            hasAppliedOpenCalibration = true
+            return
+        }
+        #endif
+        hasAppliedOpenCalibration = true
+        applyStandardView(anchorFraction: 0)   // open at t = 0, not centred
     }
 
     #if DEBUG
@@ -867,7 +905,7 @@ struct BedsideView: View {
     /// physical size can't be trusted (we won't assert a mm scale we can't
     /// verify — the X32 honesty rule); the gain is still set to the nominal
     /// standard so the amplitude returns home.
-    private func applyStandardView() {
+    private func applyStandardView(anchorFraction: Double = 0.5) {
         calibration.gainMillimetersPerMillivolt = CalibrationReading.standardMillimetersPerMillivolt
         guard let mmPerPoint = DisplayMetrics.millimetersPerPoint(),
               let samples = CalibrationMath.windowSamples(
@@ -877,7 +915,10 @@ struct BedsideView: View {
                   sampleRate: viewport.sampleRate
               ) else { return }
         if windowLockedTo10s { windowLockedTo10s = false }
-        viewport.setWidth(samples, anchorFraction: 0.5)   // preserves centre time
+        // The command preserves centre time (anchor 0.5) so the analyst isn't
+        // teleported; the open path (X50) passes 0 to keep the viewport at
+        // t = 0 — a known coordinate, not a first-interesting-region guess.
+        viewport.setWidth(samples, anchorFraction: anchorFraction)
     }
 
     /// Set the shared amplitude gain to a preset (X40 §5: 5 / 10 / 20 mm/mV).

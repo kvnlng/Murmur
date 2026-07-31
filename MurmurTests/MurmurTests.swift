@@ -1691,6 +1691,36 @@ struct CalibrationMathTests {
         #expect(reading.isStandard)
         #expect(reading.text == "25 mm/s · 10 mm/mV")
     }
+
+    /// X50 open state, X40 §6 contract asserted at open: holding 25 mm/s, a
+    /// narrower canvas derives a SMALLER time extent (fewer samples), yet the
+    /// readout still reports standard paper — calibration is canonical, extent
+    /// is derived, and the derived extent stays legible at either width.
+    @Test("Narrower canvas derives a smaller extent, still standard (X50)")
+    func narrowCanvasStandardOpen() {
+        let mmPerPoint = 0.2, sr = 360.0
+        func openWindow(width: Double) -> (samples: Int64, reading: CalibrationReading) {
+            let samples = CalibrationMath.windowSamples(
+                millimetersPerSecond: 25, canvasWidthPoints: width,
+                millimetersPerPoint: mmPerPoint, sampleRate: sr
+            )!
+            let reading = CalibrationReading.make(
+                windowSeconds: Double(samples) / sr,
+                canvasWidthPoints: width, canvasHeightPoints: 360,
+                visibleMillivoltSpan: 2 * CalibrationMath.millivoltHalfSpan(
+                    gainMillimetersPerMillivolt: 10, canvasHeightPoints: 360, millimetersPerPoint: mmPerPoint
+                )!,
+                millimetersPerPoint: mmPerPoint
+            )
+            return (samples, reading)
+        }
+        let wide = openWindow(width: 1250)     // ~10 s
+        let narrow = openWindow(width: 625)     // ~5 s
+        #expect(narrow.samples < wide.samples)        // extent shrank with the canvas
+        #expect(wide.reading.isStandard)              // …but the ruler didn't
+        #expect(narrow.reading.isStandard)
+        #expect(!narrow.reading.text.contains("non-standard"))
+    }
 }
 
 // MARK: - Annotation model + JSON ingest
