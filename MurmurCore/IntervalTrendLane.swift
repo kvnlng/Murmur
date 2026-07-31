@@ -354,11 +354,17 @@ struct IntervalTrendLane: View {
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(Color.secondary.opacity(0.12), in: Capsule())
+                // X51 §3: name the Menu via its CONTENT, not the Menu itself —
+                // on macOS an `.accessibilityLabel` on the Menu blanks the name
+                // (the audit found it missing), whereas the content name is what
+                // the working pickers surface. This label is RUO-load-bearing:
+                // it marks the line as the analyst's, not an app-supplied cutoff.
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Add your own reference line")
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
             .help("Add your own reference line — a user-set threshold, not a population or clinical norm")
-            .accessibilityLabel("Add your own reference line")
             .accessibilityIdentifier("interval-trend-lane-add-guide")
         }
     }
@@ -1005,6 +1011,13 @@ struct IntervalTrendLane: View {
                         )
                 }
             }
+            // X51 §2: the chart emitted ~183 unnamed per-bin marks — noise for
+            // VoiceOver, unaddressable for XCUI. Collapse them into ONE element
+            // carrying the footer facts (metric · formula · bins · template ·
+            // lead). Gestures on the overlay are unaffected (not AX children).
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(data.reproCaption)
+            .accessibilityIdentifier("interval-trend-lane-summary")
             // Repro caption emitted verbatim to the citation menu.
             Text(data.reproCaption)
                 .font(.caption2.monospaced())

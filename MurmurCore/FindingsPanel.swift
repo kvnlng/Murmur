@@ -620,11 +620,28 @@ struct FindingsPanel: View {
                     .fill(isExpanded ? Color.secondary.opacity(0.05) : Color.clear)
             )
             .accessibilityIdentifier("finding-group-\(group.category)")
+            // X51 §1: the Button's composed content isn't synthesised into an
+            // accessibility name (VoiceOver said only "button"), so state the
+            // row's facts explicitly — kind, its departure-ranking subtitle,
+            // count, and provenance tag — in the same navigational voice. Do
+            // NOT use `.accessibilityElement(children: .ignore)` here: it strips
+            // the button trait and `app.buttons["finding-group-…"]` stops
+            // matching. An explicit label keeps the trait and sets the name.
+            .accessibilityLabel(Self.groupRowAXLabel(group))
 
             if isExpanded {
                 exemplarRows(for: group)
             }
         }
+    }
+
+    /// Composes the group row's spoken label from the same facts it displays.
+    private static func groupRowAXLabel(_ group: FindingGroup) -> String {
+        var parts = [group.humanLabel]
+        if let sub = group.subLabel { parts.append(sub) }
+        parts.append("\(group.count)")
+        parts.append(group.provenanceLabel)
+        return parts.joined(separator: ", ")
     }
 
     private func exemplarRows(for group: FindingGroup) -> some View {
@@ -768,6 +785,9 @@ struct FindingsPanel: View {
         .buttonStyle(.plain)
         .padding(.top, 6)
         .accessibilityIdentifier("collapsed-normals-row")
+        // X51 §1: speak the count + source (the X48 XCUI assertion binds here).
+        // Explicit label only — no `.ignore`, which would strip the button trait.
+        .accessibilityLabel("\(collapsedNormals.count) beats within this patient's template, nothing flagged")
     }
 
     // MARK: - Disposition buttons (inline on expanded exemplars)

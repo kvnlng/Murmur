@@ -1281,6 +1281,10 @@ struct BedsideView: View {
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+            // X51 §4: combine the two texts into ONE element so the identifier
+            // isn't shared across both static texts (which made `.firstMatch`
+            // bind arbitrarily).
+            .accessibilityElement(children: .combine)
             .accessibilityIdentifier("docked-beat-inspector-empty")
         }
     }

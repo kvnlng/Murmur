@@ -68,7 +68,9 @@ struct OverviewMap: View {
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text("Overview — one map")
+            // X51 §5: "one map" was the 2026-07-04 merge rationale leaking into
+            // the caption; "Overview" alone is sufficient.
+            Text("Overview")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
@@ -205,6 +207,11 @@ struct OverviewMap: View {
             Text(currentWindowLabel)
                 .font(.caption2.monospacedDigit().weight(.semibold))
                 .foregroundStyle(.secondary)
+                // X51 §5 / X49 §3: its two siblings (time-window-label,
+                // viewport-indicator) carry ids; give the overview span one too.
+                // The Text's content is already its spoken name (VoiceOver /
+                // XCUI value); this only adds the addressable identifier.
+                .accessibilityIdentifier("overview-window-label")
             Spacer(minLength: 0)
             Text(formatDuration(totalDurationSeconds))
                 .font(.caption2.monospacedDigit())

@@ -343,7 +343,19 @@ struct VariabilityLane: View {
                         }
                 }
             }
+            // X51 §2: collapse the ~58 unnamed per-bin marks into one element
+            // carrying the lane's summary (the header already names it too).
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(chartAXLabel)
+            .accessibilityIdentifier("variability-lane-summary")
         }
+    }
+
+    /// One-line accessibility summary for the collapsed chart.
+    private var chartAXLabel: String {
+        var summary = metricLabel
+        if let window = windowCaption, !window.isEmpty { summary += " · \(window)" }
+        return summary
     }
 
     private var emptyState: some View {
