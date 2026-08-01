@@ -2,11 +2,13 @@
 //  PurchaseStore.swift
 //  MurmurCore
 //
-//  Entitlement state for the three planned in-app purchases that gate
-//  the paid extension frameworks (Annotation Authoring, ECG Metrics,
-//  VT Detection). The free viewer + the synthetic test producer never
-//  need to consult this store — `canRun(producerID:)` returns true for
-//  free producers by design.
+//  Entitlement state for the single all-inclusive in-app purchase that
+//  gates the paid extension frameworks (annotation authoring, ECG
+//  metrics, arrhythmia candidate detection) — they unlock together.
+//  The free viewer + the synthetic test producer never need to consult
+//  this store — `canRun(producerID:)` returns true for free producers
+//  by design. (Single-IAP pivot 2026-08-01; the former per-module
+//  product IDs are retired — nothing shipped under them.)
 //
 //  Phase 1 (StoreKit 2): products fetched via `Product.products(for:)`
 //  on init; ownership tracked via `Transaction.currentEntitlements`
@@ -35,13 +37,14 @@ public final class PurchaseStore {
     /// a fresh `PurchaseStore()` to keep parallel runs isolated.
     public static let shared = PurchaseStore()
 
-    /// App Store Connect product identifiers. Raw values match what
-    /// will be registered in App Store Connect when Phase 1 of the
-    /// IAP roadmap submits — `com.kevinlong.murmur.<feature>`.
+    /// App Store Connect product identifiers. One all-inclusive product
+    /// now (single-IAP pivot): it unlocks every paid feature together.
+    /// The former per-module IDs (`…annotationauthoring` / `…metrics` /
+    /// `…vtdetection`) are retired — nothing shipped under them, so no
+    /// purchaser migration is owed. Kept as an enum (not a bare constant)
+    /// so the generic ownership / row-state / gating API is unchanged.
     public enum ProductID: String, CaseIterable, Sendable {
-        case annotationAuthoring = "com.kevinlong.murmur.annotationauthoring"
-        case ecgMetrics          = "com.kevinlong.murmur.metrics"
-        case vtDetection         = "com.kevinlong.murmur.vtdetection"
+        case studio = "com.kevinlong.murmur.studio"
     }
 
     /// Errors surfaced from `purchase(_:)`. UI converts these into
@@ -77,10 +80,10 @@ public final class PurchaseStore {
     }
     public private(set) var productsLoadState: ProductsLoadState = .idle
 
-    /// Merchandising order for the purchase surface — by TIER, not the
-    /// alphabetical `allCases` order (X55 §4). ECG Metrics leads: it is Phase 1,
-    /// the entry price, and the module a curious PI is meant to buy first.
-    public static let merchandisingOrder: [ProductID] = [.ecgMetrics, .annotationAuthoring, .vtDetection]
+    /// Presentation order for the purchase surface. One product now, so this is
+    /// a single entry; kept as an array so `SettingsView` iterates uniformly.
+    /// (The former by-tier ordering of X55 §4 is moot under the single IAP.)
+    public static let merchandisingOrder: [ProductID] = [.studio]
 
     public init() {
         #if DEBUG
@@ -90,11 +93,11 @@ public final class PurchaseStore {
         // local Manage-Transactions state. Start no listener and skip the
         // entitlement walk — ownedProductIDs stays empty for the process.
         if UITestSupport.forceNoEntitlements { return }
-        // X52 §5: grant ECG Metrics for the QTc-lane wire-up test and skip the
-        // entitlement walk, so a StoreKit-test machine (which has no metrics
+        // X52 §5: grant Studio for the QTc-lane wire-up test and skip the
+        // entitlement walk, so a StoreKit-test machine (which has no studio
         // transaction) can't clobber the grant on the async refresh.
         if UITestSupport.injectQTcLaneValue != nil {
-            ownedProductIDs = [.ecgMetrics]
+            ownedProductIDs = [.studio]
             return
         }
         #endif
@@ -122,6 +125,11 @@ public final class PurchaseStore {
     public func owns(_ id: ProductID) -> Bool {
         ownedProductIDs.contains(id)
     }
+
+    /// True when the user owns the single all-inclusive Murmur Studio purchase —
+    /// the one entitlement every paid feature checks. There is no per-module
+    /// ownership under the single-IAP model; feature call sites read this.
+    public var hasStudio: Bool { ownedProductIDs.contains(.studio) }
 
     /// Localised price string for `id` (e.g. "$9.99"), or nil when the
     /// product hasn't loaded from the App Store yet (offline, not configured
@@ -293,10 +301,11 @@ public final class PurchaseStore {
     /// tasks and tests) can use it without a hop.
     public nonisolated static func requiredProduct(forProducerID producerID: String) -> ProductID? {
         switch producerID {
-        case "murmur.annotation":  return .annotationAuthoring
-        case "murmur.metrics":     return .ecgMetrics
-        case "murmur.vtdetect":    return .vtDetection
-        default:                   return nil   // free / baseline producer
+        // One purchase unlocks every paid producer (single-IAP pivot).
+        case "murmur.annotation", "murmur.metrics", "murmur.vtdetect":
+            return .studio
+        default:
+            return nil   // free / baseline producer
         }
     }
 

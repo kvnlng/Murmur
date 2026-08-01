@@ -1548,7 +1548,7 @@ struct BedsideView: View {
     /// Drag-to-author is live only when the analyst is editing AND owns the
     /// Annotation IAP — authoring is a paid mutation; viewing findings is free.
     private var canAuthorFindings: Bool {
-        isEditing && PurchaseStore.shared.owns(.annotationAuthoring)
+        isEditing && PurchaseStore.shared.hasStudio
     }
 
     /// Creates + persists a range `Annotation` from a drag-to-author gesture.

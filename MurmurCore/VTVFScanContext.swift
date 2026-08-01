@@ -23,7 +23,7 @@ import Observation
 /// Defined here (not in the App target) so the orchestrator that MINTS
 /// candidates and the queue that RENDERS them agree on one vocabulary.
 public enum VTVFCandidateSource {
-    /// Producer id. Matches `PurchaseStore.requiredProduct` → `.vtDetection`
+    /// Producer id. Matches `PurchaseStore.requiredProduct` → `.studio`
     /// so entitlement gating is consistent with the rest of the app.
     public static let id = "murmur.vtdetect"
     /// Category token the review queue keys on to render the candidate group.

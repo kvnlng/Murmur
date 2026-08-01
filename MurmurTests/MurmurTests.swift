@@ -4078,19 +4078,17 @@ struct BundleAnnotationsFileTests {
 @Suite("Purchase store entitlement gating")
 struct PurchaseStoreTests {
 
-    @Test("Product IDs match the registered App Store Connect identifiers")
+    @Test("The one product ID matches the registered App Store Connect identifier")
     func productIDsStable() {
-        #expect(PurchaseStore.ProductID.annotationAuthoring.rawValue == "com.kevinlong.murmur.annotationauthoring")
-        #expect(PurchaseStore.ProductID.ecgMetrics.rawValue == "com.kevinlong.murmur.metrics")
-        #expect(PurchaseStore.ProductID.vtDetection.rawValue == "com.kevinlong.murmur.vtdetection")
-        #expect(PurchaseStore.ProductID.allCases.count == 3)
+        #expect(PurchaseStore.ProductID.studio.rawValue == "com.kevinlong.murmur.studio")
+        #expect(PurchaseStore.ProductID.allCases == [.studio])
     }
 
-    @Test("requiredProduct maps producer IDs to their gating IAP; free producers return nil")
+    @Test("Every paid producer maps to the one Studio product; free producers return nil")
     func producerToProductMapping() {
-        #expect(PurchaseStore.requiredProduct(forProducerID: "murmur.annotation") == .annotationAuthoring)
-        #expect(PurchaseStore.requiredProduct(forProducerID: "murmur.metrics") == .ecgMetrics)
-        #expect(PurchaseStore.requiredProduct(forProducerID: "murmur.vtdetect") == .vtDetection)
+        #expect(PurchaseStore.requiredProduct(forProducerID: "murmur.annotation") == .studio)
+        #expect(PurchaseStore.requiredProduct(forProducerID: "murmur.metrics") == .studio)
+        #expect(PurchaseStore.requiredProduct(forProducerID: "murmur.vtdetect") == .studio)
         #expect(PurchaseStore.requiredProduct(forProducerID: "murmur.synthetic") == nil)
         #expect(PurchaseStore.requiredProduct(forProducerID: "anything.else") == nil)
     }
@@ -4123,25 +4121,26 @@ struct PurchaseStoreTests {
         #expect(!store.canRun(producerID: "murmur.annotation"))
     }
 
-    @Test("canRun returns true for paid producers once the IAP is owned")
+    @Test("Owning the one product unlocks every paid producer (single-IAP)")
     @MainActor
     func canRunPaidWithEntitlement() {
         let store = PurchaseStore()
-        store._setOwnedForTesting([.ecgMetrics])
+        store._setOwnedForTesting([.studio])
         #expect(store.canRun(producerID: "murmur.metrics"))
-        // Other paid producers still gated.
-        #expect(!store.canRun(producerID: "murmur.vtdetect"))
-        #expect(!store.canRun(producerID: "murmur.annotation"))
+        #expect(store.canRun(producerID: "murmur.vtdetect"))
+        #expect(store.canRun(producerID: "murmur.annotation"))
     }
 
-    @Test("Owning one product doesn't grant entitlement to the others")
+    @Test("hasStudio reflects the single entitlement and clears (single-IAP)")
     @MainActor
-    func entitlementsAreIndependent() {
+    func hasStudioReflectsEntitlement() {
         let store = PurchaseStore()
-        store._setOwnedForTesting([.annotationAuthoring])
-        #expect(store.owns(.annotationAuthoring))
-        #expect(!store.owns(.ecgMetrics))
-        #expect(!store.owns(.vtDetection))
+        #expect(!store.hasStudio)
+        store._setOwnedForTesting([.studio])
+        #expect(store.hasStudio)
+        #expect(store.owns(.studio))
+        store._setOwnedForTesting([])
+        #expect(!store.hasStudio)
     }
 }
 

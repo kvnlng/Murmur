@@ -129,7 +129,7 @@ struct FindingsPanel: View {
     /// departure. Ownership alone isn't enough — a per-patient template
     /// must exist, which requires beats + delineation to have finished.
     private var departureSortAvailable: Bool {
-        purchaseStore.owns(.ecgMetrics) && markingsContext.template != nil
+        purchaseStore.hasStudio && markingsContext.template != nil
     }
 
     var body: some View {

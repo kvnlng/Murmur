@@ -44,7 +44,7 @@ struct QualifyingWindowOrchestrator: View {
             .allowsHitTesting(false)
             .task(id: Key(
                 recordingID: recordingContext.recording?.id,
-                owned: store.owns(.ecgMetrics),
+                owned: store.hasStudio,
                 binSeconds: trendLaneContext.binSeconds,
                 beatCount: markingsContext.beats.count,
                 firstBeat: markingsContext.beats.first?.rPeakSampleIndex,
@@ -58,7 +58,7 @@ struct QualifyingWindowOrchestrator: View {
         let beats = markingsContext.beats
         let sampleRate = markingsContext.sampleRate
         let binSeconds = trendLaneContext.binSeconds
-        guard store.owns(.ecgMetrics), sampleRate > 0, binSeconds > 0, beats.count > 1 else {
+        guard store.hasStudio, sampleRate > 0, binSeconds > 0, beats.count > 1 else {
             await MainActor.run { QualifyingWindowContext.shared.clear() }
             return
         }

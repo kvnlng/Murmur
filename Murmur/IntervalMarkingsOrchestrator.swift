@@ -42,7 +42,7 @@ struct IntervalMarkingsOrchestrator: View {
             .allowsHitTesting(false)
             .task(id: Key(
                 recordingID: recordingContext.recording?.id,
-                owned: store.owns(.ecgMetrics),
+                owned: store.hasStudio,
                 qtcFormula: markingsContext.qtcFormula
             )) {
                 await recompute()
@@ -61,7 +61,7 @@ struct IntervalMarkingsOrchestrator: View {
         // Gate on entitlement + presence of a recording; clear
         // otherwise so a mid-session unmount doesn't leave stale
         // fiducials rendering on the next recording.
-        guard store.owns(.ecgMetrics),
+        guard store.hasStudio,
               let recording = recordingContext.recording,
               let directory = recordingContext.directory,
               let ecgChannel = recording.primaryECGChannel else {

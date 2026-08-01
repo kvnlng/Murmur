@@ -3,48 +3,18 @@
   "nonRenewingSubscriptions" : [],
   "products" : [
     {
-      "displayPrice" : "99.99",
-      "familyShareable" : false,
-      "internalID" : "ANNOTATION-AUTH-0001",
-      "localizations" : [
-        {
-          "description" : "Manually create, edit, and delete findings on top of any recording. Free viewer continues to support reading and disposition.",
-          "displayName" : "Annotation Authoring",
-          "locale" : "en_US"
-        }
-      ],
-      "productID" : "com.kevinlong.murmur.annotationauthoring",
-      "referenceName" : "Annotation Authoring",
-      "type" : "NonConsumable"
-    },
-    {
-      "displayPrice" : "49.99",
-      "familyShareable" : false,
-      "internalID" : "ECG-METRICS-0001",
-      "localizations" : [
-        {
-          "description" : "Standard ECG analytic measures computed on device — HRV (RMSSD, SDNN, pNN50), RR-interval statistics, interval measurements, frequency-domain HRV. For clinical researchers and cardiologists.",
-          "displayName" : "ECG Metrics",
-          "locale" : "en_US"
-        }
-      ],
-      "productID" : "com.kevinlong.murmur.metrics",
-      "referenceName" : "ECG Metrics",
-      "type" : "NonConsumable"
-    },
-    {
       "displayPrice" : "199.99",
       "familyShareable" : false,
-      "internalID" : "VT-DETECTION-0001",
+      "internalID" : "MURMUR-STUDIO-0001",
       "localizations" : [
         {
-          "description" : "SE-ResLSTM detector for malignant ventricular arrhythmias in noisy ICU telemetry. Research use only — not for clinical decision support.",
-          "displayName" : "VT/VF Detection (RUO)",
+          "description" : "Unlocks every research feature at once: on-device ECG metrics and trend lanes (HRV, RR-interval statistics, interval measurements), annotation authoring, and arrhythmia candidate detection. Research use only — the analyst adjudicates; the app proposes candidates, never verdicts. The free viewer's reading, disposition, and export stay free.",
+          "displayName" : "Murmur Studio",
           "locale" : "en_US"
         }
       ],
-      "productID" : "com.kevinlong.murmur.vtdetection",
-      "referenceName" : "VT/VF Detection",
+      "productID" : "com.kevinlong.murmur.studio",
+      "referenceName" : "Murmur Studio (all-inclusive)",
       "type" : "NonConsumable"
     }
   ],

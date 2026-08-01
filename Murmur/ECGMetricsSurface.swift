@@ -6,7 +6,7 @@
 //  `PurchaseStore` and `MurmurCore` stay ignorant of `MurmurMetrics`.
 //  This view:
 //
-//   1. Reads `PurchaseStore.shared.owns(.ecgMetrics)` — MurmurCore
+//   1. Reads `PurchaseStore.shared.hasStudio` — MurmurCore
 //      exposes the entitlement.
 //   2. When entitled: renders `ECGMetricsView` with a report. First
 //      slice computes the report from a small synthetic RR sequence
@@ -46,7 +46,7 @@ struct ECGMetricsSurface: View {
 
     var body: some View {
         Group {
-            if store.owns(.ecgMetrics) {
+            if store.hasStudio {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         ECGMetricsView(report: reportForCurrentRecording)
@@ -66,7 +66,7 @@ struct ECGMetricsSurface: View {
     private var lockedBody: some View {
         VStack(alignment: .leading, spacing: 12) {
             ECGMetricsLockedView(
-                displayPrice: store.products[.ecgMetrics]?.displayPrice,
+                displayPrice: store.displayPrice(for: .studio),
                 onBuy: { Task { await purchase() } },
                 onRestore: { Task { await store.restore() } }
             )
@@ -89,7 +89,7 @@ struct ECGMetricsSurface: View {
         lastPurchaseError = nil
         defer { isPurchasing = false }
         do {
-            _ = try await store.purchase(.ecgMetrics)
+            _ = try await store.purchase(.studio)
         } catch PurchaseStore.PurchaseError.productNotLoaded {
             lastPurchaseError = "Product not yet loaded. Try again in a moment."
         } catch PurchaseStore.PurchaseError.unverifiedTransaction {

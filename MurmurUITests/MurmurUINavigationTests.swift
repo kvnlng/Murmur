@@ -280,7 +280,7 @@ final class MurmurUINavigationTests: XCTestCase {
     /// visible. Guards the ratified measurement-layer gating rule.
     ///
     /// The seam element is the load-bearing assertion. When
-    /// `PurchaseStore.owns(.ecgMetrics) && markingsContext.template
+    /// `PurchaseStore.hasStudio && markingsContext.template
     /// != nil` becomes true the seam disappears — its very existence
     /// is a signal that the measurement layer is gated. We deliberately
     /// don't assert the sort picker's visible label because macOS

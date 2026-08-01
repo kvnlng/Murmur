@@ -43,7 +43,7 @@ struct VTVFScanOrchestrator: View {
             .allowsHitTesting(false)
             .task(id: Key(
                 recordingID: recordingContext.recording?.id,
-                owned: store.owns(.vtDetection)
+                owned: store.hasStudio
             )) {
                 await refreshAvailability()
             }
@@ -70,7 +70,7 @@ struct VTVFScanOrchestrator: View {
             return
         }
         #endif
-        let owned = store.owns(.vtDetection)
+        let owned = store.hasStudio
         scanContext.isScanAvailable = owned && recordingContext.recording != nil
 
         // Load the model once, the first time the IAP is owned.

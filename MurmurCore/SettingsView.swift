@@ -113,7 +113,7 @@ private struct PurchasesSettingsTab: View {
             } header: {
                 Text("Developer — grant entitlements (DEBUG)")
             } footer: {
-                Text("Debug builds only. Flips local ownership so paid features can be exercised without a StoreKit purchase. Grant \"VT/VF Detection (RUO)\", open a recording, then use the \"Scan for VT/VF candidates\" toolbar button.")
+                Text("Debug builds only. Flips local ownership so paid features can be exercised without a StoreKit purchase. Grant \"Murmur Studio\", open a recording, then use any paid feature (the metrics lanes, annotation authoring, or the \"Scan for VT/VF candidates\" toolbar button).")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -208,9 +208,7 @@ private struct PurchasesSettingsTab: View {
 
     private func displayName(for id: PurchaseStore.ProductID) -> String {
         switch id {
-        case .annotationAuthoring: return "Annotation Authoring"
-        case .ecgMetrics:          return "ECG Metrics"
-        case .vtDetection:         return "VT/VF Detection (RUO)"
+        case .studio: return "Murmur Studio (all-inclusive)"
         }
     }
 }

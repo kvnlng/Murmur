@@ -64,7 +64,7 @@ struct VariabilityLaneOrchestrator: View {
             .allowsHitTesting(false)
             .task(id: Key(
                 recordingID: recordingContext.recording?.id,
-                owned: store.owns(.ecgMetrics),
+                owned: store.hasStudio,
                 preset: laneContext.windowPreset,
                 customWindowSeconds: laneContext.customWindowSeconds,
                 stepSeconds: laneContext.stepSeconds
@@ -79,7 +79,7 @@ struct VariabilityLaneOrchestrator: View {
     /// beats), and the rolling computer is O(N).
     @MainActor
     private func recompute() {
-        guard store.owns(.ecgMetrics),
+        guard store.hasStudio,
               let recording = recordingContext.recording,
               let sampleRate = recording.channels.first?.sampleRate else {
             laneContext.clear()

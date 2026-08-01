@@ -596,16 +596,14 @@ struct ExternalProducerTests {
 @MainActor
 struct PurchaseStoreTests {
 
-    @Test("ProductID raw values are stable")
+    @Test("The single product's raw value is stable")
     func productIDRawValues() {
-        #expect(PurchaseStore.ProductID.annotationAuthoring.rawValue == "com.kevinlong.murmur.annotationauthoring")
-        #expect(PurchaseStore.ProductID.ecgMetrics.rawValue == "com.kevinlong.murmur.metrics")
-        #expect(PurchaseStore.ProductID.vtDetection.rawValue == "com.kevinlong.murmur.vtdetection")
+        #expect(PurchaseStore.ProductID.studio.rawValue == "com.kevinlong.murmur.studio")
     }
 
-    @Test("ProductID is CaseIterable across all three IAPs")
+    @Test("ProductID is a single all-inclusive product (single-IAP pivot)")
     func productIDCaseIterable() {
-        #expect(PurchaseStore.ProductID.allCases.count == 3)
+        #expect(PurchaseStore.ProductID.allCases == [.studio])
     }
 
     @Test("requiredProduct returns nil for unrecognized (free) producer ids")
@@ -614,17 +612,18 @@ struct PurchaseStoreTests {
         #expect(PurchaseStore.requiredProduct(forProducerID: "random.thing") == nil)
     }
 
-    @Test("requiredProduct maps the three known paid producers")
+    @Test("requiredProduct maps every paid producer to the one Studio product")
     func requiredProductPaid() {
-        #expect(PurchaseStore.requiredProduct(forProducerID: "murmur.annotation") == .annotationAuthoring)
-        #expect(PurchaseStore.requiredProduct(forProducerID: "murmur.metrics") == .ecgMetrics)
-        #expect(PurchaseStore.requiredProduct(forProducerID: "murmur.vtdetect") == .vtDetection)
+        #expect(PurchaseStore.requiredProduct(forProducerID: "murmur.annotation") == .studio)
+        #expect(PurchaseStore.requiredProduct(forProducerID: "murmur.metrics") == .studio)
+        #expect(PurchaseStore.requiredProduct(forProducerID: "murmur.vtdetect") == .studio)
     }
 
     @Test("Fresh store owns nothing")
     func freshStoreEmpty() {
         let store = PurchaseStore()
         #expect(store.ownedProductIDs.isEmpty)
+        #expect(store.hasStudio == false)
         for id in PurchaseStore.ProductID.allCases {
             #expect(store.owns(id) == false)
         }
@@ -645,11 +644,9 @@ struct PurchaseStoreTests {
         #expect(store.canRun(producerID: "murmur.vtdetect") == false)
     }
 
-    @Test("Merchandising order leads with ECG Metrics, by tier (X55 §4)")
+    @Test("Merchandising order is the single Studio product (single-IAP)")
     func merchandisingOrder() {
-        #expect(PurchaseStore.merchandisingOrder == [.ecgMetrics, .annotationAuthoring, .vtDetection])
-        #expect(PurchaseStore.merchandisingOrder.first == .ecgMetrics)
-        // Every product is still listed — a reorder must not drop one.
+        #expect(PurchaseStore.merchandisingOrder == [.studio])
         #expect(Set(PurchaseStore.merchandisingOrder) == Set(PurchaseStore.ProductID.allCases))
     }
 
@@ -672,24 +669,25 @@ struct PurchaseStoreTests {
     }
 
     #if DEBUG
-    @Test("canRun flips to true once the gating entitlement is set")
+    @Test("Owning Studio unlocks every paid producer together (single-IAP)")
     func canRunPaidUnlocked() {
         let store = PurchaseStore()
-        store._setOwnedForTesting([.ecgMetrics])
+        store._setOwnedForTesting([.studio])
+        #expect(store.hasStudio == true)
+        #expect(store.owns(.studio) == true)
         #expect(store.canRun(producerID: "murmur.metrics") == true)
-        #expect(store.canRun(producerID: "murmur.annotation") == false)
-        #expect(store.canRun(producerID: "murmur.vtdetect") == false)
-        #expect(store.owns(.ecgMetrics) == true)
-        #expect(store.owns(.annotationAuthoring) == false)
+        #expect(store.canRun(producerID: "murmur.annotation") == true)
+        #expect(store.canRun(producerID: "murmur.vtdetect") == true)
     }
 
-    @Test("Multiple entitlements set independently")
+    @Test("Clearing the entitlement re-locks every paid producer")
     func multipleEntitlements() {
         let store = PurchaseStore()
-        store._setOwnedForTesting([.ecgMetrics, .vtDetection])
-        #expect(store.canRun(producerID: "murmur.metrics") == true)
-        #expect(store.canRun(producerID: "murmur.vtdetect") == true)
-        #expect(store.canRun(producerID: "murmur.annotation") == false)
+        store._setOwnedForTesting([.studio])
+        store._setOwnedForTesting([])
+        #expect(store.hasStudio == false)
+        #expect(store.canRun(producerID: "murmur.metrics") == false)
+        #expect(store.canRun(producerID: "murmur.vtdetect") == false)
     }
     #endif
 
@@ -701,7 +699,7 @@ struct PurchaseStoreTests {
         // productNotLoaded rather than crashing or hanging.
         let store = PurchaseStore()
         do {
-            _ = try await store.purchase(.ecgMetrics)
+            _ = try await store.purchase(.studio)
             Issue.record("Expected purchase to throw productNotLoaded")
         } catch let error as PurchaseStore.PurchaseError {
             if case .productNotLoaded = error {
