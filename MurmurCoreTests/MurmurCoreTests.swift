@@ -645,6 +645,32 @@ struct PurchaseStoreTests {
         #expect(store.canRun(producerID: "murmur.vtdetect") == false)
     }
 
+    @Test("Merchandising order leads with ECG Metrics, by tier (X55 §4)")
+    func merchandisingOrder() {
+        #expect(PurchaseStore.merchandisingOrder == [.ecgMetrics, .annotationAuthoring, .vtDetection])
+        #expect(PurchaseStore.merchandisingOrder.first == .ecgMetrics)
+        // Every product is still listed — a reorder must not drop one.
+        #expect(Set(PurchaseStore.merchandisingOrder) == Set(PurchaseStore.ProductID.allCases))
+    }
+
+    @Test("Row state distinguishes the two non-resolving conditions (X55 §3)")
+    func rowStateNonResolving() {
+        // Transient failure → retry.
+        #expect(PurchaseStore.rowState(owns: false, purchasing: false, price: nil, loadState: .failed) == .unreachable)
+        // Loaded but this product wasn't returned → not offered here, no retry.
+        #expect(PurchaseStore.rowState(owns: false, purchasing: false, price: nil, loadState: .loaded) == .notOfferedHere)
+        // Still loading / not started → checking, not an error yet.
+        #expect(PurchaseStore.rowState(owns: false, purchasing: false, price: nil, loadState: .loading) == .checking)
+        #expect(PurchaseStore.rowState(owns: false, purchasing: false, price: nil, loadState: .idle) == .checking)
+    }
+
+    @Test("Row state precedence: owned > purchasing > buy > load-state")
+    func rowStatePrecedence() {
+        #expect(PurchaseStore.rowState(owns: true, purchasing: true, price: "$49.99", loadState: .loaded) == .owned)
+        #expect(PurchaseStore.rowState(owns: false, purchasing: true, price: "$49.99", loadState: .loaded) == .purchasing)
+        #expect(PurchaseStore.rowState(owns: false, purchasing: false, price: "$49.99", loadState: .failed) == .buy(price: "$49.99"))
+    }
+
     #if DEBUG
     @Test("canRun flips to true once the gating entitlement is set")
     func canRunPaidUnlocked() {

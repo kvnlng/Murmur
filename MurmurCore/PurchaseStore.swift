@@ -68,6 +68,20 @@ public final class PurchaseStore {
     /// StoreKit transaction resolves (purchase, restore, refund).
     public private(set) var ownedProductIDs: Set<ProductID> = []
 
+    /// Outcome of the most recent product load — lets the purchase UI tell a
+    /// TRANSIENT failure (offer a retry) apart from a product that simply isn't
+    /// offered in this storefront (nothing the user can do). X55 §3 / K19: two
+    /// non-resolving conditions, not one dead-end "Unavailable".
+    public enum ProductsLoadState: Sendable, Equatable {
+        case idle, loading, loaded, failed
+    }
+    public private(set) var productsLoadState: ProductsLoadState = .idle
+
+    /// Merchandising order for the purchase surface — by TIER, not the
+    /// alphabetical `allCases` order (X55 §4). ECG Metrics leads: it is Phase 1,
+    /// the entry price, and the module a curious PI is meant to buy first.
+    public static let merchandisingOrder: [ProductID] = [.ecgMetrics, .annotationAuthoring, .vtDetection]
+
     public init() {
         #if DEBUG
         // Free-viewer XCUI hermeticity: `--ui-test-no-entitlements` makes this
@@ -162,7 +176,14 @@ public final class PurchaseStore {
 
     // MARK: - Loading
 
+    /// Re-run the product load — the retry action behind a transient-failure
+    /// row (X55 §3). Public so the purchase UI can offer "Try again".
+    public func reloadProducts() async {
+        await loadProducts()
+    }
+
     private func loadProducts() async {
+        productsLoadState = .loading
         do {
             let fetched = try await Product.products(for: ProductID.allCases.map(\.rawValue))
             var byID: [ProductID: Product] = [:]
@@ -172,10 +193,43 @@ public final class PurchaseStore {
                 }
             }
             self.products = byID
+            // Loaded successfully: any product NOT in `byID` is genuinely not
+            // offered in this storefront, distinct from a transient failure.
+            self.productsLoadState = .loaded
         } catch {
-            // Non-fatal: the products surface stays empty until the
-            // next successful load. Purchase attempts throw
-            // `productNotLoaded` so the caller can surface a retry.
+            // Transient (network / outage): the products surface stays empty and
+            // the UI offers a retry rather than a dead-end "Unavailable".
+            self.productsLoadState = .failed
+        }
+    }
+
+    // MARK: - Purchase-row presentation (pure, testable)
+
+    /// What a product's row should show, decided from ownership, an in-flight
+    /// purchase, the resolved price, and the load state. Pure so the two
+    /// non-resolving conditions (X55 §3) are unit-testable without StoreKit.
+    public enum RowState: Sendable, Equatable {
+        case owned
+        case purchasing
+        case buy(price: String)
+        case checking              // load in flight — no verdict yet
+        case unreachable           // transient failure — offer a retry
+        case notOfferedHere        // loaded, but this storefront doesn't carry it
+    }
+
+    public static func rowState(
+        owns: Bool,
+        purchasing: Bool,
+        price: String?,
+        loadState: ProductsLoadState
+    ) -> RowState {
+        if owns { return .owned }
+        if purchasing { return .purchasing }
+        if let price { return .buy(price: price) }
+        switch loadState {
+        case .loaded:          return .notOfferedHere
+        case .failed:          return .unreachable
+        case .idle, .loading:  return .checking
         }
     }
 

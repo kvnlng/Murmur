@@ -19,7 +19,12 @@ public struct SettingsView: View {
             PurchasesSettingsTab()
                 .tabItem { Label("Purchases", systemImage: "creditcard") }
         }
-        .frame(width: 460, height: 320)
+        // X55 §2: size for the TALLEST state — the unowned Purchases tab, where
+        // Buy buttons make the rows taller than the Owned badge and the closing
+        // captions must stay fully visible. Sized at 320 it clipped the last
+        // caption line mid-sentence, and the only person who ever sees that
+        // screen is a first-time buyer reading how Restore works.
+        .frame(width: 460, height: 440)
     }
 }
 
@@ -39,7 +44,8 @@ private struct PurchasesSettingsTab: View {
     var body: some View {
         Form {
             Section {
-                ForEach(PurchaseStore.ProductID.allCases, id: \.self) { id in
+                // X55 §4: order by tier (ECG Metrics first), not alphabetically.
+                ForEach(PurchaseStore.merchandisingOrder, id: \.self) { id in
                     HStack {
                         Text(displayName(for: id))
                         Spacer()
@@ -124,28 +130,52 @@ private struct PurchasesSettingsTab: View {
     /// why.
     @ViewBuilder
     private func productControl(for id: PurchaseStore.ProductID) -> some View {
-        if store.owns(id) {
+        let state = PurchaseStore.rowState(
+            owns: store.owns(id),
+            purchasing: purchasing == id,
+            price: store.displayPrice(for: id),
+            loadState: store.productsLoadState
+        )
+        switch state {
+        case .owned:
             Label("Owned", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green)
                 .labelStyle(.titleAndIcon)
                 .accessibilityIdentifier("purchase-owned-\(id.rawValue)")
-        } else if purchasing == id {
+        case .purchasing:
             HStack(spacing: 6) {
                 ProgressView().controlSize(.small)
                 Text("Purchasing…")
             }
             .accessibilityIdentifier("purchase-pending-\(id.rawValue)")
-        } else if let price = store.displayPrice(for: id) {
+        case .buy(let price):
             Button("Buy \(price)") { buy(id) }
                 .buttonStyle(.borderedProminent)
                 .disabled(purchasing != nil)
                 .accessibilityIdentifier("purchase-buy-\(id.rawValue)")
-        } else {
-            // Products didn't load — no App Store Connect product, offline, or
-            // still fetching. Say so rather than showing a dead row.
-            Text("Unavailable")
+        case .checking:
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("Checking…")
+            }
+            .foregroundStyle(.secondary)
+            .accessibilityIdentifier("purchase-checking-\(id.rawValue)")
+        case .unreachable:
+            // X55 §3: a TRANSIENT failure — the store returned nothing. Say the
+            // honest thing and offer a retry rather than a dead-end word.
+            HStack(spacing: 6) {
+                Text("Couldn't reach the App Store")
+                    .foregroundStyle(.secondary)
+                Button("Try again") { Task { await store.reloadProducts() } }
+                    .buttonStyle(.link)
+                    .accessibilityIdentifier("purchase-retry-\(id.rawValue)")
+            }
+            .accessibilityIdentifier("purchase-unreachable-\(id.rawValue)")
+        case .notOfferedHere:
+            // X55 §3: loaded successfully, but this storefront doesn't carry it —
+            // nothing the user can do, so no retry. Distinct from unreachable.
+            Text("Not available in your region")
                 .foregroundStyle(.secondary)
-                .help("This purchase couldn't be loaded from the App Store. Check your connection, then reopen Settings.")
                 .accessibilityIdentifier("purchase-unavailable-\(id.rawValue)")
         }
     }
