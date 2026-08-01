@@ -308,6 +308,12 @@ public final class IntervalMarkingsContext {
 
     public static let shared = IntervalMarkingsContext()
 
+    /// Default QTc rate-correction formula when the analyst hasn't chosen one
+    /// (P21). Fridericia per ICH E14/S7B — Bazett is no longer warranted in most
+    /// applications absent a reason to match historical Bazett data. Named so a
+    /// silent drift of the default is a one-line change a test can pin.
+    public static let defaultQTcFormula: MarkingsQTcFormula = .fridericia
+
     /// R-peak-sorted per-beat markings. Empty means no fiducials
     /// available (no entitlement / no recording / no beats / delineator
     /// still running).
@@ -367,7 +373,7 @@ public final class IntervalMarkingsContext {
 
     public init() {
         let raw = UserDefaults.standard.string(forKey: Keys.qtcFormula)
-        self.qtcFormula = raw.flatMap(MarkingsQTcFormula.init(rawValue:)) ?? .fridericia
+        self.qtcFormula = raw.flatMap(MarkingsQTcFormula.init(rawValue:)) ?? Self.defaultQTcFormula
         let persistedLayers = UserDefaults.standard.stringArray(forKey: Keys.enabledLayers)
         if let persistedLayers, !persistedLayers.isEmpty {
             self.enabledLayers = Set(persistedLayers.compactMap(MarkingsFiducialLayer.init(rawValue:)))

@@ -1506,6 +1506,32 @@ struct BaselineDepartureTests {
     }
 }
 
+@Suite("QTc default formula (P21)")
+@MainActor
+struct QTcDefaultFormulaTests {
+
+    /// Keys.qtcFormula is private; this literal must match it. If it ever
+    /// diverges the behavioural test below simply constructs a fresh context
+    /// (still the right assertion), and the constant test stays authoritative.
+    private static let persistenceKey = "murmur.intervalMarkings.qtcFormula"
+
+    @Test("Default is Fridericia and cannot drift silently")
+    func defaultIsFridericia() {
+        #expect(IntervalMarkingsContext.defaultQTcFormula == .fridericia)
+    }
+
+    @Test("A fresh context with no stored choice resolves to the default")
+    func freshContextUsesDefault() {
+        let saved = UserDefaults.standard.string(forKey: Self.persistenceKey)
+        UserDefaults.standard.removeObject(forKey: Self.persistenceKey)
+        defer { if let saved { UserDefaults.standard.set(saved, forKey: Self.persistenceKey) } }
+
+        let context = IntervalMarkingsContext()
+        #expect(context.qtcFormula == .fridericia)
+        #expect(context.qtcFormula == IntervalMarkingsContext.defaultQTcFormula)
+    }
+}
+
 @Suite("Qualifier join into trend bins (X42→X43/X46 wiring)")
 @MainActor
 struct QualifierJoinTests {
