@@ -1075,7 +1075,10 @@ struct IntervalTrendLane: View {
         }
         guard total > 0, excluded >= 0.5 else { return nil }
         let count = Int(excluded.rounded())
-        let base = "\(count) of \(total) beats excluded — QT physically impossible"
+        // X56 §4: name the population — these are the beats the delineator
+        // produced a QT for, distinct from the annotated-beat and template
+        // counts elsewhere on screen.
+        let base = "\(count) of \(total) measured beats excluded — QT physically impossible"
         // X56 §2 / K9: a count that exists must not render as "(0%)". One
         // decimal, and drop the parenthetical entirely when it would still round
         // to 0.0 — the count already carries the information.

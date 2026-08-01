@@ -208,7 +208,10 @@ struct FindingsPanel: View {
     }
 
     private func ectopyBurdenText(_ summary: EctopyRunSummary) -> String {
-        var parts = [String(format: "Ventricular ectopy: %.1f%% of %d beats",
+        // X56 §4: name the population — a denominator without one can't be
+        // reconciled against the other beat counts on screen (annotations,
+        // template, QT-excluded), which are genuinely different populations.
+        var parts = [String(format: "Ventricular ectopy: %.1f%% of %d annotated beats",
                             summary.burdenPercent, summary.totalBeatCount)]
         var runs: [String] = []
         if summary.coupletCount > 0 {

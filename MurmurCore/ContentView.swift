@@ -355,7 +355,11 @@ public struct ContentView: View {
         if case .imported(_, let recording) = importStates[key] {
             return recording.device
         }
-        return key
+        // X56 §6: the selection tag is the `.hea` FILENAME; the window
+        // represents a record, not a header file, so title by the record name.
+        // (The imported path above already uses `recordName`, which carries no
+        // extension — this makes the pre-import title agree with it.)
+        return (key as NSString).deletingPathExtension
     }
 
     // MARK: - Folder + selection handling
@@ -752,6 +756,8 @@ private struct RecordRow: View {
                 Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
             Spacer()
             statusIcon
@@ -762,10 +768,21 @@ private struct RecordRow: View {
     private var subtitle: String {
         let sigs = record.header.signalCount
         let hz   = Int(record.header.samplingFrequency)
+        var parts = ["\(sigs) sig", "\(hz) Hz"]
         if record.durationSeconds > 0 {
-            return "\(sigs) sig • \(hz) Hz • \(formatDuration(record.durationSeconds))"
+            parts.append(formatDuration(record.durationSeconds))
         }
-        return "\(sigs) sig • \(hz) Hz"
+        // X56 §3: "N sig • H Hz • M min" is identical for all 48 MIT-BIH records,
+        // so it discriminates nothing while costing a row of height. The first
+        // .hea comment is record-specific (the patient line, or a rhythm note
+        // like 212's rate-related RBBB), so surface it — anything record-specific
+        // beats a constant. Truncated to one line by the Text above.
+        if let note = record.header.comments
+            .map({ $0.trimmingCharacters(in: .whitespaces) })
+            .first(where: { !$0.isEmpty }) {
+            parts.append(note)
+        }
+        return parts.joined(separator: " • ")
     }
 
     @ViewBuilder
