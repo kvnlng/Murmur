@@ -202,6 +202,27 @@ public extension Recording {
     var primaryECGChannel: Channel? {
         channels.first { !$0.isTrendChannel }
     }
+
+    /// Every non-trend ECG channel's samples, in channel order — the
+    /// multi-lead counterpart of `primaryECGSamples`. The arrhythmia scan
+    /// service and the QRS lead auto-selector work over ALL leads (they pick
+    /// the strongest-QRS one), so they need this rather than lead 0 alone.
+    /// Returns nil when no ECG channel exists; an individual unreadable channel
+    /// is dropped rather than failing the whole read. Leads share
+    /// `primaryECGChannel.sampleRate` (true for standard multi-lead records).
+    func ecgLeadSamples(inDirectory directory: URL) -> [[Float]]? {
+        let ecgChannels = channels.filter { !$0.isTrendChannel }
+        guard !ecgChannels.isEmpty else { return nil }
+        var leads: [[Float]] = []
+        for channel in ecgChannels where channel.sampleCount > 0 {
+            let url = directory.appendingPathComponent(channel.storageFileName)
+            if let samples = try? BinaryRecordingFile.readSamples(
+                url: url, range: 0..<channel.sampleCount) {
+                leads.append(samples)
+            }
+        }
+        return leads.isEmpty ? nil : leads
+    }
 }
 
 public struct PyramidLevel: Codable, Equatable, Sendable {
