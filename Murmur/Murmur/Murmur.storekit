@@ -3,7 +3,7 @@
   "nonRenewingSubscriptions" : [],
   "products" : [
     {
-      "displayPrice" : "4.99",
+      "displayPrice" : "99.99",
       "familyShareable" : false,
       "internalID" : "ANNOTATION-AUTH-0001",
       "localizations" : [
@@ -18,7 +18,7 @@
       "type" : "NonConsumable"
     },
     {
-      "displayPrice" : "9.99",
+      "displayPrice" : "49.99",
       "familyShareable" : false,
       "internalID" : "ECG-METRICS-0001",
       "localizations" : [
@@ -33,7 +33,7 @@
       "type" : "NonConsumable"
     },
     {
-      "displayPrice" : "19.99",
+      "displayPrice" : "199.99",
       "familyShareable" : false,
       "internalID" : "VT-DETECTION-0001",
       "localizations" : [

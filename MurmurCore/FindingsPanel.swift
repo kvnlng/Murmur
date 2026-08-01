@@ -623,15 +623,17 @@ struct FindingsPanel: View {
                 RoundedRectangle(cornerRadius: 7)
                     .fill(isExpanded ? Color.secondary.opacity(0.05) : Color.clear)
             )
-            .accessibilityIdentifier("finding-group-\(group.category)")
-            // X51 §1: the Button's composed content isn't synthesised into an
-            // accessibility name (VoiceOver said only "button"), so state the
-            // row's facts explicitly — kind, its departure-ranking subtitle,
-            // count, and provenance tag — in the same navigational voice. Do
-            // NOT use `.accessibilityElement(children: .ignore)` here: it strips
-            // the button trait and `app.buttons["finding-group-…"]` stops
-            // matching. An explicit label keeps the trait and sets the name.
+            // X51 §1 (REOPENED X56 §3): `.accessibilityLabel` ALONE on a Button
+            // with a composed multi-Text label sets XCUIElement.label but does
+            // NOT synthesise a real AX name — VoiceOver and the raw AX API still
+            // read "button" with name=[missing value]. `.combine` collapses the
+            // label's children into one leaf that carries an actual name, while
+            // KEEPING the button trait (unlike `.ignore`, which strips it and
+            // breaks `app.buttons["finding-group-…"]`). Combine first, then the
+            // explicit name + id. See feedback_swiftui_accessibility_contain.
+            .accessibilityElement(children: .combine)
             .accessibilityLabel(Self.groupRowAXLabel(group))
+            .accessibilityIdentifier("finding-group-\(group.category)")
 
             if isExpanded {
                 exemplarRows(for: group)
@@ -829,10 +831,12 @@ struct FindingsPanel: View {
         }
         .buttonStyle(.plain)
         .padding(.top, 6)
-        .accessibilityIdentifier("collapsed-normals-row")
-        // X51 §1: speak the count + source (the X48 XCUI assertion binds here).
-        // Explicit label only — no `.ignore`, which would strip the button trait.
+        // X51 §1 (REOPENED X56 §3): `.combine` so this Button gets a real AX
+        // name (not just an XCUIElement.label) while keeping its button trait —
+        // the X48 XCUI assertion binds to the count + source here.
+        .accessibilityElement(children: .combine)
         .accessibilityLabel("\(collapsedNormalsTitle), \(collapsedNormalsProvenance), nothing flagged")
+        .accessibilityIdentifier("collapsed-normals-row")
     }
 
     /// X48 §4(a): the collapse row's title states what SELECTED these beats —
