@@ -379,7 +379,7 @@ struct WaveformTimeAxis: View {
             ForEach(Array(majors.enumerated()), id: \.offset) { index, t in
                 if index.isMultiple(of: stride) {
                     let xFrac = (t - startTime) / duration
-                    Text(format(seconds: t))
+                    Text(ViewportTimeFormat.elapsed(t))
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
                         .position(x: CGFloat(xFrac) * geo.size.width, y: geo.size.height - 8)
@@ -388,12 +388,6 @@ struct WaveformTimeAxis: View {
         }
         .frame(height: 16)
         .allowsHitTesting(false)
-    }
-
-    private func format(seconds: Double) -> String {
-        if seconds >= 60 { return String(format: "%.0f s", seconds) }
-        if seconds >= 1  { return String(format: "%.1f s", seconds) }
-        return String(format: "%.2f s", seconds)
     }
 }
 

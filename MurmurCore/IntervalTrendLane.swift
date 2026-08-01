@@ -1074,9 +1074,14 @@ struct IntervalTrendLane: View {
             total += bin.beatCount
         }
         guard total > 0, excluded >= 0.5 else { return nil }
+        let count = Int(excluded.rounded())
+        let base = "\(count) of \(total) beats excluded — QT physically impossible"
+        // X56 §2 / K9: a count that exists must not render as "(0%)". One
+        // decimal, and drop the parenthetical entirely when it would still round
+        // to 0.0 — the count already carries the information.
         let pct = 100 * excluded / Double(total)
-        return String(format: "%.0f of %d beats excluded — QT physically impossible (%.0f%%)",
-                      excluded.rounded(), total, pct)
+        guard (pct * 10).rounded() >= 1 else { return base }
+        return base + String(format: " (%.1f%%)", pct)
     }
 
     private var emptyState: some View {
