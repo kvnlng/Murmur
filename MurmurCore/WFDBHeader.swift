@@ -270,7 +270,13 @@ enum WFDBHeaderParser {
             rest = String(rest[..<open])
         }
 
-        let gain = Double(rest) ?? 200.0
+        // WFDB: a gain of 0 (or an unparseable/missing field) means the signal
+        // is UNCALIBRATED, and the reader assumes the default 200 adu/mV
+        // (WFDB_DEFGAIN). NSRDB headers carry `gain 0`, so without this the
+        // physical conversion `(adc - baseline) / gain` divides by zero and
+        // every sample becomes ±Inf/NaN — the waveform renders as no line at all.
+        let parsed = Double(rest) ?? 200.0
+        let gain = parsed > 0 ? parsed : 200.0
         return (gain, unit, baseline)
     }
 

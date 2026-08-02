@@ -54,6 +54,23 @@ struct WFDBHeaderParserTests {
         #expect(header.signals[2].gain  == 1000.0)
     }
 
+    @Test("A gain field of 0 (uncalibrated) falls back to the WFDB default 200 adu/mV")
+    func gainZeroFallsBackToDefault() throws {
+        // NSRDB signal lines carry `gain 0` (uncalibrated). Parsed literally as
+        // 0, the physical conversion (adc - baseline) / gain divides by zero and
+        // the waveform renders as no line at all — so 0 must become 200.
+        let hea = """
+        16265 2 128 11730944
+        16265.dat 212 0 12 0 -33 15756 0 ECG1
+        16265.dat 212 0 12 0 -65 -21174 0 ECG2
+        """
+        let header = try WFDBHeaderParser.parse(text: hea)
+        #expect(header.signals[0].gain == 200.0)
+        #expect(header.signals[1].gain == 200.0)
+        // Guard against the divide-by-zero the bug produced.
+        #expect(header.signals.allSatisfy { $0.gain > 0 })
+    }
+
     @Test("Accepts format 16 and 212; throws for truly unsupported formats")
     func throwsOnUnsupportedFormat() {
         // Format 8 is not supported.
