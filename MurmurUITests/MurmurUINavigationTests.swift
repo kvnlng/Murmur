@@ -114,6 +114,62 @@ final class MurmurUINavigationTests: XCTestCase {
                        "J should jump to next finding (was '\(initial)')")
     }
 
+    /// X35 cure (via X22): the finding-jump command lives on the Navigate menu
+    /// as a key equivalent, dispatched scene-wide through `focusedSceneValue`, so
+    /// it must fire even when the bedside / findings list does NOT hold first
+    /// responder — the exact state that dropped the keystroke before X22. XCUI
+    /// can't send a bare `j` key event reliably (`testKeyboardJJumpsToNextFinding`
+    /// props focus up first to work around that), so this drives the MENU ITEM,
+    /// which exercises the same responder-chain dispatch — and deliberately does
+    /// NOT focus the bedside, so a focus-dependent handler would fail here.
+    @MainActor
+    func testNextFindingMenuMovesViewportRegardlessOfFocus() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-sample", "--ui-test-initial-duration=2"]
+        app.launch()
+
+        let viewportState = app.descendants(matching: .any)
+            .matching(identifier: "ui-test-viewport-state").firstMatch
+        XCTAssertTrue(viewportState.waitForExistence(timeout: 5))
+        let initial = viewportState.label
+
+        // No bedside.click() — invoke the command via the menu, the path that
+        // must work with focus anywhere.
+        let nextFinding = app.menuItems["Next Finding"]
+        XCTAssertTrue(nextFinding.waitForExistence(timeout: 3),
+                      "Navigate ▸ Next Finding menu item should exist")
+        nextFinding.click()
+
+        let changed = NSPredicate(format: "label != %@", initial)
+        let exp = XCTNSPredicateExpectation(predicate: changed, object: viewportState)
+        XCTAssertEqual(XCTWaiter.wait(for: [exp], timeout: 3), .completed,
+                       "Next Finding via the menu (responder chain) should move the viewport regardless of focus (was '\(initial)')")
+    }
+
+    /// X22 menu pass: File ▸ Open Recent reflects the recents store, and plain
+    /// Save is disabled with no recording open (the welcome screen).
+    @MainActor
+    func testFileMenuOpenRecentPopulatedAndSaveDisabled() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-seed-recent"]
+        app.launch()
+
+        let fileMenu = app.menuBarItems["File"]
+        XCTAssertTrue(fileMenu.waitForExistence(timeout: 5))
+        fileMenu.click()
+
+        // No recording open on the welcome screen → plain Save is disabled.
+        let save = app.menuItems["Save Session"]
+        XCTAssertTrue(save.waitForExistence(timeout: 3))
+        XCTAssertFalse(save.isEnabled, "Save should be disabled with no recording open")
+
+        // Open Recent is populated from the seeded store — "Clear Menu" only
+        // renders when there is at least one entry.
+        app.menuItems["Open Recent"].hover()
+        XCTAssertTrue(app.menuItems["Clear Menu"].waitForExistence(timeout: 3),
+                      "Open Recent should list the seeded record (Clear Menu ⇒ populated)")
+    }
+
     // MARK: - Producers panel (DEBUG)
 
     /// The Producers toolbar button is gated on `#if DEBUG`. The DEBUG

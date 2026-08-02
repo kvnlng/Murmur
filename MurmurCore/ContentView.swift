@@ -12,7 +12,7 @@ public struct ContentView: View {
     @State private var isImporterPresented = false
     @State private var errorMessage: String?
     @State private var currentImportTask: Task<Void, Never>?
-    @State private var recentsStore = RecentFoldersStore()
+    @State private var recentsStore = RecentFoldersStore.shared
     /// Bridge for the File → Open Session… menu command (Scene-level, can't
     /// reach this view's state directly). Finder double-clicks arrive via
     /// `.onOpenURL` and share the same `openMurPackage` loader.
@@ -98,6 +98,13 @@ public struct ContentView: View {
             guard let url else { return }
             open(url)
             docCoordinator.openRequestURL = nil
+        }
+        // File → Open Recent (X22): reuse `reopen` so the bookmark is resolved
+        // and read in one scoped call.
+        .onChange(of: docCoordinator.reopenRecentRequest) { _, entry in
+            guard let entry else { return }
+            reopen(entry)
+            docCoordinator.reopenRecentRequest = nil
         }
     }
 

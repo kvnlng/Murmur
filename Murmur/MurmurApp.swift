@@ -75,7 +75,29 @@ struct MurmurApp: App {
                     .keyboardShortcut("o", modifiers: .command)
                 Button("Open Session…") { openSessionPanel() }
                     .keyboardShortcut("o", modifiers: [.command, .shift])
+                // X22: standard macOS Open Recent — reopens a bookmarked record
+                // folder via the coordinator (ContentView's scoped `reopen`).
+                Menu("Open Recent") {
+                    if RecentFoldersStore.shared.entries.isEmpty {
+                        Button("No Recent Records") {}.disabled(true)
+                    } else {
+                        ForEach(RecentFoldersStore.shared.entries) { entry in
+                            Button(entry.displayName) {
+                                SessionDocumentCoordinator.shared.requestReopenRecent(entry)
+                            }
+                        }
+                        Divider()
+                        Button("Clear Menu") { RecentFoldersStore.shared.clear() }
+                    }
+                }
                 Button("Import CSV…") { importCSVPanel() }
+                Divider()
+                // X22: plain Save (⌘S) — enabled only when a recording is open.
+                // No .mur-in-place path yet, so it prompts a location like an
+                // untitled document; Save As keeps ⌘⇧S.
+                Button("Save Session") { saveSessionPanel() }
+                    .keyboardShortcut("s", modifiers: .command)
+                    .disabled(CurrentRecordingContext.shared.recording == nil)
                 Button("Save Session As…") { saveSessionPanel() }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
             }

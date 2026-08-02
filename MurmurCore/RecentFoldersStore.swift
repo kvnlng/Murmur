@@ -16,20 +16,33 @@ import Foundation
 
 /// One row in the recent-folders list. `id` and `addedAt` are local; the
 /// bookmark is what actually gets the sandbox to hand the folder back.
-struct RecentFolder: Codable, Identifiable, Equatable {
-    let id: UUID
-    let displayName: String
+public struct RecentFolder: Codable, Identifiable, Equatable {
+    public let id: UUID
+    public let displayName: String
     /// Best-effort path captured at record-time. Used for display, dedup
     /// against re-picking the same folder, and as a "last seen at" hint
     /// when the bookmark resolves to a moved location.
-    let resolvedPath: String
-    let bookmarkData: Data
-    let addedAt: Date
+    public let resolvedPath: String
+    public let bookmarkData: Data
+    public let addedAt: Date
+
+    public init(id: UUID, displayName: String, resolvedPath: String, bookmarkData: Data, addedAt: Date) {
+        self.id = id
+        self.displayName = displayName
+        self.resolvedPath = resolvedPath
+        self.bookmarkData = bookmarkData
+        self.addedAt = addedAt
+    }
 }
 
 @Observable
-final class RecentFoldersStore {
-    private(set) var entries: [RecentFolder] = []
+public final class RecentFoldersStore {
+    /// Shared so the File ▸ Open Recent menu (App scene) and ContentView read
+    /// the same list — both persist to and load from the same UserDefaults key,
+    /// but a single instance keeps them live-consistent within a run (X22).
+    @MainActor public static let shared = RecentFoldersStore()
+
+    public private(set) var entries: [RecentFolder] = []
 
     /// Versioned key — bump if the `RecentFolder` shape ever changes
     /// incompatibly.
@@ -79,7 +92,7 @@ final class RecentFoldersStore {
         persist()
     }
 
-    func clear() {
+    public func clear() {
         entries = []
         persist()
     }
