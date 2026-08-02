@@ -35,8 +35,16 @@ final class MurmurUIPurchaseTests: XCTestCase {
         app.launchArguments += ["--ui-test-sample", "--ui-test-initial-duration=2", "--ui-test-no-entitlements"]
         app.launch()
 
-        // Open the SwiftUI Settings scene (macOS: ⌘,).
-        app.typeKey(",", modifierFlags: .command)
+        // Open the SwiftUI Settings scene. `typeKey(",")` only lands if the app
+        // is frontmost, which the headless CI runner often is not ("Running
+        // Background"); clicking the Settings… menu item activates the app and
+        // dispatches through the responder chain, so it's the reliable path. Key
+        // equivalent stays as a fallback.
+        app.activate()
+        let settingsItem = ["Settings…", "Settings...", "Preferences…"]
+            .map { app.menuItems[$0] }
+            .first { $0.waitForExistence(timeout: 2) }
+        if let settingsItem { settingsItem.click() } else { app.typeKey(",", modifierFlags: .command) }
 
         // The one all-inclusive Studio row is present, in whatever load state.
         XCTAssertTrue(
