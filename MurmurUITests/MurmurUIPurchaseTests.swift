@@ -46,6 +46,17 @@ final class MurmurUIPurchaseTests: XCTestCase {
             .first { $0.waitForExistence(timeout: 2) }
         if let settingsItem { settingsItem.click() } else { app.typeKey(",", modifierFlags: .command) }
 
+        // Settings opens on its FIRST tab (Interaction); the purchase surface is
+        // the second (Purchases) tab, so it must be selected explicitly. Locally
+        // the last-selected tab persists in UserDefaults and hides this, but the
+        // clean CI runner lands on Interaction and the row is off-screen. The tab
+        // is a toolbar button exposing its name as the `title` attribute (NOT
+        // `label`, so the `[…]` subscript and a `label ==` predicate both miss it).
+        let purchasesTab = app.buttons
+            .matching(NSPredicate(format: "title == %@", "Purchases"))
+            .firstMatch
+        if purchasesTab.waitForExistence(timeout: 5) { purchasesTab.click() }
+
         // The one all-inclusive Studio row is present, in whatever load state.
         XCTAssertTrue(
             rowExists(app, productIDSuffix: "com.kevinlong.murmur.studio", timeout: 8),
