@@ -2774,6 +2774,44 @@ private struct CanvasSizeKey: PreferenceKey {
     }
 }
 
+// MARK: - Interval trend compute memo
+
+/// One-slot memo for the trend compute, keyed on ONLY the inputs the compute
+/// actually depends on — NOT the viewport. The memoized strip's `==` includes
+/// `viewportTimeRange` (it drives the window-band x-domain), so the strip body
+/// re-runs on every pan/zoom frame. Without this, `IntervalTrendComputer.compute`
+/// — O(N_beats) with a per-bin bootstrap CI — ran again on each of those frames
+/// and HUNG on a long recording (NSRDB is ~8 h → tens of thousands of beats over
+/// hundreds of bins). Zoom repeats the same key, so this collapses the recompute
+/// to an O(1) cache hit. Single slot is enough: there is one trend lane, and a
+/// zoom burst hammers one identical key.
+@MainActor
+private enum IntervalTrendComputeMemo {
+    struct Key: Equatable {
+        let beatsCount: Int
+        let firstRPeak: Int64?
+        let lastRPeak: Int64?
+        let sampleRate: Double
+        let metric: IntervalTrendMetric
+        let binSeconds: Double
+        let templateBeatCount: Int?
+        let qtcFormulaName: String
+        let template: MarkingsTemplate?
+        let qualifiers: [IntervalBinQualifier]
+    }
+
+    private static var cachedKey: Key?
+    private static var cachedValue: IntervalTrendData?
+
+    static func data(for key: Key, compute: () -> IntervalTrendData) -> IntervalTrendData {
+        if key == cachedKey, let cachedValue { return cachedValue }
+        let value = compute()
+        cachedKey = key
+        cachedValue = value
+        return value
+    }
+}
+
 // MARK: - Interval trend lane memoization
 
 /// Wraps `IntervalTrendComputer.compute` + `IntervalTrendLane` so
@@ -2861,20 +2899,37 @@ private struct IntervalTrendLaneMemoizedStrip: View, Equatable {
     }
 
     var body: some View {
-        let data = IntervalTrendComputer.compute(
-            beats: beats,
-            template: template,
+        // Recompute only when a COMPUTE input changes — not on pan/zoom, which
+        // only moves the render's x-domain. This is what keeps a long recording
+        // from hanging as the strip body re-runs on each zoom frame.
+        let key = IntervalTrendComputeMemo.Key(
+            beatsCount: beats.count,
+            firstRPeak: beats.first?.rPeakSampleIndex,
+            lastRPeak: beats.last?.rPeakSampleIndex,
             sampleRate: sampleRate,
             metric: metric,
             binSeconds: binSeconds,
             templateBeatCount: templateBeatCount,
             qtcFormulaName: qtcFormulaName,
-            // X48 §4(b): the template's beats are the annotator's normal-beat
-            // code (Recording.normalBeatSampleIndices), NOT an app-computed
-            // morphology cluster — state that selection basis in the caption.
-            templateSelectionBasis: template != nil ? "annotator-coded normal (N)" : nil,
+            template: template,
             qualifiers: qualifiers
         )
+        let data = IntervalTrendComputeMemo.data(for: key) {
+            IntervalTrendComputer.compute(
+                beats: beats,
+                template: template,
+                sampleRate: sampleRate,
+                metric: metric,
+                binSeconds: binSeconds,
+                templateBeatCount: templateBeatCount,
+                qtcFormulaName: qtcFormulaName,
+                // X48 §4(b): the template's beats are the annotator's normal-beat
+                // code (Recording.normalBeatSampleIndices), NOT an app-computed
+                // morphology cluster — state that selection basis in the caption.
+                templateSelectionBasis: template != nil ? "annotator-coded normal (N)" : nil,
+                qualifiers: qualifiers
+            )
+        }
         IntervalTrendLane(
             // Map band → whole recording ribbon; window band → the viewport
             // window becomes the x-domain so per-beat scatter fills the lane.
