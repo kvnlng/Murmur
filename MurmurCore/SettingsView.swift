@@ -147,6 +147,9 @@ private struct PurchasesSettingsTab: View {
                 ProgressView().controlSize(.small)
                 Text("Purchasing…")
             }
+            // Combine so the row is ONE queryable element carrying the id — a
+            // bare HStack + .accessibilityIdentifier is not addressable by XCUI.
+            .accessibilityElement(children: .combine)
             .accessibilityIdentifier("purchase-pending-\(id.rawValue)")
         case .buy(let price):
             Button("Buy \(price)") { buy(id) }
@@ -159,18 +162,25 @@ private struct PurchasesSettingsTab: View {
                 Text("Checking…")
             }
             .foregroundStyle(.secondary)
+            // Combine so the row is ONE queryable element (XCUI can't address a
+            // bare HStack by its identifier). This is the state a UI test hits
+            // when products don't load (--ui-test-no-entitlements → idle).
+            .accessibilityElement(children: .combine)
             .accessibilityIdentifier("purchase-checking-\(id.rawValue)")
         case .unreachable:
             // X55 §3: a TRANSIENT failure — the store returned nothing. Say the
             // honest thing and offer a retry rather than a dead-end word.
             HStack(spacing: 6) {
+                // The row id sits on the Text (a queryable element) rather than
+                // the HStack, so the "Try again" button stays independently
+                // addressable/clickable — .combine would swallow it.
                 Text("Couldn't reach the App Store")
                     .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("purchase-unreachable-\(id.rawValue)")
                 Button("Try again") { Task { await store.reloadProducts() } }
                     .buttonStyle(.link)
                     .accessibilityIdentifier("purchase-retry-\(id.rawValue)")
             }
-            .accessibilityIdentifier("purchase-unreachable-\(id.rawValue)")
         case .notOfferedHere:
             // X55 §3: loaded successfully, but this storefront doesn't carry it —
             // nothing the user can do, so no retry. Distinct from unreachable.
