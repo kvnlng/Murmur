@@ -1612,6 +1612,23 @@ struct PercentAboveGuideTests {
     func strictBoundary() {
         #expect(IntervalTrendLane.percentAbove(perBeatValues: [450, 450], guideMs: 450) == 0)
     }
+
+    /// K9 / X56 §2: "2 of 1,861 excluded … (0%)" said 2 and 0% in one sentence.
+    /// A quantity that exists must not render as one that does not.
+    @Test("A non-zero percentage never renders as 0% or a fabricated 100%")
+    func smallQuantitiesNeverReadAsZero() {
+        // 2 of 1861 = 0.107% — one decimal, matching the X53 sibling's voice.
+        #expect(IntervalTrendLane.percentText(100 * 2 / 1861.0) == "0.1%")
+        #expect(IntervalTrendLane.percentText(0.4) == "0.4%")
+        // ...and the symmetric end: nearly-all must not read as all.
+        #expect(IntervalTrendLane.percentText(99.6) == "99.6%")
+        // True zero and true totality still state themselves plainly.
+        #expect(IntervalTrendLane.percentText(0) == "0%")
+        #expect(IntervalTrendLane.percentText(100) == "100%")
+        // Ordinary values keep the compact whole-number form.
+        #expect(IntervalTrendLane.percentText(37.4) == "37%")
+        #expect(IntervalTrendLane.percentText(1) == "1%")
+    }
 }
 
 @Suite("Rate-stability marker (X43)")
