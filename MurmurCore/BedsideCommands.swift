@@ -38,6 +38,15 @@ public struct BedsideCommands {
     public var reset: () -> Void
     /// Snap both axes back to standard ECG paper (25 mm/s · 10 mm/mV) — X40.
     public var standardView: () -> Void
+    /// X28 — flip the viewport readout between elapsed and time-of-day.
+    public var toggleTimeDisplay: () -> Void
+    /// False when the record carries no real start time. The menu item is then
+    /// shown DISABLED rather than hidden, so the analyst can see the capability
+    /// exists and that THIS record cannot support it — never a fabricated
+    /// clock (X32).
+    public var timeDisplayAvailable: Bool
+    /// Drives the menu item's checkmark.
+    public var timeDisplayIsWallClock: Bool
 
     /// True while a text field (the notes editor) is the first responder. The
     /// App disables the bedside key commands then so typing isn't intercepted.
@@ -60,6 +69,9 @@ public struct BedsideCommands {
         dismiss: @escaping () -> Void,
         reset: @escaping () -> Void,
         standardView: @escaping () -> Void,
+        toggleTimeDisplay: @escaping () -> Void = {},
+        timeDisplayAvailable: Bool = false,
+        timeDisplayIsWallClock: Bool = false,
         textEntryActive: Bool,
         isEditing: Bool
     ) {
@@ -75,6 +87,9 @@ public struct BedsideCommands {
         self.dismiss = dismiss
         self.reset = reset
         self.standardView = standardView
+        self.toggleTimeDisplay = toggleTimeDisplay
+        self.timeDisplayAvailable = timeDisplayAvailable
+        self.timeDisplayIsWallClock = timeDisplayIsWallClock
         self.textEntryActive = textEntryActive
         self.isEditing = isEditing
     }
