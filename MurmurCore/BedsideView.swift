@@ -541,6 +541,14 @@ struct BedsideView: View {
         }
         .onChange(of: calibration.canvasSize, initial: true) { _, _ in
             applyOpenCalibrationIfNeeded()
+            // X59: a restored `.mur` session applies AFTER the open-calibration
+            // snap, so a saved viewport wins over the standard-paper default.
+            applyPendingSessionRestoreIfNeeded()
+        }
+        // X59: republish the live snapshot on every change, so ⌘S can capture
+        // state that lives in this view's @State.
+        .onChange(of: sessionSnapshot, initial: true) { _, snapshot in
+            CurrentRecordingContext.shared.liveSessionState = snapshot
         }
         #if DEBUG
         .task { applyUITestHooks() }
@@ -578,6 +586,55 @@ struct BedsideView: View {
         #endif
         hasAppliedOpenCalibration = true
         applyStandardView(anchorFraction: 0)   // open at t = 0, not centred
+    }
+
+    // MARK: - Session capture (X59)
+
+    /// The live session snapshot published for `.mur` save. Deliberately small:
+    /// only state an analyst would notice losing on reopen. Read by
+    /// `saveSessionPanel()` via `CurrentRecordingContext.liveSessionState`,
+    /// because this state is `@State` on this view and the App target's menu
+    /// commands cannot reach in.
+    private var sessionSnapshot: MurSessionState {
+        MurSessionState(
+            viewportStartSample: viewport.startSample,
+            viewportEndSample: viewport.endSample,
+            focusedChannelName: focusedChannel?.name,
+            windowLockedTo10s: windowLockedTo10s
+        )
+    }
+
+    /// Applies session state restored from a `.mur`, exactly once.
+    ///
+    /// Runs AFTER `applyOpenCalibrationIfNeeded()` so a viewport the analyst
+    /// deliberately saved wins over the standard-paper default. A raw
+    /// WFDB/CSV import never has a pending restore, so X50's standard open
+    /// state is untouched — as is a `.mur` written before session capture
+    /// existed (absent stays absent; nothing is fabricated).
+    ///
+    /// CONSUMES the pending value, so a later re-render cannot re-apply a
+    /// stale restore over navigation the analyst has done since.
+    private func applyPendingSessionRestoreIfNeeded() {
+        let context = CurrentRecordingContext.shared
+        guard let restore = context.pendingSessionRestore else { return }
+        context.pendingSessionRestore = nil
+
+        if let start = restore.viewportStartSample,
+           let end = restore.viewportEndSample,
+           end > start {
+            // Width first, then origin: `setWidth` re-anchors, and both clamp
+            // to recording bounds, so a corrupt or out-of-range pair can't
+            // push the viewport outside the record.
+            viewport.setWidth(end - start, anchorFraction: 0)
+            viewport.setStart(start)
+        }
+        if let locked = restore.windowLockedTo10s {
+            windowLockedTo10s = locked
+        }
+        if let name = restore.focusedChannelName,
+           let channel = ecgChannels.first(where: { $0.name == name }) {
+            layoutMode = .focus(channel.id)
+        }
     }
 
     #if DEBUG

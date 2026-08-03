@@ -160,9 +160,9 @@ struct MurmurApp: App {
     private static let sessionType = UTType("com.kevinlong.murmur.session")
 
     /// Writes the current recording + its analyst layer to a `.mur` package the
-    /// analyst chooses the location of. Session/provenance capture from live UI
-    /// is a later refinement; this already saves the source + the analyst's
-    /// findings/dispositions/guides faithfully.
+    /// analyst chooses the location of, including the live session snapshot
+    /// (X59) so a reopen lands them back where they were. Provenance capture is
+    /// still a later refinement.
     @MainActor private func saveSessionPanel() {
         let context = CurrentRecordingContext.shared
         guard let recording = context.recording, let directory = context.directory else {
@@ -178,7 +178,14 @@ struct MurmurApp: App {
         panel.nameFieldStringValue = "\(base.isEmpty ? "Session" : base).mur"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            try MurSessionPackage.write(recording: recording, recordingDirectory: directory, to: url)
+            // X59: capture the live session snapshot the bedside view publishes.
+            // Encoding failure must not cost the analyst their save — fall back
+            // to writing without it rather than throwing the whole save away.
+            let sessionJSON = try? JSONEncoder().encode(context.liveSessionState)
+            try MurSessionPackage.write(recording: recording,
+                                        recordingDirectory: directory,
+                                        sessionJSON: sessionJSON,
+                                        to: url)
         } catch {
             presentSessionAlert(title: "Couldn't save session", message: error.localizedDescription)
         }

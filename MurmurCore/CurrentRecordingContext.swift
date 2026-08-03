@@ -42,6 +42,25 @@ public final class CurrentRecordingContext {
     /// disposition-store JSON, etc.) alongside the manifest.
     public private(set) var directory: URL?
 
+    /// X59 — the live session snapshot, republished by the bedside view
+    /// whenever the analyst moves the viewport, locks the window, or changes
+    /// the focused lead. `saveSessionPanel()` reads this at save time: the
+    /// state lives in `BedsideView`'s `@State`, which the App target's menu
+    /// commands cannot reach directly, so the view publishes it here rather
+    /// than the menu reaching in.
+    ///
+    /// Snapshot only — never the source of truth for what is on screen.
+    public var liveSessionState = MurSessionState()
+
+    /// X59 — session state decoded from a `.mur` that has just been opened,
+    /// waiting for the bedside view to appear and apply it. The view CONSUMES
+    /// this (sets it back to `nil`) so a later re-render can't re-apply a stale
+    /// restore over the analyst's own subsequent navigation.
+    ///
+    /// `nil` for a raw WFDB/CSV import, and for a `.mur` written before session
+    /// capture existed — absent must stay absent, never a fabricated default.
+    public var pendingSessionRestore: MurSessionState?
+
     public init() {}
 
     /// Publish that `recording` is now current, loaded from `directory`.
@@ -55,5 +74,8 @@ public final class CurrentRecordingContext {
     public func clear() {
         recording = nil
         directory = nil
+        // Don't let one recording's session state leak into the next.
+        liveSessionState = MurSessionState()
+        pendingSessionRestore = nil
     }
 }
