@@ -563,6 +563,19 @@ struct IntervalTrendLane: View {
     /// line for this metric (deterministic; guides are value-sorted).
     private var qtClockGuide: IntervalTrendGuide? { guides.first }
 
+    /// Renders a percentage so a quantity that EXISTS never reads as one that
+    /// does not (K9 / X56 §2): "2 of 1,861 excluded" must not print `0%`. A
+    /// non-zero fraction under 1% shows `<1%`, and a value just shy of totality
+    /// shows `>99%`, so neither end fabricates an absolute. A true zero still
+    /// prints `0%`. Pure so the boundaries are unit-testable without a view.
+    static func percentText(_ pct: Double) -> String {
+        if pct <= 0 { return "0%" }
+        if pct < 1 { return "<1%" }
+        if pct >= 100 { return "100%" }
+        if pct > 99 { return ">99%" }
+        return String(format: "%.0f%%", pct)
+    }
+
     /// "QT clock" aggregate (X46): the percentage of beats above the analyst's
     /// guide, over QUALIFYING windows only (eligible + rate-stable), with the
     /// excluded fraction stated when the paid layer computed it. nil when there
@@ -571,21 +584,26 @@ struct IntervalTrendLane: View {
         guard let guide = qtClockGuide else { return nil }
         var above = 0
         var total = 0
-        var excludedSum = 0.0
-        var excludedCount = 0
+        // BEAT-WEIGHTED, not a mean of per-bin fractions: `excludedBeatFraction`
+        // is a fraction *of the bin's beats*, so a 3-beat bin and a 300-beat bin
+        // must not carry equal weight. Mirrors the X53 sibling
+        // (`qtImplausibleSummaryText`), which established this convention.
+        var excludedBeats = 0.0
+        var excludedTotal = 0
         for bin in data.bins where bin.isQualifying {
             for v in bin.perBeatValues where v > guide.valueMs { above += 1 }
             total += bin.perBeatValues.count
             if let ex = bin.excludedBeatFraction {
-                excludedSum += ex
-                excludedCount += 1
+                excludedBeats += ex * Double(bin.beatCount)
+                excludedTotal += bin.beatCount
             }
         }
         guard total > 0 else { return nil }
         let pct = 100 * Double(above) / Double(total)
-        var text = String(format: "%.0f%% > %.0f (qualifying)", pct, guide.valueMs)
-        if excludedCount > 0 {
-            text += String(format: " · %.0f%% excl", 100 * excludedSum / Double(excludedCount))
+        var text = "\(Self.percentText(pct)) > \(String(format: "%.0f", guide.valueMs)) (qualifying)"
+        if excludedTotal > 0 {
+            let excludedPct = 100 * excludedBeats / Double(excludedTotal)
+            text += " · \(Self.percentText(excludedPct)) excl"
         }
         return text
     }
