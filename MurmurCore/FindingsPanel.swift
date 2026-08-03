@@ -314,12 +314,15 @@ struct FindingsPanel: View {
         .accessibilityIdentifier("findings-sort-picker")
     }
 
-    /// Menu item title — appends "(ECG Metrics)" to `.departure` when
+    /// Menu item title — names the purchase that unlocks `.departure` when
     /// the measurement layer can't back it, so the paid seam reads as
     /// what it is (a locked capability, not a mystery inert option).
+    /// Names "Murmur Studio", the actual product: the former "ECG Metrics"
+    /// label pointed at a per-module IAP retired in the single-IAP pivot,
+    /// so it sent the reader looking for something unbuyable.
     private func sortMenuTitle(_ mode: FindingSort) -> String {
         if mode == .departure && !departureSortAvailable {
-            return "\(mode.displayName) — ECG Metrics"
+            return "\(mode.displayName) — Murmur Studio"
         }
         return mode.displayName
     }
@@ -334,7 +337,7 @@ struct FindingsPanel: View {
 
     /// Small caption under the sort chip that names the paid unlock
     /// when the analyst is looking at the free-tier structural view.
-    /// Hidden once ECG Metrics is owned AND a template exists — at
+    /// Hidden once Murmur Studio is owned AND a template exists — at
     /// that point the departure sort is a first-class picker option
     /// and the seam is no longer needed.
     @ViewBuilder
@@ -344,7 +347,7 @@ struct FindingsPanel: View {
                 Image(systemName: "lock.fill")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-                Text("Rank by departure from this patient's normal — ECG Metrics")
+                Text("Rank by departure from this patient's normal — Murmur Studio")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }

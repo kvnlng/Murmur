@@ -75,7 +75,11 @@ struct ProducersPanel: View {
                 ContentUnavailableView(
                     "No producers registered",
                     systemImage: "wand.and.stars",
-                    description: Text("Install an extension (Annotation Authoring, ECG Metrics, VT Detection) to unlock producers.")
+                    // Named the three per-module IAPs the single-IAP pivot
+                    // retired, and told the analyst to "install" something —
+                    // the paid frameworks ship inside the app and are gated by
+                    // entitlement, so there was never anything to install.
+                    description: Text("Murmur Studio adds producers for annotation authoring, interval metrics, and arrhythmia candidate detection.")
                 )
                 .frame(maxWidth: .infinity)
             } else {
