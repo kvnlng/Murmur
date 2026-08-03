@@ -36,11 +36,14 @@ final class VTVFScanModel {
         }
     }
 
-    // Dials.
-    var scope: Scope = .currentView
-    var tau: Double
-    var minimumDurationSeconds: Double = 4
-    var mergeGapSeconds: Double = 5
+    // Dials. X11: each writes back to the session state on change, so the
+    // operating point survives closing and reopening the sheet — and rides the
+    // `.mur` round trip (X59). Property observers don't fire for the seeding
+    // assignments in `init`, so this can't write defaults back over a restore.
+    var scope: Scope = .currentView { didSet { persistDials() } }
+    var tau: Double { didSet { persistDials() } }
+    var minimumDurationSeconds: Double = 4 { didSet { persistDials() } }
+    var mergeGapSeconds: Double = 5 { didSet { persistDials() } }
     var showAdvanced = false
 
     // Preview state (Stage 1).
@@ -73,7 +76,31 @@ final class VTVFScanModel {
         self.viewEndSample = viewEndSample
         self.nativeRate = recording.primaryECGChannel?.sampleRate ?? 250
         self.leadName = recording.primaryECGChannel?.name
-        self.tau = model.thresholdTau
+
+        // X11: seed the dials from the session state so reopening the sheet
+        // resumes the analyst's operating point instead of snapping back to
+        // defaults. Absent fields keep their default — a session written before
+        // scan capture (or a fresh recording) must not be given a fabricated
+        // operating point.
+        let session = CurrentRecordingContext.shared.liveSessionState
+        self.tau = session.tau ?? model.thresholdTau
+        if let seconds = session.minDurationSeconds { self.minimumDurationSeconds = seconds }
+        if let gap = session.mergeGapSeconds { self.mergeGapSeconds = gap }
+        if let whole = session.scanScopeWholeRecording {
+            self.scope = whole ? .wholeRecording : .currentView
+        }
+    }
+
+    /// X11 — mirror the dials into the shared session state, which `⌘S` writes
+    /// into the `.mur` (X59) and a reopen seeds from. Only the four fields this
+    /// surface owns are touched; the rest of the state is left alone.
+    private func persistDials() {
+        var state = CurrentRecordingContext.shared.liveSessionState
+        state.tau = tau
+        state.minDurationSeconds = minimumDurationSeconds
+        state.mergeGapSeconds = mergeGapSeconds
+        state.scanScopeWholeRecording = (scope == .wholeRecording)
+        CurrentRecordingContext.shared.liveSessionState = state
     }
 
     // MARK: - Derived

@@ -546,9 +546,14 @@ struct BedsideView: View {
             applyPendingSessionRestoreIfNeeded()
         }
         // X59: republish the live snapshot on every change, so ⌘S can capture
-        // state that lives in this view's @State.
+        // state that lives in this view's @State. MERGES rather than replaces —
+        // `MurSessionState` also carries fields owned by other surfaces (the
+        // scan dials, X11), and assigning a fresh value built only from this
+        // view's state would silently wipe them.
         .onChange(of: sessionSnapshot, initial: true) { _, snapshot in
-            CurrentRecordingContext.shared.liveSessionState = snapshot
+            let context = CurrentRecordingContext.shared
+            context.liveSessionState = context.liveSessionState
+                .replacingViewState(with: snapshot)
         }
         #if DEBUG
         .task { applyUITestHooks() }
@@ -618,6 +623,11 @@ struct BedsideView: View {
         let context = CurrentRecordingContext.shared
         guard let restore = context.pendingSessionRestore else { return }
         context.pendingSessionRestore = nil
+
+        // Adopt the restored state wholesale as the live baseline FIRST, so
+        // fields this view doesn't own (the scan dials, X11) survive the round
+        // trip. The view then applies the subset it does own, below.
+        context.liveSessionState = restore
 
         if let start = restore.viewportStartSample,
            let end = restore.viewportEndSample,

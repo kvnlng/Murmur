@@ -124,6 +124,22 @@ public struct MurSessionState: Codable, Equatable, Sendable {
         self.mergeGapSeconds = mergeGapSeconds
         self.scanScopeWholeRecording = scanScopeWholeRecording
     }
+
+    /// X59/X11 — replace only the fields the bedside view owns, preserving the
+    /// ones other surfaces own (the scan dials).
+    ///
+    /// The bedside view republishes on every viewport change; assigning a state
+    /// built solely from its own `@State` would silently wipe an operating point
+    /// the scan sheet had just set. Stated once here rather than inline at the
+    /// call site, so the ownership split is testable and hard to get wrong.
+    public func replacingViewState(with other: MurSessionState) -> MurSessionState {
+        var copy = self
+        copy.viewportStartSample = other.viewportStartSample
+        copy.viewportEndSample = other.viewportEndSample
+        copy.focusedChannelName = other.focusedChannelName
+        copy.windowLockedTo10s = other.windowLockedTo10s
+        return copy
+    }
 }
 
 public enum MurSessionError: LocalizedError, Equatable {
