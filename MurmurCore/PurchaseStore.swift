@@ -72,9 +72,9 @@ public final class PurchaseStore {
     public private(set) var ownedProductIDs: Set<ProductID> = []
 
     /// Outcome of the most recent product load — lets the purchase UI tell a
-    /// TRANSIENT failure (offer a retry) apart from a product that simply isn't
-    /// offered in this storefront (nothing the user can do). X55 §3 / K19: two
-    /// non-resolving conditions, not one dead-end "Unavailable".
+    /// TRANSIENT failure (offer a retry) apart from a product the App Store
+    /// isn't offering (a reload won't help — nothing the user can do). X55 §3 /
+    /// K19: two non-resolving conditions, not one dead-end "Unavailable".
     public enum ProductsLoadState: Sendable, Equatable {
         case idle, loading, loaded, failed
     }
@@ -201,8 +201,11 @@ public final class PurchaseStore {
                 }
             }
             self.products = byID
-            // Loaded successfully: any product NOT in `byID` is genuinely not
-            // offered in this storefront, distinct from a transient failure.
+            // Loaded successfully. A product absent from `byID` isn't
+            // purchasable, but StoreKit doesn't say why — region restriction,
+            // Missing Metadata, an inactive Paid Apps agreement, or an
+            // unknown/mismatched ID all look identical here. Don't infer a
+            // cause; the row copy stays neutral. Distinct from a transient .failed.
             self.productsLoadState = .loaded
         } catch {
             // Transient (network / outage): the products surface stays empty and
@@ -222,7 +225,7 @@ public final class PurchaseStore {
         case buy(price: String)
         case checking              // load in flight — no verdict yet
         case unreachable           // transient failure — offer a retry
-        case notOfferedHere        // loaded, but this storefront doesn't carry it
+        case unavailable           // loaded, but the App Store isn't offering it (cause unknowable here)
     }
 
     public static func rowState(
@@ -235,7 +238,7 @@ public final class PurchaseStore {
         if purchasing { return .purchasing }
         if let price { return .buy(price: price) }
         switch loadState {
-        case .loaded:          return .notOfferedHere
+        case .loaded:          return .unavailable
         case .failed:          return .unreachable
         case .idle, .loading:  return .checking
         }

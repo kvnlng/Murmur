@@ -654,8 +654,8 @@ struct PurchaseStoreTests {
     func rowStateNonResolving() {
         // Transient failure → retry.
         #expect(PurchaseStore.rowState(owns: false, purchasing: false, price: nil, loadState: .failed) == .unreachable)
-        // Loaded but this product wasn't returned → not offered here, no retry.
-        #expect(PurchaseStore.rowState(owns: false, purchasing: false, price: nil, loadState: .loaded) == .notOfferedHere)
+        // Loaded but this product wasn't returned → unavailable (cause unknowable), no retry.
+        #expect(PurchaseStore.rowState(owns: false, purchasing: false, price: nil, loadState: .loaded) == .unavailable)
         // Still loading / not started → checking, not an error yet.
         #expect(PurchaseStore.rowState(owns: false, purchasing: false, price: nil, loadState: .loading) == .checking)
         #expect(PurchaseStore.rowState(owns: false, purchasing: false, price: nil, loadState: .idle) == .checking)
