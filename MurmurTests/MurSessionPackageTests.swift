@@ -68,6 +68,24 @@ struct MurSessionPackageTests {
         #expect(result.sessionJSON == session)
     }
 
+    /// X59 backward compatibility: a package written before session capture
+    /// existed carries no `session.json`. Absent must stay ABSENT — the open
+    /// path must never fabricate a default viewport for an older `.mur`.
+    @Test("A package with no session state reads back nil, never a default")
+    func absentSessionStateStaysAbsent() throws {
+        let (dir, recording, _) = try makeBundle()
+        let pkg = try tempDir("pkg-nostate").appendingPathComponent("Legacy.mur")
+
+        _ = try MurSessionPackage.write(
+            recording: recording, recordingDirectory: dir, to: pkg
+        )
+
+        let result = try MurSessionPackage.read(
+            packageURL: pkg, into: try tempDir("open-nostate")
+        )
+        #expect(result.sessionJSON == nil)
+    }
+
     @Test("Portable: reopens after the original bundle is deleted")
     func portability() throws {
         let (dir, recording, files) = try makeBundle()

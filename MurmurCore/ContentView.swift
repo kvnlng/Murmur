@@ -215,6 +215,19 @@ public struct ContentView: View {
             let result = try MurSessionPackage.read(packageURL: url, into: workingDirectory)
             let recording = try RecordingStore.shared.loadManifest(at: result.recordingDirectory)
             setAppState(.directView(directory: result.recordingDirectory, recording: recording))
+            // X59: stage any saved session state for the bedside view to apply
+            // when it appears. Sequenced after `setAppState` so the context's
+            // recording is already published when the restore lands. (The
+            // `.directView` branch calls `set(...)`, not `clear()` — only the
+            // `.empty`/`.browsing` branches clear — so this ordering is a
+            // readability choice, not a correctness dependency.)
+            // A package written before session capture (or by an older build)
+            // carries no session.json — decode failure leaves it nil, and the
+            // open behaves exactly as it does today.
+            if let data = result.sessionJSON,
+               let restored = try? JSONDecoder().decode(MurSessionState.self, from: data) {
+                CurrentRecordingContext.shared.pendingSessionRestore = restored
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
