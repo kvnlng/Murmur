@@ -236,10 +236,16 @@ public struct MarkingsTemplate: Sendable, Equatable, Codable {
     public let spanStartSample: Int64?
     public let spanEndSample: Int64?
 
-    /// Beats withheld from these medians because their QT measurement was
-    /// physically impossible (X53). Mirror of
+    /// Beats withheld from these medians for EITHER reason: the QT measurement
+    /// was physically impossible (X53), or the delineator flagged its T-offset
+    /// as unreliable (X58). Mirror of
     /// `MurmurMetrics.NormalTemplate.excludedBeatCount`; `sampleCount` is the
     /// beats that contributed, this is the beats dropped. 0 when no filter ran.
+    ///
+    /// NB the two reasons are MERGED here. Any surface that renders this count
+    /// must not attribute it to one cause — "physically impossible" alone would
+    /// mislabel the X58 exclusions. Naming the split needs a per-reason count
+    /// from `NormalTemplateBuilder` first.
     public let excludedBeatCount: Int
 
     public init(
