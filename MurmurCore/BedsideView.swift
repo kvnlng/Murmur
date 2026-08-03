@@ -30,6 +30,14 @@ struct BedsideView: View {
     /// candidate jumps recenter without changing zoom — for analysts who
     /// read in fixed time windows. A manual zoom breaks the lock.
     @State private var windowLockedTo10s = false
+    /// X28 — elapsed vs wall-clock. App preference, shared across records.
+    private var timeDisplay: TimeDisplayContext { TimeDisplayContext.shared }
+    /// The record's real start instant, or nil when it carried none. nil is the
+    /// honest answer for MIT-BIH-style records and keeps wall-clock unavailable.
+    private var recordingStartUnixMillis: Int64? {
+        guard recording.hasAbsoluteStartTime else { return nil }
+        return recording.channels.first?.startTimeUnixMS
+    }
     /// X50: a raw record opens ON standard ECG paper (25 mm/s · 10 mm/mV)
     /// rather than at whatever calibration falls out of the initial time
     /// window. Applied once, on the first valid layout — canvasSize is `.zero`
@@ -243,6 +251,12 @@ struct BedsideView: View {
             dismiss: { _ = dispositionFocused(.dismiss) },
             reset: { _ = dispositionFocused(.reset) },
             standardView: { applyStandardView() },
+            toggleTimeDisplay: {
+                let ctx = TimeDisplayContext.shared
+                ctx.mode = (ctx.mode == .wallClock) ? .elapsed : .wallClock
+            },
+            timeDisplayAvailable: recording.hasAbsoluteStartTime,
+            timeDisplayIsWallClock: TimeDisplayContext.shared.mode == .wallClock,
             textEntryActive: notesEditorFocused,
             isEditing: isEditing
         )
@@ -1411,9 +1425,19 @@ struct BedsideView: View {
 
     private var viewportIndicator: some View {
         let sr = viewport.sampleRate > 0 ? viewport.sampleRate : 250
-        // X49: one shared m:ss.d formatter across all three viewport renderers.
-        let start = ViewportTimeFormat.elapsed(Double(viewport.startSample) / sr)
-        let end = ViewportTimeFormat.elapsed(Double(viewport.endSample) / sr)
+        // X49: one shared formatter across all three viewport renderers.
+        // X28: the two live COORDINATES follow the analyst's time-display mode;
+        // `coordinate` falls back to elapsed when there is no real time base, so
+        // no synthesised clock can reach the screen (X32).
+        let mode = timeDisplay.effectiveMode(hasAbsoluteStart: recording.hasAbsoluteStartTime)
+        let base = recordingStartUnixMillis
+        let start = ViewportTimeFormat.coordinate(Double(viewport.startSample) / sr,
+                                                  mode: mode, startUnixMillis: base)
+        let end = ViewportTimeFormat.coordinate(Double(viewport.endSample) / sr,
+                                                mode: mode, startUnixMillis: base)
+        // The TOTAL stays elapsed in both modes: it is a DURATION, not an
+        // instant. "of 30:06" is the record's length; a time of day there would
+        // be a category error.
         let total = ViewportTimeFormat.elapsed(Double(viewport.totalSamples) / sr, tenths: false)
         return HStack(spacing: 4) {
             Image(systemName: "scope")

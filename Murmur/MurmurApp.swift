@@ -307,7 +307,25 @@ struct BedsideCommandMenu: Commands {
             Button("Standard View") { commands?.standardView() }
                 .keyboardShortcut("0", modifiers: .command)
                 .disabled(commands == nil)
+
+            // X28: elapsed ↔ time-of-day. DISABLED (not hidden) when the record
+            // carries no real start time — the analyst should be able to see
+            // that the capability exists and that this record cannot support it,
+            // rather than wonder where the option went. ⌘-modified so it stays
+            // safe during note entry.
+            Button(timeDisplayTitle) { commands?.toggleTimeDisplay() }
+                .keyboardShortcut("t", modifiers: [.command, .shift])
+                .disabled(commands?.timeDisplayAvailable != true)
         }
+    }
+
+    /// X28 menu title — a checkmark would be ambiguous on a two-state toggle,
+    /// so the title names what the command WILL do.
+    private var timeDisplayTitle: String {
+        guard let commands, commands.timeDisplayAvailable else {
+            return "Show Time of Day"          // disabled: no time base
+        }
+        return commands.timeDisplayIsWallClock ? "Show Elapsed Time" : "Show Time of Day"
     }
 
     /// Pan / zoom / jump: available once a recording is loaded, suppressed
