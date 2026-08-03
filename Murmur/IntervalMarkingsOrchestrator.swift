@@ -170,7 +170,9 @@ struct IntervalMarkingsOrchestrator: View {
                     sourceLead: leadName,
                     spanStartSample: spanStart,
                     spanEndSample: spanEnd,
-                    excludedBeatCount: template.excludedBeatCount
+                    excludedBeatCount: template.excludedBeatCount,
+                    excludedImplausibleCount: template.excludedImplausibleCount,
+                    excludedUnreliableCount: template.excludedUnreliableCount
                 )
                 : nil
             return (beats, coreTemplate)

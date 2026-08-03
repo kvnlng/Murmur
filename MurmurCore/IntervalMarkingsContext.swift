@@ -242,11 +242,21 @@ public struct MarkingsTemplate: Sendable, Equatable, Codable {
     /// `MurmurMetrics.NormalTemplate.excludedBeatCount`; `sampleCount` is the
     /// beats that contributed, this is the beats dropped. 0 when no filter ran.
     ///
-    /// NB the two reasons are MERGED here. Any surface that renders this count
-    /// must not attribute it to one cause — "physically impossible" alone would
-    /// mislabel the X58 exclusions. Naming the split needs a per-reason count
-    /// from `NormalTemplateBuilder` first.
+    /// This is the TOTAL; a surface naming a cause must use the split below,
+    /// since "physically impossible" alone would mislabel the X58 exclusions.
     public let excludedBeatCount: Int
+
+    /// Of `excludedBeatCount`, the beats dropped as physically impossible
+    /// (X53). Mirror of `MurmurMetrics.NormalTemplate.excludedImplausibleCount`.
+    public let excludedImplausibleCount: Int
+
+    /// Of `excludedBeatCount`, the beats dropped because the delineator flagged
+    /// the T-offset as unreliable (X58) — measurable-looking but biased long.
+    ///
+    /// A beat failing both tests is counted once, under implausible, so
+    /// `implausible + unreliable == excludedBeatCount` and a stated breakdown
+    /// reconciles against the total (the X48 arithmetic-closes discipline).
+    public let excludedUnreliableCount: Int
 
     public init(
         sampleCount: Int,
@@ -262,7 +272,9 @@ public struct MarkingsTemplate: Sendable, Equatable, Codable {
         sourceLead: String? = nil,
         spanStartSample: Int64? = nil,
         spanEndSample: Int64? = nil,
-        excludedBeatCount: Int = 0
+        excludedBeatCount: Int = 0,
+        excludedImplausibleCount: Int = 0,
+        excludedUnreliableCount: Int = 0
     ) {
         self.sampleCount = sampleCount
         self.medianPRMs = medianPRMs
@@ -278,6 +290,8 @@ public struct MarkingsTemplate: Sendable, Equatable, Codable {
         self.spanStartSample = spanStartSample
         self.spanEndSample = spanEndSample
         self.excludedBeatCount = excludedBeatCount
+        self.excludedImplausibleCount = excludedImplausibleCount
+        self.excludedUnreliableCount = excludedUnreliableCount
     }
 }
 
