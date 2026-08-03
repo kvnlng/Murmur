@@ -551,8 +551,16 @@ struct BedsideView: View {
     /// time the focused panel reports a real canvas size. `applyStandardView()`
     /// needs `calibration.canvasSize` (published post-layout), so this can't
     /// run in `init`. Runs exactly once, and only while gain is still unset, so
-    /// a restored `.mur` session (X14) keeps its own paper and the analyst's
-    /// subsequent manual changes are never clobbered.
+    /// the analyst's subsequent manual changes are never clobbered.
+    ///
+    /// NOTE (verified 2026-08-02): this guard is currently the ONLY gate, and a
+    /// `.mur` open takes the SAME path as a raw import — `openMurPackage`
+    /// discards `sessionJSON`, and `MurSessionState` carries no calibration
+    /// field at all. So a restored session does NOT yet keep its own paper; it
+    /// snaps to Standard View like everything else. An earlier version of this
+    /// comment claimed otherwise. Restoring saved calibration is X59 (session
+    /// capture) plus X50's second half — until both land, do not read this
+    /// guard as if `.mur` were already exempt.
     private func applyOpenCalibrationIfNeeded() {
         guard !hasAppliedOpenCalibration,
               calibration.canvasSize.width > 0,
