@@ -100,6 +100,43 @@ struct MurSessionPackageTests {
         #expect(merged.scanScopeWholeRecording == true)
     }
 
+    /// X50(b): the saved paper round-trips, and — the part that matters — a
+    /// session saved WITHOUT a resolved gain reads back nil, so the open falls
+    /// back to Standard View exactly as a raw import does (X50(a) preserved).
+    @Test("Saved paper round-trips; absent paper stays absent")
+    func calibrationRoundTripsAndAbsenceIsPreserved() throws {
+        let (dir, recording, _) = try makeBundle()
+
+        let withPaper = MurSessionState(
+            viewportStartSample: 0, viewportEndSample: 2_500,
+            gainMillimetersPerMillivolt: 20      // deliberately NOT standard 10
+        )
+        let pkgA = try tempDir("pkg-paper").appendingPathComponent("Paper.mur")
+        _ = try MurSessionPackage.write(
+            recording: recording, recordingDirectory: dir,
+            sessionJSON: try JSONEncoder().encode(withPaper), to: pkgA
+        )
+        let a = try MurSessionPackage.read(packageURL: pkgA, into: try tempDir("open-paper"))
+        let restoredA = try JSONDecoder().decode(
+            MurSessionState.self, from: #require(a.sessionJSON)
+        )
+        #expect(restoredA.gainMillimetersPerMillivolt == 20)
+
+        // A session captured before any gain resolved carries no paper.
+        let noPaper = MurSessionState(viewportStartSample: 0, viewportEndSample: 2_500)
+        let pkgB = try tempDir("pkg-nopaper").appendingPathComponent("NoPaper.mur")
+        _ = try MurSessionPackage.write(
+            recording: recording, recordingDirectory: dir,
+            sessionJSON: try JSONEncoder().encode(noPaper), to: pkgB
+        )
+        let b = try MurSessionPackage.read(packageURL: pkgB, into: try tempDir("open-nopaper"))
+        let restoredB = try JSONDecoder().decode(
+            MurSessionState.self, from: #require(b.sessionJSON)
+        )
+        #expect(restoredB.gainMillimetersPerMillivolt == nil,
+                "no saved paper must stay absent — the open falls back to Standard View")
+    }
+
     /// X59 backward compatibility: a package written before session capture
     /// existed carries no `session.json`. Absent must stay ABSENT — the open
     /// path must never fabricate a default viewport for an older `.mur`.

@@ -95,6 +95,12 @@ public struct MurSessionState: Codable, Equatable, Sendable {
     public var windowLockedTo10s: Bool?
     public var selectedTrendMetric: String?
     public var selectedBinPreset: String?
+    /// X50(b) — the analyst's saved paper (mm/mV). Present only when the
+    /// session was saved with a resolved gain; `nil` means "this package
+    /// carries no paper", and the open falls back to Standard View exactly as
+    /// a raw import does. The time scale (mm/s) is not stored separately: it is
+    /// implied by the saved viewport width against the canvas.
+    public var gainMillimetersPerMillivolt: Double?
     /// VT/VF scan operating point in effect.
     public var tau: Double?
     public var minDurationSeconds: Double?
@@ -108,6 +114,7 @@ public struct MurSessionState: Codable, Equatable, Sendable {
         windowLockedTo10s: Bool? = nil,
         selectedTrendMetric: String? = nil,
         selectedBinPreset: String? = nil,
+        gainMillimetersPerMillivolt: Double? = nil,
         tau: Double? = nil,
         minDurationSeconds: Double? = nil,
         mergeGapSeconds: Double? = nil,
@@ -119,6 +126,7 @@ public struct MurSessionState: Codable, Equatable, Sendable {
         self.windowLockedTo10s = windowLockedTo10s
         self.selectedTrendMetric = selectedTrendMetric
         self.selectedBinPreset = selectedBinPreset
+        self.gainMillimetersPerMillivolt = gainMillimetersPerMillivolt
         self.tau = tau
         self.minDurationSeconds = minDurationSeconds
         self.mergeGapSeconds = mergeGapSeconds
@@ -138,6 +146,7 @@ public struct MurSessionState: Codable, Equatable, Sendable {
         copy.viewportEndSample = other.viewportEndSample
         copy.focusedChannelName = other.focusedChannelName
         copy.windowLockedTo10s = other.windowLockedTo10s
+        copy.gainMillimetersPerMillivolt = other.gainMillimetersPerMillivolt
         return copy
     }
 }
