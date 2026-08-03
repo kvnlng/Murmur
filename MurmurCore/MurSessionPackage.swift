@@ -20,7 +20,14 @@
 //        dispositions/     annotation + candidate dispositions
 //        guides/           interval-trend threshold guides
 //        provenance.json   model id/version/tau, app version, analyst labels
-//        session.json      UI/session state (viewport, layout, tau, scan scope)
+//                          — SCHEMA ONLY: never written today, see X59
+//        session.json      UI/session state (viewport, tau, scan scope)
+//                          — SCHEMA ONLY: never written today, see X59. NB
+//                          `MurSessionState` carries NO layout and NO
+//                          calibration field; earlier wording here claimed
+//                          "layout" and was wrong. Both `write` call sites omit
+//                          `sessionJSON:`/`provenanceJSON:`, and `read`'s
+//                          `sessionJSON` is discarded by `openMurPackage`.
 //        cache/            derived, REBUILDABLE, version-stamped (X14-C)
 //
 //  This file is Phase A: manifest + read/write over NSFileWrapper with the
