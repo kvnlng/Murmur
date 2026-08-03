@@ -219,10 +219,12 @@ private struct PurchasesSettingsTab: View {
         }
     }
 
+    /// Delegates to `PurchaseStore`, which prefers StoreKit's localized name
+    /// and falls back to a built-in one. Previously hard-coded here as "Murmur
+    /// Studio (all-inclusive)" — the App Store Connect *reference* name, which
+    /// is internal bookkeeping and should never be shown to a user.
     private func displayName(for id: PurchaseStore.ProductID) -> String {
-        switch id {
-        case .studio: return "Murmur Studio (all-inclusive)"
-        }
+        store.displayName(for: id)
     }
 }
 

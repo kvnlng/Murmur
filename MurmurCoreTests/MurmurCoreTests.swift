@@ -650,6 +650,21 @@ struct PurchaseStoreTests {
         #expect(Set(PurchaseStore.merchandisingOrder) == Set(PurchaseStore.ProductID.allCases))
     }
 
+    /// The name shown before StoreKit resolves — which, on a build the App
+    /// Store isn't offering the product to, is the ONLY name ever shown. It
+    /// must be the product's display name, not its App Store Connect reference
+    /// name ("Murmur Studio (all-inclusive)"), which is internal bookkeeping.
+    @Test("Fallback product name is the display name, not the ASC reference name")
+    func fallbackDisplayNameIsNotTheReferenceName() {
+        for id in PurchaseStore.ProductID.allCases {
+            let name = PurchaseStore.fallbackDisplayName(for: id)
+            #expect(!name.contains("("),
+                    "\(id.rawValue) fallback name '\(name)' looks like an ASC reference name")
+            #expect(!name.isEmpty)
+        }
+        #expect(PurchaseStore.fallbackDisplayName(for: .studio) == "Murmur Studio")
+    }
+
     @Test("Row state distinguishes the two non-resolving conditions (X55 §3)")
     func rowStateNonResolving() {
         // Transient failure → retry.
