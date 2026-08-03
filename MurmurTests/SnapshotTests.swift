@@ -739,18 +739,39 @@ final class SnapshotTests: XCTestCase {
     }
 
     func testECGMetricsLockedView() {
-        // Locked/marketing variant with a stable price string. The Buy
-        // and Restore closures do nothing — this is a layout snapshot,
-        // not an interaction test.
-        let view = ECGMetricsLockedView(
-            displayPrice: "$9.99",
+        // Locked/marketing variant with a stable price string. The closures
+        // do nothing — this is a layout snapshot, not an interaction test.
+        let view = lockedView(.purchasable(price: "$199.99"))
+        assertSnapshot(of: render(view, size: CGSize(width: 380, height: 320)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
+    /// The state a build hits when App Store Connect isn't offering the
+    /// product — no Buy button at all, and a line saying so plus the Restore
+    /// route for someone who already owns it. This is the branch that shipped
+    /// broken (a Buy button that could only fail), so it is worth pinning: the
+    /// snapshot fails if a Buy affordance reappears here.
+    func testECGMetricsLockedView_unavailable() {
+        let view = lockedView(.unavailable)
+        assertSnapshot(of: render(view, size: CGSize(width: 380, height: 340)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
+    /// Transient failure — a retry is the honest affordance here, and it must
+    /// NOT look the same as `.unavailable`, where retrying cannot help.
+    func testECGMetricsLockedView_unreachable() {
+        let view = lockedView(.unreachable)
+        assertSnapshot(of: render(view, size: CGSize(width: 380, height: 340)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
+    private func lockedView(_ availability: ECGMetricsLockedView.Availability) -> some View {
+        ECGMetricsLockedView(
+            availability: availability,
             onBuy: {},
-            onRestore: {}
+            onRestore: {},
+            onRetry: {}
         )
         .frame(width: 340)
         .padding()
         .background(Color.white)
-        assertSnapshot(of: render(view, size: CGSize(width: 380, height: 260)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 
     #endif // canImport(MurmurMetrics)

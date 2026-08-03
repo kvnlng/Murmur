@@ -66,9 +66,10 @@ struct ECGMetricsSurface: View {
     private var lockedBody: some View {
         VStack(alignment: .leading, spacing: 12) {
             ECGMetricsLockedView(
-                displayPrice: store.displayPrice(for: .studio),
+                availability: availability,
                 onBuy: { Task { await purchase() } },
-                onRestore: { Task { await store.restore() } }
+                onRestore: { Task { await store.restore() } },
+                onRetry: { Task { await store.reloadProducts() } }
             )
             if isPurchasing {
                 ProgressView("Contacting App Store…")
@@ -80,6 +81,41 @@ struct ECGMetricsSurface: View {
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+
+    /// Bridges `PurchaseStore.RowState` (MurmurCore) to the locked view's
+    /// `Availability` (MurmurMetrics). This surface is the only place the two
+    /// modules meet, so the mapping belongs here — MurmurMetrics stays ignorant
+    /// of PurchaseStore, and MurmurCore stays ignorant of MurmurMetrics.
+    ///
+    /// Deriving it from `rowState` rather than re-reading `displayPrice` and
+    /// `productsLoadState` keeps ONE definition of "what can the store do right
+    /// now". The Settings row and this window used to answer that question
+    /// differently — Settings distinguished a transient failure from an
+    /// App-Store-Connect condition (X55 §3) while this view collapsed both into
+    /// a Buy button that could only fail.
+    ///
+    /// `owns:` and `purchasing:` are passed `false` deliberately. `body` has
+    /// already branched on `store.hasStudio`, so an owned product cannot reach
+    /// here; and an in-flight purchase is this surface's own state, rendered by
+    /// the `isPurchasing` progress row below rather than by swapping the whole
+    /// call-to-action out from under the analyst mid-tap.
+    private var availability: ECGMetricsLockedView.Availability {
+        switch PurchaseStore.rowState(
+            owns: false,
+            purchasing: false,
+            price: store.displayPrice(for: .studio),
+            loadState: store.productsLoadState
+        ) {
+        case .buy(let price):        return .purchasable(price: price)
+        case .checking:              return .checking
+        case .unreachable:           return .unreachable
+        case .unavailable:           return .unavailable
+        case .owned, .purchasing:
+            // Excluded by the `false` arguments above; treat as "no verdict
+            // yet" rather than inventing a purchasable state.
+            return .checking
         }
     }
 

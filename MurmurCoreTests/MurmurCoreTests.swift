@@ -661,6 +661,32 @@ struct PurchaseStoreTests {
         #expect(PurchaseStore.rowState(owns: false, purchasing: false, price: nil, loadState: .idle) == .checking)
     }
 
+    /// `ECGMetricsSurface` maps `RowState` onto the locked view's
+    /// `Availability`, which has no `owned`/`purchasing` cases — it asks only
+    /// "what can the store do right now". It calls `rowState` with
+    /// `owns: false, purchasing: false` and treats those two cases as
+    /// unreachable, falling back to `.checking`.
+    ///
+    /// This pins that assumption. If precedence ever changed so that either
+    /// case could surface with both flags false, the buy screen would silently
+    /// render "Checking the App Store…" forever instead of a Buy button, and
+    /// nothing else would fail.
+    @Test("With owns:false and purchasing:false, row state is never .owned or .purchasing")
+    func rowStateExcludesOwnershipCasesWhenFlagsAreFalse() {
+        let loadStates: [PurchaseStore.ProductsLoadState] = [.idle, .loading, .loaded, .failed]
+        for loadState in loadStates {
+            for price in [nil, "$199.99"] {
+                let state = PurchaseStore.rowState(
+                    owns: false, purchasing: false, price: price, loadState: loadState
+                )
+                #expect(state != .owned,
+                        "owns:false must never yield .owned (loadState: \(loadState), price: \(price ?? "nil"))")
+                #expect(state != .purchasing,
+                        "purchasing:false must never yield .purchasing (loadState: \(loadState), price: \(price ?? "nil"))")
+            }
+        }
+    }
+
     @Test("Row state precedence: owned > purchasing > buy > load-state")
     func rowStatePrecedence() {
         #expect(PurchaseStore.rowState(owns: true, purchasing: true, price: "$49.99", loadState: .loaded) == .owned)
