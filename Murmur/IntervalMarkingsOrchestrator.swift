@@ -112,10 +112,19 @@ struct IntervalMarkingsOrchestrator: View {
             // and carry a per-beat implausibility flag for the trend lane and
             // the inspector. Both key off the SAME Tier-A rule set so the
             // template's excludedBeatCount and the beat flags never disagree.
+            //
+            // X58: ALSO exclude beats whose T-offset the delineator flagged as
+            // unreliable. This is the load-bearing half of the rec-212 fix —
+            // the 625 ms own-normal is false T-terminations (biased LONG)
+            // inflating the median, which a plausibility rule alone does not
+            // catch (Tier A passed them). Threshold defaults to the QTDB/LUDB
+            // -derived operating point; the app ships the default and never
+            // arbitrates the dial.
             let template = NormalTemplateBuilder.build(
                 from: store,
                 qtcFormula: Self.metricsFormula(from: qtcFormula),
-                excluding: QTPlausibilityFilter.defaultRules
+                excluding: QTPlausibilityFilter.defaultRules,
+                features: features
             )
             let implausibleMask = QTPlausibilityFilter.mask(for: store)
             let calibration = CalibrationTable.builtInTOffset
