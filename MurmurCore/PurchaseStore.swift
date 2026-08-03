@@ -24,6 +24,7 @@
 
 import Foundation
 import Observation
+import OSLog
 import StoreKit
 
 /// Process-wide entitlement state. `@MainActor` because the UI
@@ -36,6 +37,27 @@ public final class PurchaseStore {
     /// Shared instance the app uses at runtime. Tests should construct
     /// a fresh `PurchaseStore()` to keep parallel runs isolated.
     public static let shared = PurchaseStore()
+
+    /// Diagnostic log for the StoreKit round-trip.
+    ///
+    /// Exists because a shipped build that can't sell anything is otherwise
+    /// mute: `Product.products(for:)` returning an empty array and returning
+    /// the product look identical from outside, the UI deliberately refuses to
+    /// guess a cause, and a TestFlight tester has no debugger. Every message
+    /// here is `.notice` or `.error` — the two levels the unified log persists
+    /// to disk by default — so the answer survives until someone runs:
+    ///
+    ///     log show --last 1h --predicate 'subsystem == "com.kevinlong.murmur"'
+    ///
+    /// Product identifiers are interpolated `.public` on purpose. Logger
+    /// redacts string interpolations by default, which would render every
+    /// line as `<private>` and defeat the point. These are compile-time
+    /// constants from `ProductID` — no user or purchase data is logged, and
+    /// nothing here touches a transaction's contents.
+    private static let log = Logger(
+        subsystem: "com.kevinlong.murmur",
+        category: "purchases"
+    )
 
     /// App Store Connect product identifiers. One all-inclusive product
     /// now (single-IAP pivot): it unlocks every paid feature together.
@@ -147,8 +169,10 @@ public final class PurchaseStore {
     @discardableResult
     public func purchase(_ id: ProductID) async throws -> Bool {
         guard let product = products[id] else {
+            Self.log.error("Purchase refused — \(id.rawValue, privacy: .public) never loaded from the App Store")
             throw PurchaseError.productNotLoaded
         }
+        Self.log.notice("Purchase starting — \(id.rawValue, privacy: .public)")
         do {
             let result = try await product.purchase()
             switch result {
@@ -159,15 +183,23 @@ public final class PurchaseStore {
                     productIDString: transaction.productID,
                     revocationDate: transaction.revocationDate
                 )
+                Self.log.notice("Purchase SUCCEEDED — \(id.rawValue, privacy: .public)")
                 return true
-            case .userCancelled, .pending:
+            case .userCancelled:
+                Self.log.notice("Purchase cancelled by user — \(id.rawValue, privacy: .public)")
+                return false
+            case .pending:
+                // Ask-to-Buy / SCA. Resolves later via `Transaction.updates`.
+                Self.log.notice("Purchase pending approval — \(id.rawValue, privacy: .public)")
                 return false
             @unknown default:
+                Self.log.error("Purchase returned an unknown result — \(id.rawValue, privacy: .public)")
                 return false
             }
         } catch let error as PurchaseError {
             throw error
         } catch {
+            Self.log.error("Purchase FAILED — \(id.rawValue, privacy: .public): \(String(describing: error), privacy: .public)")
             throw PurchaseError.storeKit(error)
         }
     }
@@ -178,7 +210,14 @@ public final class PurchaseStore {
     /// `Transaction.updates` and we also re-walk
     /// `currentEntitlements` for completeness.
     public func restore() async {
-        try? await AppStore.sync()
+        Self.log.notice("Restore requested — calling AppStore.sync()")
+        do {
+            try await AppStore.sync()
+        } catch {
+            // Still fall through to the entitlement walk: a failed sync does
+            // not mean we can't see already-issued entitlements.
+            Self.log.error("AppStore.sync() failed — \(String(describing: error), privacy: .public)")
+        }
         await refreshCurrentEntitlements()
     }
 
@@ -192,8 +231,10 @@ public final class PurchaseStore {
 
     private func loadProducts() async {
         productsLoadState = .loading
+        let requested = ProductID.allCases.map(\.rawValue)
+        Self.log.notice("Product load starting — requesting \(requested.joined(separator: ", "), privacy: .public)")
         do {
-            let fetched = try await Product.products(for: ProductID.allCases.map(\.rawValue))
+            let fetched = try await Product.products(for: requested)
             var byID: [ProductID: Product] = [:]
             for product in fetched {
                 if let id = ProductID(rawValue: product.id) {
@@ -207,10 +248,33 @@ public final class PurchaseStore {
             // unknown/mismatched ID all look identical here. Don't infer a
             // cause; the row copy stays neutral. Distinct from a transient .failed.
             self.productsLoadState = .loaded
+
+            let returned = fetched.map(\.id).sorted()
+            let missing = requested.filter { !returned.contains($0) }
+            if missing.isEmpty {
+                Self.log.notice("Product load OK — App Store returned \(returned.joined(separator: ", "), privacy: .public)")
+            } else {
+                // The interesting case, and the one this logger exists for. The
+                // call SUCCEEDED — this is not a network problem — the App
+                // Store simply did not offer these identifiers. Log it as an
+                // error so it lands in the persisted store, and record what did
+                // come back: an empty list and a partial list point at
+                // different causes.
+                Self.log.error(
+                    """
+                    Product load returned WITHOUT \(missing.joined(separator: ", "), privacy: .public) \
+                    — the call succeeded, so this is an App Store Connect condition, not connectivity. \
+                    App Store returned: \(returned.isEmpty ? "(nothing)" : returned.joined(separator: ", "), privacy: .public). \
+                    Check, in order: Paid Applications Agreement active; the identifier exists under this app; \
+                    product state is not Missing Metadata.
+                    """
+                )
+            }
         } catch {
             // Transient (network / outage): the products surface stays empty and
             // the UI offers a retry rather than a dead-end "Unavailable".
             self.productsLoadState = .failed
+            Self.log.error("Product load FAILED (transient) — \(String(describing: error), privacy: .public)")
         }
     }
 
@@ -246,14 +310,26 @@ public final class PurchaseStore {
 
     private func refreshCurrentEntitlements() async {
         var owned: Set<ProductID> = []
+        var unverifiedCount = 0
         for await result in Transaction.currentEntitlements {
-            guard case .verified(let transaction) = result else { continue }
+            guard case .verified(let transaction) = result else {
+                unverifiedCount += 1
+                continue
+            }
             if transaction.revocationDate == nil,
                let id = ProductID(rawValue: transaction.productID) {
                 owned.insert(id)
             }
         }
         self.ownedProductIDs = owned
+        let names = owned.map(\.rawValue).sorted()
+        Self.log.notice("Entitlement walk — owns \(names.isEmpty ? "(nothing)" : names.joined(separator: ", "), privacy: .public)")
+        if unverifiedCount > 0 {
+            // Refusing these is correct, but refusing them silently means a
+            // user who genuinely bought the product looks identical to one who
+            // never did. Say so.
+            Self.log.error("Entitlement walk skipped \(unverifiedCount, privacy: .public) unverified transaction(s) — never granted")
+        }
     }
 
     // MARK: - Transaction processing
@@ -267,9 +343,11 @@ public final class PurchaseStore {
                 revocationDate: transaction.revocationDate
             )
         } catch {
-            // Unverified transactions are silently ignored — never
-            // grant an entitlement off a transaction we can't prove
-            // came from Apple.
+            // Unverified transactions are ignored — never grant an
+            // entitlement off a transaction we can't prove came from Apple.
+            // Logged rather than swallowed: this is the one path where a
+            // legitimate purchase can vanish without the user seeing anything.
+            Self.log.error("Ignored an unverified transaction from Transaction.updates — entitlement NOT granted")
         }
     }
 

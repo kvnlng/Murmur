@@ -109,7 +109,7 @@ struct MurmurApp: App {
             // is only available inside a view scope, so we expose the
             // metrics scene ID and call it from a Button action closure.
             CommandGroup(after: .windowArrangement) {
-                Button("ECG Metrics") {
+                Button("Variability Metrics") {
                     openWindow(id: "ecg-metrics")
                 }
                 .keyboardShortcut("m", modifiers: [.command, .shift])
@@ -143,12 +143,21 @@ struct MurmurApp: App {
         Settings {
             SettingsView()
         }
-        // Auxiliary single-instance window for the paid ECG Metrics
-        // surface. Opened from Window → "ECG Metrics" or ⌘⇧M. We
-        // suppress the auto-generated Window-menu entry (which would
-        // duplicate our explicit CommandGroup Button above) via
-        // `.commandsRemoved()`; the explicit entry owns the shortcut.
-        Window("ECG Metrics", id: "ecg-metrics") {
+        // Auxiliary single-instance window for the paid variability
+        // surface — heart-rate variability plus the QT Variability Index.
+        // Opened from Window → "Variability Metrics" or ⌘⇧M. We suppress
+        // the auto-generated Window-menu entry (which would duplicate our
+        // explicit CommandGroup Button above) via `.commandsRemoved()`;
+        // the explicit entry owns the shortcut.
+        //
+        // Titled after its CONTENTS, not after a product. It used to be
+        // called "ECG Metrics" — a per-module IAP retired by the single-IAP
+        // pivot (2026-08-01) — so the menu named something that could not be
+        // bought and did not describe what the window showed.
+        //
+        // The scene `id` stays "ecg-metrics" deliberately: it is not
+        // user-visible, and changing it would discard saved window frames.
+        Window("Variability Metrics", id: "ecg-metrics") {
             ECGMetricsSurface()
         }
         .defaultSize(width: 380, height: 320)
