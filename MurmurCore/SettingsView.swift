@@ -181,10 +181,13 @@ private struct PurchasesSettingsTab: View {
                     .buttonStyle(.link)
                     .accessibilityIdentifier("purchase-retry-\(id.rawValue)")
             }
-        case .notOfferedHere:
-            // X55 §3: loaded successfully, but this storefront doesn't carry it —
-            // nothing the user can do, so no retry. Distinct from unreachable.
-            Text("Not available in your region")
+        case .unavailable:
+            // X55 §3: the load succeeded but the App Store isn't offering this
+            // product. StoreKit doesn't say why — region restriction, Missing
+            // Metadata, an inactive Paid Apps agreement, or an unknown ID all
+            // look identical here — so the copy names no cause. A reload won't
+            // change ASC state, so no retry. Distinct from unreachable.
+            Text("Not currently available")
                 .foregroundStyle(.secondary)
                 .accessibilityIdentifier("purchase-unavailable-\(id.rawValue)")
         }
