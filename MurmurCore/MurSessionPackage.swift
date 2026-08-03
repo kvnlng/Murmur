@@ -151,6 +151,81 @@ public struct MurSessionState: Codable, Equatable, Sendable {
     }
 }
 
+/// The `provenance.json` schema — what the analyst's numbers were MADE OF at
+/// save time (X26). The package already reconstitutes enough to recompute a
+/// template, but a recomputed number is not the saved one: the delineator, the
+/// exclusion rules, or the formula default can all move between versions.
+/// Recording the population alongside the value is what makes the saved
+/// measurement auditable rather than merely repeatable — X48's rule (a number
+/// without its population is not reproducible) applied to the file format.
+///
+/// All optional so partial/older packages decode. App version and record
+/// identity already live on the manifest and are deliberately not duplicated.
+public struct MurProvenance: Codable, Equatable, Sendable {
+
+    /// The patient-normal template as it stood when the session was saved.
+    public struct NormalTemplate: Codable, Equatable, Sendable {
+        /// Beats that CONTRIBUTED to the medians.
+        public var beatCount: Int?
+        /// Beats withheld — physically impossible (X53) or unreliable T-offset
+        /// (X58). Merged, as the builder merges them; do not attribute this to
+        /// a single cause when rendering it.
+        public var excludedBeatCount: Int?
+        /// The lead the intervals were measured in. A QT without its lead is
+        /// not comparable (the X58 rec-212 lesson).
+        public var sourceLead: String?
+        public var spanStartSample: Int64?
+        public var spanEndSample: Int64?
+        /// Rate-correction formula in effect — the app never arbitrates it
+        /// (X44), so the saved number is only interpretable alongside it.
+        public var qtcFormulaName: String?
+        /// The template median AS SAVED, so a later recompute can be compared
+        /// against it rather than silently replacing it.
+        public var medianQTcMs: Double?
+
+        public init(
+            beatCount: Int? = nil,
+            excludedBeatCount: Int? = nil,
+            sourceLead: String? = nil,
+            spanStartSample: Int64? = nil,
+            spanEndSample: Int64? = nil,
+            qtcFormulaName: String? = nil,
+            medianQTcMs: Double? = nil
+        ) {
+            self.beatCount = beatCount
+            self.excludedBeatCount = excludedBeatCount
+            self.sourceLead = sourceLead
+            self.spanStartSample = spanStartSample
+            self.spanEndSample = spanEndSample
+            self.qtcFormulaName = qtcFormulaName
+            self.medianQTcMs = medianQTcMs
+        }
+    }
+
+    public var normalTemplate: NormalTemplate?
+
+    public init(normalTemplate: NormalTemplate? = nil) {
+        self.normalTemplate = normalTemplate
+    }
+}
+
+extension MurProvenance.NormalTemplate {
+    /// Snapshot a live template for saving. `nil` when there is no template —
+    /// absent must stay absent rather than becoming a zero-beat template.
+    public init?(_ template: MarkingsTemplate?) {
+        guard let template else { return nil }
+        self.init(
+            beatCount: template.sampleCount,
+            excludedBeatCount: template.excludedBeatCount,
+            sourceLead: template.sourceLead,
+            spanStartSample: template.spanStartSample,
+            spanEndSample: template.spanEndSample,
+            qtcFormulaName: template.qtcFormulaName,
+            medianQTcMs: template.medianQTcMs
+        )
+    }
+}
+
 public enum MurSessionError: LocalizedError, Equatable {
     case missingManifest
     case unsupportedFormatVersion(Int)

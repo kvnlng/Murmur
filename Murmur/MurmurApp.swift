@@ -182,8 +182,17 @@ struct MurmurApp: App {
             // Encoding failure must not cost the analyst their save — fall back
             // to writing without it rather than throwing the whole save away.
             let sessionJSON = try? JSONEncoder().encode(context.liveSessionState)
+            // X26: record what the analyst's numbers were MADE OF — the
+            // template's population, lead, span and formula — so the saved
+            // measurement stays auditable if the delineator or the formula
+            // default moves in a later version. Absent when there is no
+            // template; never a fabricated zero-beat one.
+            let provenanceJSON = MurProvenance.NormalTemplate(
+                IntervalMarkingsContext.shared.template
+            ).flatMap { try? JSONEncoder().encode(MurProvenance(normalTemplate: $0)) }
             try MurSessionPackage.write(recording: recording,
                                         recordingDirectory: directory,
+                                        provenanceJSON: provenanceJSON,
                                         sessionJSON: sessionJSON,
                                         to: url)
         } catch {

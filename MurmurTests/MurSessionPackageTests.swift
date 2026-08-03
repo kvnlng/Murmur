@@ -137,6 +137,50 @@ struct MurSessionPackageTests {
                 "no saved paper must stay absent — the open falls back to Standard View")
     }
 
+    /// X26: the template's provenance — its population, lead, span and formula
+    /// — survives the round trip, so a saved measurement stays auditable if the
+    /// delineator or the formula default moves in a later version.
+    @Test("Template provenance round-trips through provenance.json")
+    func templateProvenanceRoundTrips() throws {
+        let (dir, recording, _) = try makeBundle()
+        let pkg = try tempDir("pkg-prov").appendingPathComponent("Prov.mur")
+        let provenance = MurProvenance(normalTemplate: .init(
+            beatCount: 1_859,
+            excludedBeatCount: 2,
+            sourceLead: "MLII",
+            spanStartSample: 180,
+            spanEndSample: 649_872,
+            qtcFormulaName: "Fridericia",
+            medianQTcMs: 428.4
+        ))
+
+        _ = try MurSessionPackage.write(
+            recording: recording, recordingDirectory: dir,
+            provenanceJSON: try JSONEncoder().encode(provenance), to: pkg
+        )
+
+        let result = try MurSessionPackage.read(
+            packageURL: pkg, into: try tempDir("open-prov")
+        )
+        let restored = try JSONDecoder().decode(
+            MurProvenance.self, from: #require(result.provenanceJSON)
+        )
+        #expect(restored == provenance)
+        // The population statement is the point — each part must survive.
+        #expect(restored.normalTemplate?.beatCount == 1_859)
+        #expect(restored.normalTemplate?.excludedBeatCount == 2)
+        #expect(restored.normalTemplate?.sourceLead == "MLII")
+        #expect(restored.normalTemplate?.qtcFormulaName == "Fridericia")
+    }
+
+    /// X26: no template means no provenance. A zero-beat template would read as
+    /// "we measured nothing" rather than "we never measured" — the
+    /// absent-not-zero rule (X48 §4c).
+    @Test("No template yields no provenance, never a zero-beat one")
+    func absentTemplateYieldsNoProvenance() {
+        #expect(MurProvenance.NormalTemplate(nil) == nil)
+    }
+
     /// X59 backward compatibility: a package written before session capture
     /// existed carries no `session.json`. Absent must stay ABSENT — the open
     /// path must never fabricate a default viewport for an older `.mur`.
