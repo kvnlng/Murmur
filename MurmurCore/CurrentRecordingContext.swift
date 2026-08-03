@@ -61,6 +61,16 @@ public final class CurrentRecordingContext {
     /// capture existed — absent must stay absent, never a fabricated default.
     public var pendingSessionRestore: MurSessionState?
 
+    /// X26 — provenance decoded from a `.mur` that has just been opened: what
+    /// the analyst's numbers were made of at save time. Unlike
+    /// `pendingSessionRestore` this is NOT consumed and NOT applied — the live
+    /// template is always recomputed from the recording. It is kept so a
+    /// surface can show the saved population beside the recomputed one, and so
+    /// a divergence (a delineator or formula change between versions) is
+    /// visible rather than silent. `nil` for a raw import or a package with no
+    /// provenance.
+    public var restoredProvenance: MurProvenance?
+
     public init() {}
 
     /// Publish that `recording` is now current, loaded from `directory`.
@@ -77,5 +87,6 @@ public final class CurrentRecordingContext {
         // Don't let one recording's session state leak into the next.
         liveSessionState = MurSessionState()
         pendingSessionRestore = nil
+        restoredProvenance = nil
     }
 }

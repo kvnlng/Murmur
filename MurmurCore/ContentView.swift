@@ -228,6 +228,14 @@ public struct ContentView: View {
                let restored = try? JSONDecoder().decode(MurSessionState.self, from: data) {
                 CurrentRecordingContext.shared.pendingSessionRestore = restored
             }
+            // X26: keep the saved provenance alongside the live (recomputed)
+            // template. Deliberately NOT applied — the template is always
+            // recomputed from the recording; this is the record of what it was,
+            // so a divergence is visible rather than silent.
+            if let data = result.provenanceJSON,
+               let provenance = try? JSONDecoder().decode(MurProvenance.self, from: data) {
+                CurrentRecordingContext.shared.restoredProvenance = provenance
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
