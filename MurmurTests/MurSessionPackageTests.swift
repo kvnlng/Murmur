@@ -68,6 +68,38 @@ struct MurSessionPackageTests {
         #expect(result.sessionJSON == session)
     }
 
+    /// X11/X59: the bedside view republishes on every viewport change. If that
+    /// republish replaced the whole state, it would wipe the scan dials the
+    /// scan sheet owns — the operating point would silently reset the moment
+    /// the analyst panned. Only the view-owned fields may move.
+    @Test("Republishing view state preserves the fields other surfaces own")
+    func viewRepublishPreservesScanDials() {
+        let live = MurSessionState(
+            viewportStartSample: 0, viewportEndSample: 100,
+            focusedChannelName: "V1", windowLockedTo10s: false,
+            tau: 0.42, minDurationSeconds: 7, mergeGapSeconds: 9,
+            scanScopeWholeRecording: true
+        )
+        // What the bedside view knows about: viewport / lead / lock only.
+        let fromView = MurSessionState(
+            viewportStartSample: 500, viewportEndSample: 900,
+            focusedChannelName: "MLII", windowLockedTo10s: true
+        )
+
+        let merged = live.replacingViewState(with: fromView)
+
+        // View-owned fields move...
+        #expect(merged.viewportStartSample == 500)
+        #expect(merged.viewportEndSample == 900)
+        #expect(merged.focusedChannelName == "MLII")
+        #expect(merged.windowLockedTo10s == true)
+        // ...and the scan dials survive untouched.
+        #expect(merged.tau == 0.42)
+        #expect(merged.minDurationSeconds == 7)
+        #expect(merged.mergeGapSeconds == 9)
+        #expect(merged.scanScopeWholeRecording == true)
+    }
+
     /// X59 backward compatibility: a package written before session capture
     /// existed carries no `session.json`. Absent must stay ABSENT — the open
     /// path must never fabricate a default viewport for an older `.mur`.
