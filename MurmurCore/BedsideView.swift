@@ -540,9 +540,13 @@ struct BedsideView: View {
             Text(attachError ?? "")
         }
         .onChange(of: calibration.canvasSize, initial: true) { _, _ in
+            // Order is load-bearing (X50(b)): the saved PAPER goes on first, so
+            // the snap guard sees a non-nil gain and declines; then the snap
+            // runs for anything that has no saved paper; then the rest of the
+            // restore (viewport, lead, lock) lands last, so a snap can't
+            // clobber a restored viewport width.
+            applyPendingCalibrationRestoreIfNeeded()
             applyOpenCalibrationIfNeeded()
-            // X59: a restored `.mur` session applies AFTER the open-calibration
-            // snap, so a saved viewport wins over the standard-paper default.
             applyPendingSessionRestoreIfNeeded()
         }
         // X59: republish the live snapshot on every change, so ⌘S can capture
@@ -605,8 +609,31 @@ struct BedsideView: View {
             viewportStartSample: viewport.startSample,
             viewportEndSample: viewport.endSample,
             focusedChannelName: focusedChannel?.name,
-            windowLockedTo10s: windowLockedTo10s
+            windowLockedTo10s: windowLockedTo10s,
+            // X50(b): the analyst's paper. Still `nil` before the open snap
+            // resolves a gain, which is exactly right — a package saved in that
+            // state carries no paper and reopens at Standard View.
+            gainMillimetersPerMillivolt: calibration.gainMillimetersPerMillivolt
         )
+    }
+
+    /// X50(b) — restore the saved paper, and ONLY the paper, before
+    /// `applyOpenCalibrationIfNeeded()` gets a chance to snap.
+    ///
+    /// Ordering is the whole mechanism: that guard fires only while
+    /// `gainMillimetersPerMillivolt == nil`, so setting the saved gain first
+    /// makes it correctly decline, and a `.mur` keeps its own paper. A raw
+    /// import (no pending restore) and a `.mur` saved without a resolved gain
+    /// both leave it nil, so X50(a)'s standard-paper open is untouched.
+    ///
+    /// Deliberately does NOT consume `pendingSessionRestore` — the rest of the
+    /// restore has to land *after* the snap, or a standard-view snap would
+    /// clobber the restored viewport width.
+    private func applyPendingCalibrationRestoreIfNeeded() {
+        guard let restore = CurrentRecordingContext.shared.pendingSessionRestore,
+              let gain = restore.gainMillimetersPerMillivolt,
+              calibration.gainMillimetersPerMillivolt == nil else { return }
+        calibration.gainMillimetersPerMillivolt = gain
     }
 
     /// Applies session state restored from a `.mur`, exactly once.
