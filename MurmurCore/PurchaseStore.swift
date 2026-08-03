@@ -153,6 +153,29 @@ public final class PurchaseStore {
     /// ownership under the single-IAP model; feature call sites read this.
     public var hasStudio: Bool { ownedProductIDs.contains(.studio) }
 
+    /// User-facing name for `id`. Prefers StoreKit's own `displayName`, which
+    /// comes from App Store Connect and is localized by Apple, and falls back
+    /// to a built-in constant when the product hasn't loaded — offline, not yet
+    /// configured, or the App Store isn't offering it. That last case is not
+    /// hypothetical, so the fallback is a shipping surface, not a nicety.
+    ///
+    /// The fallback is the product's DISPLAY name, never its App Store Connect
+    /// *reference* name. Settings used to hard-code "Murmur Studio
+    /// (all-inclusive)" — the reference name, which exists for ASC bookkeeping
+    /// and should never reach a user. It also disagreed with the buy screen, so
+    /// one purchase appeared under two names.
+    public func displayName(for id: ProductID) -> String {
+        products[id]?.displayName ?? Self.fallbackDisplayName(for: id)
+    }
+
+    /// Name shown before StoreKit resolves the product. `nonisolated` so tests
+    /// and non-main-actor callers can reach it without a hop.
+    public nonisolated static func fallbackDisplayName(for id: ProductID) -> String {
+        switch id {
+        case .studio: return "Murmur Studio"
+        }
+    }
+
     /// Localised price string for `id` (e.g. "$9.99"), or nil when the
     /// product hasn't loaded from the App Store yet (offline, not configured
     /// in App Store Connect, or still fetching). Keeps StoreKit's `Product`
