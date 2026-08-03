@@ -570,9 +570,11 @@ struct IntervalTrendLane: View {
     /// prints `0%`. Pure so the boundaries are unit-testable without a view.
     static func percentText(_ pct: Double) -> String {
         if pct <= 0 { return "0%" }
-        if pct < 1 { return "<1%" }
         if pct >= 100 { return "100%" }
-        if pct > 99 { return ">99%" }
+        // Where whole-number rounding would fabricate an absolute, keep one
+        // decimal — the same convention `qtImplausibleSummaryText` (X53) already
+        // uses, rather than inventing a second voice for the same idea.
+        if pct < 1 || pct > 99 { return String(format: "%.1f%%", pct) }
         return String(format: "%.0f%%", pct)
     }
 
