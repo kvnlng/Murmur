@@ -261,6 +261,11 @@ public enum MurSessionPackage {
         (BundleAnnotationsFile.filename, "annotations"),
         (DispositionFile.bundleFileName, "dispositions"),
         (RegionDispositionFile.bundleFileName, "dispositions"),
+        // Committed VT/VF candidates. Travels with the region dispositions
+        // that adjudicate it — a package carrying the verdicts but not what
+        // was judged would reopen with the same orphaned-disposition problem
+        // this sidecar exists to fix.
+        (VTVFCandidateFile.bundleFileName, "annotations"),
         ("interval_guides.json", "guides"),
     ]
 
