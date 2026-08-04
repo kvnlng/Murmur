@@ -762,6 +762,77 @@ final class SnapshotTests: XCTestCase {
         assertSnapshot(of: render(view, size: CGSize(width: 380, height: 340)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 
+    /// The relocated variability summary, rendered inline in the record
+    /// column. Fixture values are the real ones from NSRDB record 16786 so the
+    /// snapshot shows a realistic 24-hour Holter, including the QTVI empty
+    /// state that record actually produces.
+    ///
+    /// Pins the two things the move was for: the record is NAMED in the
+    /// header (the detached window named no record), and the metrics lay out
+    /// across the available width instead of down a narrow fixed column.
+    @MainActor
+    func testVariabilityMetricsStrip_populated() {
+        let context = VariabilityMetricsContext()
+        context.set(summary: Self.variabilityFixture)
+        let view = VariabilityMetricsStrip(context: context)
+            .frame(width: 620)
+            .padding()
+            .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 660, height: 320)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
+    /// Unentitled: a one-line seam naming the capability and the product, with
+    /// no Buy affordance — Settings owns the purchase surface.
+    @MainActor
+    func testVariabilityMetricsStrip_locked() {
+        let context = VariabilityMetricsContext()
+        context.setLocked()
+        let view = VariabilityMetricsStrip(context: context)
+            .frame(width: 620)
+            .padding()
+            .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 660, height: 60)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
+    private static var variabilityFixture: VariabilityMetricsSummary {
+        VariabilityMetricsSummary(
+            sections: [
+                .init(
+                    id: "variability-metrics-time-domain",
+                    title: "Heart rate variability",
+                    rows: [
+                        .init(id: "vm-mean-rr", label: "Mean RR", value: "827.2", unit: "ms"),
+                        .init(id: "vm-sdnn", label: "SDNN", value: "118.2", unit: "ms"),
+                        .init(id: "vm-rmssd", label: "RMSSD", value: "49.1", unit: "ms"),
+                        .init(id: "vm-pnn50", label: "pNN50", value: "14.6", unit: "%"),
+                    ]
+                ),
+                .init(
+                    id: "variability-metrics-frequency-domain",
+                    title: "Frequency-domain HRV",
+                    rows: [
+                        .init(id: "vm-vlf", label: "VLF", value: "8419", unit: "ms²"),
+                        .init(id: "vm-lf", label: "LF", value: "2902", unit: "ms²"),
+                        .init(id: "vm-hf", label: "HF", value: "2101", unit: "ms²"),
+                        .init(id: "vm-lfhf", label: "LF/HF", value: "1.38"),
+                        .init(id: "vm-lfhf-nu", label: "LF / HF n.u.", value: "58 / 42"),
+                    ],
+                    captions: [
+                        "Lomb-Scargle · 23.3 h window · VLF 0.003–0.04 / LF 0.04–0.15 / HF 0.15–0.40 Hz",
+                        "0% of beats excluded as artifact before the spectrum.",
+                    ]
+                ),
+                .init(
+                    id: "variability-metrics-qtvi-empty",
+                    title: "QT variability index",
+                    captions: ["No qualifying 5-min segments (needs ≥ 5 min of stable, artifact-free rate)."]
+                ),
+            ],
+            provenance: "16786 · 101604 beats · 23.3 h",
+            exportText: "ECG Metrics\n  Mean RR:  827.2 ms\n"
+        )
+    }
+
     private func lockedView(_ availability: ECGMetricsLockedView.Availability) -> some View {
         ECGMetricsLockedView(
             availability: availability,
