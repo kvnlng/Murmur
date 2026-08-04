@@ -7,6 +7,7 @@
 // Aggregate test suite — grows with the codebase. Splitting purely to
 // satisfy SwiftLint would scatter related tests across many files.
 
+import AppKit
 import Foundation
 import Testing
 @testable import MurmurCore
@@ -5759,6 +5760,49 @@ struct FiducialLayerToggleTests {
         #expect(MarkingsFiducialLayer.p.displayName == "P")
         #expect(MarkingsFiducialLayer.qrs.displayName == "QRS")
         #expect(MarkingsFiducialLayer.t.displayName == "T")
+    }
+}
+
+/// X60. Kevin: "the icons at the top right … are hard to follow". The reason
+/// was mechanical — three pairs of buttons shared a glyph. Icon-only buttons
+/// carry their whole meaning in the glyph (the hover text that was supposed
+/// to back them up renders nothing on macOS 26), so a duplicate makes two
+/// actions genuinely indistinguishable rather than merely untidy.
+@Suite("Toolbar glyphs (X60)")
+struct ToolbarGlyphTests {
+
+    @Test("No two toolbar buttons share a glyph")
+    func glyphsAreUnique() {
+        let all = ToolbarGlyph.all
+        let duplicates = Dictionary(grouping: all, by: { $0 })
+            .filter { $0.value.count > 1 }
+            .keys
+            .sorted()
+        #expect(duplicates.isEmpty, "Toolbar glyphs must be unique; duplicated: \(duplicates)")
+        #expect(Set(all).count == all.count)
+    }
+
+    /// The specific collisions X60 was filed for. Named so a future edit that
+    /// reintroduces one fails with the reason attached rather than just a
+    /// count mismatch.
+    @Test("The three X60 collisions stay fixed")
+    func historicCollisionsStayFixed() {
+        // Open-folder vs attach-findings were both `doc.badge.plus`.
+        #expect(ToolbarGlyph.openRecordFolder != ToolbarGlyph.attachFindings)
+        #expect(ToolbarGlyph.openRecordFolder != "doc.badge.plus")
+        // Two padlocks: edit mode and the 10 s window hold.
+        #expect(!ToolbarGlyph.windowHeld.hasPrefix("lock"))
+        #expect(!ToolbarGlyph.windowFree.hasPrefix("lock"))
+        // Import vs export, previously two near-identical document outlines.
+        #expect(ToolbarGlyph.attachFindings != ToolbarGlyph.exportWFDB)
+    }
+
+    @Test("Every toolbar glyph resolves to a real SF Symbol")
+    func glyphsExist() {
+        for name in ToolbarGlyph.all {
+            #expect(NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil,
+                    "\(name) is not a valid SF Symbol")
+        }
     }
 }
 

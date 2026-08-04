@@ -271,17 +271,54 @@ struct BedsideView: View {
     /// it there — finding + candidate jumps recenter without re-zooming, so
     /// an analyst reading in fixed windows keeps their frame. A manual zoom
     /// (see `zoom(factor:)`) releases the lock.
+    // MARK: - Toolbar hover text (X60)
+    //
+    // Named once each rather than written inline, so the string a button
+    // claims is greppable and reviewable rather than buried in a modifier.
+    //
+    // NOTE: these do not currently reach the user. `.help()` renders no
+    // tooltip anywhere in this app on macOS 26 — see the X60 PR for the
+    // evidence. They are kept accurate so that whenever hover text works
+    // again (an OS fix, or a decision to show toolbar labels), the copy is
+    // already right rather than needing an audit first.
+
+    private static let scanHelp =
+        "Scan this recording for candidate VT/VF episodes (research use only)"
+    private static let attachHelp =
+        "Merge a producer's annotations JSON into this recording"
+    private static let exportReportHelp =
+        "Save a markdown report of this recording's findings and dispositions"
+    private static let exportSnapshotHelp =
+        "Save a PNG snapshot of the current bedside view"
+    private static let findingsHelp = "Show or hide the findings panel"
+
+    private var editModeHelp: String {
+        isEditing
+            ? "Editing on — notes and annotations are editable. Click to lock."
+            : "Read-only. Click to unlock and edit notes and annotations."
+    }
+
+    private var windowLockHelp: String {
+        windowLockedTo10s
+            ? "Held to a 10-second window. Jumps recenter without changing zoom. Click (or zoom) to release."
+            : "Hold the trace to a 10-second window so jumps keep your time frame."
+    }
+
+    private var exportWFDBHelp: String {
+        "Write your confirmed findings as a WFDB annotation file "
+        + "(\(wfdbRecordBase).\(WFDBAnnotationWriter.defaultAnnotator)) "
+        + "beside the recording, to hand to a peer"
+    }
+
     @ToolbarContentBuilder
     private var windowLockToolbarItem: some ToolbarContent {
         ToolbarItem {
             Button {
                 toggleWindowLock()
             } label: {
-                Label("10 s window", systemImage: windowLockedTo10s ? "lock.fill" : "lock.open")
+                Label("10 s window", systemImage: windowLockedTo10s ? ToolbarGlyph.windowHeld : ToolbarGlyph.windowFree)
             }
-            .help(windowLockedTo10s
-                  ? "Locked to a 10-second window. Jumps recenter without changing zoom. Click (or zoom) to unlock."
-                  : "Lock the trace to a 10-second window so jumps keep your time frame.")
+            .help(windowLockHelp)
             .tint(windowLockedTo10s ? Color.accentColor : nil)
             .accessibilityIdentifier("window-lock-toggle")
         }
@@ -297,9 +334,9 @@ struct BedsideView: View {
                         viewEndSample: viewport.endSample
                     )
                 } label: {
-                    Label("Scan for VT/VF candidates", systemImage: "waveform.badge.magnifyingglass")
+                    Label("Scan for VT/VF candidates", systemImage: ToolbarGlyph.scanVTVF)
                 }
-                .help("Scan this recording for candidate VT/VF episodes (research use only)")
+                .help(Self.scanHelp)
                 .accessibilityIdentifier("vtvf-scan-action")
             }
         }
@@ -467,12 +504,10 @@ struct BedsideView: View {
                 } label: {
                     Label(
                         isEditing ? "Editing" : "Locked",
-                        systemImage: isEditing ? "lock.open.fill" : "lock.fill"
+                        systemImage: isEditing ? ToolbarGlyph.editModeUnlocked : ToolbarGlyph.editModeLocked
                     )
                 }
-                .help(isEditing
-                      ? "Editing on — notes and annotations are editable. Click to lock."
-                      : "Read-only. Click to unlock and edit notes and annotations.")
+                .help(editModeHelp)
                 .tint(isEditing ? Color.accentColor : nil)
                 .accessibilityIdentifier("edit-mode-toggle")
             }
@@ -480,31 +515,31 @@ struct BedsideView: View {
                 Button {
                     showAttachFindings = true
                 } label: {
-                    Label("Attach findings…", systemImage: "doc.badge.plus")
+                    Label("Attach findings…", systemImage: ToolbarGlyph.attachFindings)
                 }
-                .help("Merge a producer's annotations JSON into this recording")
+                .help(Self.attachHelp)
                 .accessibilityIdentifier("attach-findings")
             }
             scanToolbarItem
             ToolbarItem {
                 Button { exportMarkdownReport() } label: {
-                    Label("Export report…", systemImage: "square.and.arrow.up")
+                    Label("Export report…", systemImage: ToolbarGlyph.exportReport)
                 }
-                .help("Save a markdown report of this recording's findings and dispositions")
+                .help(Self.exportReportHelp)
                 .accessibilityIdentifier("export-report")
             }
             ToolbarItem {
                 Button { exportSnapshotPNG() } label: {
-                    Label("Export snapshot…", systemImage: "camera")
+                    Label("Export snapshot…", systemImage: ToolbarGlyph.exportSnapshot)
                 }
-                .help("Save a PNG snapshot of the current bedside view")
+                .help(Self.exportSnapshotHelp)
                 .accessibilityIdentifier("export-snapshot")
             }
             ToolbarItem {
                 Button { exportWFDBAnnotations() } label: {
-                    Label("Export WFDB annotations…", systemImage: "doc.badge.arrow.up")
+                    Label("Export WFDB annotations…", systemImage: ToolbarGlyph.exportWFDB)
                 }
-                .help("Write your confirmed findings as a WFDB annotation file (\(wfdbRecordBase).\(WFDBAnnotationWriter.defaultAnnotator)) beside the recording, to hand to a peer")
+                .help(exportWFDBHelp)
                 .disabled(amberFindingCount == 0)
                 .accessibilityIdentifier("export-wfdb")
             }
@@ -513,7 +548,7 @@ struct BedsideView: View {
                 Button {
                     showProducersPanel = true
                 } label: {
-                    Label("Producers", systemImage: "wand.and.stars")
+                    Label("Producers", systemImage: ToolbarGlyph.producers)
                 }
                 .help("Run a registered FindingProducer over this recording")
                 .accessibilityIdentifier("producers-toggle")
@@ -524,9 +559,9 @@ struct BedsideView: View {
                 Button {
                     showFindings.toggle()
                 } label: {
-                    Label("Findings", systemImage: "stethoscope.circle")
+                    Label("Findings", systemImage: ToolbarGlyph.findingsPanel)
                 }
-                .help("Show or hide the findings panel")
+                .help(Self.findingsHelp)
                 .accessibilityIdentifier("findings-toggle")
             }
         }
