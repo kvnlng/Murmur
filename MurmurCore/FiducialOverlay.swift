@@ -67,12 +67,19 @@ struct FiducialOverlay: View {
     /// callers/tests that haven't been tier-wired.
     var tier: WaveformZoomTier = .inspect
 
+    /// The single authority on what this overlay draws at this zoom (X61).
+    /// The Layers chip resolves the SAME policy so the control cannot claim
+    /// a layer is on while this body drops it.
+    private var policy: FiducialRenderPolicy {
+        FiducialRenderPolicy.resolve(tier: tier, detailLevel: detailLevel)
+    }
+
     var body: some View {
         // Fiducial per-beat marks live at Inspect only. Scan + Context
         // drop them per the ratified spec + Kevin's 2026-07-07 note
         // (per-beat blue markers should disappear alongside the
         // caliper marker).
-        if tier != .inspect {
+        if !policy.drawsMarks {
             EmptyView()
         } else if canvasSize.width > 0, sampleRate > 0, !beats.isEmpty {
             ZStack(alignment: .topLeading) {
@@ -95,8 +102,14 @@ struct FiducialOverlay: View {
         // beat identity and never get toggled off.
         rTick(atSample: beat.rPeakSampleIndex, focused: beat.rPeakSampleIndex == focusedRPeakSampleIndex)
 
+        // A layer draws only where the policy allows it AND the analyst has
+        // enabled it. Both conditions read from the same policy the Layers
+        // chip reports, so "enabled" on the chip and "drawn" here cannot
+        // disagree without a test noticing.
+        let drawable = policy.renderableLayers.intersection(enabledLayers)
+
         // QRS boundaries at .qrsOnly and higher, gated by layer toggle.
-        if detailLevel != .rTicksOnly, enabledLayers.contains(.qrs) {
+        if drawable.contains(.qrs) {
             if let q = beat.qrsOnset { boundaryTick(fiducial: q, colorStyle: .qrs) }
             if let s = beat.qrsOffset { boundaryTick(fiducial: s, colorStyle: .qrs) }
         }
@@ -105,11 +118,11 @@ struct FiducialOverlay: View {
         // layer toggle so an analyst on a QT study can hide P and
         // vice versa without changing the zoom.
         if detailLevel == .fullFiducials {
-            if enabledLayers.contains(.p) {
+            if drawable.contains(.p) {
                 if let p = beat.pOnset  { boundaryTick(fiducial: p, colorStyle: .p) }
                 if let p = beat.pOffset { boundaryTick(fiducial: p, colorStyle: .p) }
             }
-            if enabledLayers.contains(.t) {
+            if drawable.contains(.t) {
                 if let t = beat.tOnset  { boundaryTick(fiducial: t, colorStyle: .t) }
                 if let t = beat.tOffset { boundaryTick(fiducial: t, colorStyle: .t) }
                 // Tangent↔isoelectric bracket (project_qtc_trend_uncertainty_wireup_spec.md

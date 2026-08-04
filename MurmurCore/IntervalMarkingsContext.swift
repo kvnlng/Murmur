@@ -307,14 +307,24 @@ public enum MarkingsDetailLevel: Sendable, Equatable {
     /// High zoom: full P / QRS / T fiducials.
     case fullFiducials
 
+    /// Longest window that still shows full P / QRS / T fiducials. Named
+    /// rather than inlined because the Layers chip QUOTES it back to the
+    /// analyst ("P and T marks need a window under 3 s") — a literal in the
+    /// copy and a literal in the rule drift apart silently, which is the
+    /// class of defect X61 was filed for.
+    public static let fullFiducialsMaxSeconds: Double = 3
+
+    /// Longest window that still shows QRS boundary marks.
+    public static let qrsMaxSeconds: Double = 30
+
     /// Pick the appropriate detail level from a viewport duration.
     /// Boundaries picked to keep the canvas legible at each scale:
     ///  - < 3 s window: full fiducials (each beat is wide enough).
     ///  - 3–30 s: QRS boundaries.
     ///  - > 30 s: R-ticks only.
     public static func level(forViewportSeconds seconds: Double) -> MarkingsDetailLevel {
-        if seconds < 3 { return .fullFiducials }
-        if seconds < 30 { return .qrsOnly }
+        if seconds < fullFiducialsMaxSeconds { return .fullFiducials }
+        if seconds < qrsMaxSeconds { return .qrsOnly }
         return .rTicksOnly
     }
 }
@@ -365,6 +375,16 @@ public final class IntervalMarkingsContext {
             UserDefaults.standard.set(raw, forKey: Keys.enabledLayers)
         }
     }
+
+    /// What the fiducial overlay is ACTUALLY drawing right now, published
+    /// by the focused channel panel (the only place that knows the zoom
+    /// tier, which needs canvas geometry). The Layers chip reads it so the
+    /// control reports the renderer's behaviour instead of asserting a state
+    /// the canvas is not honouring — X61. Defaults to the fully-permissive
+    /// policy so a surface that never publishes reads as "nothing
+    /// suppressed" rather than inventing a suppression.
+    public private(set) var renderPolicy: FiducialRenderPolicy =
+        .resolve(tier: .inspect, detailLevel: .fullFiducials)
 
     /// Currently focused beat — the one the calipers panel is pinned
     /// on, or the one under the cursor when nothing is pinned. `nil`
@@ -420,6 +440,14 @@ public final class IntervalMarkingsContext {
         sampleRate = 0
         template = nil
         focusedBeatSampleIndex = nil
+    }
+
+    /// Publish what the overlay is drawing for the current viewport. Written
+    /// by the focused channel panel only — it is the surface that knows the
+    /// zoom tier, which needs canvas geometry the chip cannot see.
+    public func set(renderPolicy: FiducialRenderPolicy) {
+        guard renderPolicy != self.renderPolicy else { return }
+        self.renderPolicy = renderPolicy
     }
 
     // MARK: - Focus / caliper state
