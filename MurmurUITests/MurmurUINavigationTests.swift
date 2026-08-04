@@ -458,10 +458,24 @@ final class MurmurUINavigationTests: XCTestCase {
 
     /// Launches with an entitlement (the chip only exists once the paid
     /// delineator has produced beats) and returns the chip's spoken label.
-    /// Skips rather than fails when the chip never appears — a delineator
-    /// that finds no beats in the synthetic sample is a different problem
-    /// from the one under test, and a test that quietly passes in that case
-    /// would be worse than one that says why it stopped.
+    ///
+    /// Two preconditions are checked and SKIPPED rather than failed, because
+    /// neither is the behaviour under test and a silent pass would be worse
+    /// than a stop that says why:
+    ///
+    /// 1. The chip must exist at all — no beats means no delineation, a
+    ///    different problem.
+    /// 2. **The zoom tier must be `.inspect`.** The fiducial overlay is gated
+    ///    by tier BEFORE detail level, and tier is points-per-beat, which is
+    ///    a function of the panel's WIDTH. In a narrow window a 5 s trace is
+    ///    dense enough to leave Inspect, the overlay draws nothing at all, and
+    ///    the chip correctly reads `hidden` — with no `QRS` to assert on.
+    ///
+    /// The second guard exists because this test silently depended on window
+    /// width when it was written: it passed on a wide window and failed the
+    /// moment a saved window frame reset to `defaultSize`. The dependency was
+    /// real either way; it just wasn't visible. Asserting the precondition
+    /// makes the geometry part of the test rather than part of the machine.
     @MainActor
     private func layersChipLabel(initialDuration: Int) throws -> String {
         let app = XCUIApplication()
@@ -478,6 +492,16 @@ final class MurmurUINavigationTests: XCTestCase {
             .matching(identifier: "fiducial-layers-picker").firstMatch
         guard chip.waitForExistence(timeout: 15) else {
             throw XCTSkip("Layers chip absent — the delineator produced no beats for the sample fixture")
+        }
+
+        let tier = app.descendants(matching: .any)
+            .matching(identifier: "ui-test-waveform-tier").firstMatch
+        if tier.waitForExistence(timeout: 5), !tier.label.contains("tier=inspect") {
+            throw XCTSkip(
+                "Waveform tier is '\(tier.label)', not inspect — this window is too narrow for "
+                + "per-beat marks at \(initialDuration) s, so the chip reports 'hidden' and there "
+                + "is no per-layer readout to assert. Not a regression in the chip."
+            )
         }
         return chip.label
     }

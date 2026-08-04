@@ -13,6 +13,7 @@ import UniformTypeIdentifiers
 
 @main
 struct MurmurApp: App {
+
     /// User-facing Help menu destinations. The docs site is the public face
     /// of the app now that the source repo is private; every entry below
     /// links into it (or to a mailto for direct support).
@@ -25,6 +26,14 @@ struct MurmurApp: App {
     }
 
     init() {
+        // X60: open the toolbar on Icon and Text. Seeds the preference AppKit
+        // reads while BUILDING the toolbar — assigning `displayMode` to a live
+        // toolbar instead makes SwiftUI rebuild the items and drop their
+        // accessibility identifiers for that launch. Must run before any
+        // window exists, hence here. One-time; Customize Toolbar… wins from
+        // then on. See ToolbarDisplayModeDefault.
+        ToolbarDisplayModeDefault.seedIfNeeded()
+
         // Register the baseline producers that ship with the free viewer.
         // The MurmurCore bootstrap encapsulates the DEBUG vs RELEASE
         // policy — in DEBUG it registers the synthetic producer so the
@@ -66,6 +75,16 @@ struct MurmurApp: App {
         }
         .defaultSize(width: 1320, height: 880)
         .commands {
+            // X60: puts View → Customize Toolbar… (and Show/Hide Toolbar) in
+            // the menu bar. Without this the bedside toolbar is customisable
+            // but the analyst has no way to reach the customisation sheet
+            // short of right-clicking the toolbar, which is not discoverable.
+            //
+            // This is how an analyst turns on Icon and Text. It matters here
+            // because `.help()` renders no tooltip anywhere in this app on
+            // macOS 26, so labels are the only way an icon-only button can
+            // say what it does.
+            ToolbarCommands()
             // File menu — native .mur session Save/Open. SAVE is free (per the
             // save-vs-export model): it reads the current recording + its bundle
             // and writes a portable Murmur session package. OPEN routes the

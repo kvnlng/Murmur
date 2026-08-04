@@ -271,7 +271,7 @@ public struct ContentView: View {
                 onDropFolder: { openFolder($0) }
             )
             .navigationTitle("Murmur")
-            .toolbar { openFolderToolbarItem }
+            .toolbar(id: MurmurToolbar.identifier) { openFolderToolbarItem }
         }
     }
 
@@ -300,7 +300,7 @@ public struct ContentView: View {
         } detail: {
             detailPane
                 .navigationTitle(detailTitle)
-                .toolbar { openFolderToolbarItem }
+                .toolbar(id: MurmurToolbar.identifier) { openFolderToolbarItem }
         }
         .onChange(of: selection) { _, newValue in
             handleSelectionChanged(newValue, folder: folder)
@@ -311,17 +311,26 @@ public struct ContentView: View {
         NavigationStack {
             BedsideView(recording: recording, recordingDirectory: directory)
                 .navigationTitle(recording.device)
-                .toolbar { openFolderToolbarItem }
+                .toolbar(id: MurmurToolbar.identifier) { openFolderToolbarItem }
         }
     }
 
-    private var openFolderToolbarItem: some ToolbarContent {
-        ToolbarItem {
+    private static let openFolderHelp =
+        "Open a folder of WFDB records (.hea / .dat)"
+
+    private var openFolderToolbarItem: some CustomizableToolbarContent {
+        ToolbarItem(id: "toolbar-open-button", placement: .automatic, showsByDefault: true) {
             Button {
                 isImporterPresented = true
             } label: {
-                Label("Open Record Folder", systemImage: "doc.badge.plus")
+                Label("Open Record Folder", systemImage: ToolbarGlyph.openRecordFolder)
             }
+            // X60: this button had NO hover text at all — not the `.help()`
+            // rendering bug, simply never written. It also carried
+            // `doc.badge.plus`, pixel-identical to the bedside "Attach
+            // findings…" button two positions away, which is why two
+            // unrelated actions were indistinguishable.
+            .help(Self.openFolderHelp)
             .accessibilityIdentifier("toolbar-open-button")
         }
     }
