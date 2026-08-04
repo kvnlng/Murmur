@@ -118,13 +118,7 @@ final class MurmurUITests: XCTestCase {
         // synthetic fixture's VF finding (mid-record) and assert the
         // hidden viewport-state label changes within the 250 ms
         // animation window.
-        let app = XCUIApplication()
-        app.launchArguments += [
-            "--ui-test-sample",
-            "--ui-test-initial-duration=2",
-            "--ui-test-expand-all-findings-groups"
-        ]
-        app.launch()
+        let app = launchWithExpandedFindingsGroups(["--ui-test-sample", "--ui-test-initial-duration=2"])
 
         let viewportState = app.descendants(matching: .any)
             .matching(identifier: "ui-test-viewport-state").firstMatch
@@ -257,9 +251,7 @@ final class MurmurUITests: XCTestCase {
         // Retired the old `summary-chip-*` chip row 2026-07-05; the
         // rail's picker does the same job in a location that's always
         // visible (dodges the CI-window-height flake).
-        let app = XCUIApplication()
-        app.launchArguments += ["--ui-test-sample", "--ui-test-expand-all-findings-groups"]
-        app.launch()
+        let app = launchWithExpandedFindingsGroups(["--ui-test-sample"])
 
         let vfRow = app.buttons.matching(identifier: "finding-row-VF").firstMatch
         XCTAssertTrue(vfRow.waitForExistence(timeout: 5))
@@ -314,12 +306,7 @@ final class MurmurUITests: XCTestCase {
         // disposition trio. Default state is read-only — the
         // confirm/dismiss buttons should not appear in the tree. Flip
         // edit-mode on; they should appear.
-        let app = XCUIApplication()
-        app.launchArguments += [
-            "--ui-test-sample",
-            "--ui-test-expand-all-findings-groups"
-        ]
-        app.launch()
+        let app = launchWithExpandedFindingsGroups(["--ui-test-sample"])
 
         let vfRow = app.buttons.matching(identifier: "finding-row-VF").firstMatch
         XCTAssertTrue(vfRow.waitForExistence(timeout: 5))
@@ -350,12 +337,7 @@ final class MurmurUITests: XCTestCase {
         // disposition-conditional render. Pre-condition: edit-mode on,
         // no dispositions yet → no reset button. Click dismiss → reset
         // button for that finding appears.
-        let app = XCUIApplication()
-        app.launchArguments += [
-            "--ui-test-sample",
-            "--ui-test-expand-all-findings-groups"
-        ]
-        app.launch()
+        let app = launchWithExpandedFindingsGroups(["--ui-test-sample"])
 
         let editToggle = app.descendants(matching: .any)
             .matching(identifier: "edit-mode-toggle").firstMatch
@@ -390,12 +372,7 @@ final class MurmurUITests: XCTestCase {
         // Guards: dispositionStore.reset path + the reset button's
         // conditional render disappearing again. Sets up state by
         // dismissing first, then resets.
-        let app = XCUIApplication()
-        app.launchArguments += [
-            "--ui-test-sample",
-            "--ui-test-expand-all-findings-groups"
-        ]
-        app.launch()
+        let app = launchWithExpandedFindingsGroups(["--ui-test-sample"])
 
         let editToggle = app.descendants(matching: .any)
             .matching(identifier: "edit-mode-toggle").firstMatch
@@ -440,12 +417,7 @@ final class MurmurUITests: XCTestCase {
         // confirm action (Confirm as VT / Confirm as VF / Confirm (unsure)).
         // SwiftUI Menu on macOS opens a popup; selecting an item fires
         // the underlying onConfirm closure.
-        let app = XCUIApplication()
-        app.launchArguments += [
-            "--ui-test-sample",
-            "--ui-test-expand-all-findings-groups"
-        ]
-        app.launch()
+        let app = launchWithExpandedFindingsGroups(["--ui-test-sample"])
 
         let editToggle = app.descendants(matching: .any)
             .matching(identifier: "edit-mode-toggle").firstMatch
@@ -521,12 +493,7 @@ final class MurmurUITests: XCTestCase {
         // Guards: toolbar button wiring, inspector show/hide, panel
         // render path. A regression here would silently strand findings
         // behind a panel the analyst can't reopen.
-        let app = XCUIApplication()
-        app.launchArguments += [
-            "--ui-test-sample",
-            "--ui-test-expand-all-findings-groups"
-        ]
-        app.launch()
+        let app = launchWithExpandedFindingsGroups(["--ui-test-sample"])
 
         let toggle = app.buttons.matching(identifier: "findings-toggle").firstMatch
         XCTAssertTrue(toggle.waitForExistence(timeout: 5))
@@ -599,13 +566,7 @@ final class MurmurUIBypassTests: XCTestCase {
         // sidecar JSON with one distinctive category ("ATTACH") and routes
         // it through the bedside view's attach path on appear. A new
         // finding-row-ATTACH must appear.
-        let app = XCUIApplication()
-        app.launchArguments += [
-            "--ui-test-sample",
-            "--ui-test-attach-findings",
-            "--ui-test-expand-all-findings-groups"
-        ]
-        app.launch()
+        let app = launchWithExpandedFindingsGroups(["--ui-test-sample", "--ui-test-attach-findings"])
 
         let attachRow = app.buttons.matching(identifier: "finding-row-ATTACH").firstMatch
         XCTAssertTrue(attachRow.waitForExistence(timeout: 10),
@@ -616,6 +577,10 @@ final class MurmurUIBypassTests: XCTestCase {
 
     @MainActor
     func testReviewQueueGroupsCollapseByDefault() throws {
+        // DO NOT convert this to `launchWithExpandedFindingsGroups`. The
+        // collapsed default is the thing under test — asking for expansion
+        // and then asserting collapse would be asserting a state we had to
+        // request, which is a different (and empty) claim.
         // Guards: the review-queue rewrite's default collapsed state.
         // Groups (finding-group-<category>) should be visible on
         // launch, but their child exemplar rows (finding-row-<cat>)
@@ -639,6 +604,9 @@ final class MurmurUIBypassTests: XCTestCase {
 
     @MainActor
     func testReviewQueueGroupExpandRevealsExemplars() throws {
+        // DO NOT convert this to `launchWithExpandedFindingsGroups` either —
+        // the analyst's own expand/collapse click is what is being exercised,
+        // so it has to start from the collapsed default.
         // Guards: click a group → its child exemplar rows appear;
         // click again → they disappear. Load-bearing for the
         // deviation-ranked queue's semantics.

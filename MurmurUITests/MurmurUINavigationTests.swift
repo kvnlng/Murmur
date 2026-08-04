@@ -368,12 +368,7 @@ final class MurmurUINavigationTests: XCTestCase {
         // ("Selected" / "Close") on every finding row. Assert the explicit
         // labels are present, and that the findings confidence picker carries
         // its sibling-style identifier rather than the chevron symbol name.
-        let app = XCUIApplication()
-        app.launchArguments += [
-            "--ui-test-sample",
-            "--ui-test-expand-all-findings-groups"
-        ]
-        app.launch()
+        let app = launchWithExpandedFindingsGroups(["--ui-test-sample"])
 
         let editToggle = app.descendants(matching: .any)
             .matching(identifier: "edit-mode-toggle").firstMatch
