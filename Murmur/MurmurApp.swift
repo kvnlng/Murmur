@@ -35,7 +35,6 @@ struct MurmurApp: App {
         }
     }
 
-    @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
         WindowGroup {
@@ -59,6 +58,11 @@ struct MurmurApp: App {
                 // entitlement gate, presents the scan dialog, and publishes
                 // committed candidates to VTVFScanContext for the review queue.
                 .background(VTVFScanOrchestrator())
+                // Whole-record variability summary (HRV + QTVI), published to
+                // VariabilityMetricsContext for the inline strip beneath the
+                // variability lane. Formerly the content of a detached
+                // "ECG Metrics" window; see VariabilityMetricsStrip.
+                .background(VariabilityMetricsOrchestrator())
         }
         .defaultSize(width: 1320, height: 880)
         .commands {
@@ -105,15 +109,10 @@ struct MurmurApp: App {
             // menu commands so they dispatch through the responder chain
             // (fixing the intermittent J/K defect) and become discoverable.
             BedsideCommandMenu()
-            // Window menu additions — separate from Help. `openWindow`
-            // is only available inside a view scope, so we expose the
-            // metrics scene ID and call it from a Button action closure.
-            CommandGroup(after: .windowArrangement) {
-                Button("Variability Metrics") {
-                    openWindow(id: "ecg-metrics")
-                }
-                .keyboardShortcut("m", modifiers: [.command, .shift])
-            }
+            // (Removed 2026-08-04) The Window → "Variability Metrics" item and
+            // its ⌘⇧M window. The summary now renders inline in the record's
+            // own column beneath the variability lane, so there is no second
+            // window to open — and nothing left for a Window-menu entry to do.
             // Replace the system Help menu (which would otherwise point at a
             // non-existent Help Book) with links into the public docs site
             // and a mailto for direct support.
@@ -143,25 +142,15 @@ struct MurmurApp: App {
         Settings {
             SettingsView()
         }
-        // Auxiliary single-instance window for the paid variability
-        // surface — heart-rate variability plus the QT Variability Index.
-        // Opened from Window → "Variability Metrics" or ⌘⇧M. We suppress
-        // the auto-generated Window-menu entry (which would duplicate our
-        // explicit CommandGroup Button above) via `.commandsRemoved()`;
-        // the explicit entry owns the shortcut.
+        // (Removed 2026-08-04) The auxiliary "Variability Metrics" window.
         //
-        // Titled after its CONTENTS, not after a product. It used to be
-        // called "ECG Metrics" — a per-module IAP retired by the single-IAP
-        // pivot (2026-08-01) — so the menu named something that could not be
-        // bought and did not describe what the window showed.
-        //
-        // The scene `id` stays "ecg-metrics" deliberately: it is not
-        // user-visible, and changing it would discard saved window frames.
-        Window("Variability Metrics", id: "ecg-metrics") {
-            ECGMetricsSurface()
-        }
-        .defaultSize(width: 380, height: 320)
-        .commandsRemoved()
+        // It occluded the trace it described, carried no record identity —
+        // switching recordings recomputed it silently under an unchanged
+        // title — and held the same quantity as the variability LANE that
+        // already lived in the record column. The summary moved inline
+        // (`VariabilityMetricsStrip`); the buy surface it also hosted
+        // consolidates into Settings → Purchases, which is where macOS
+        // users look for it and the only surface that now needs to be right.
     }
 
     // MARK: - Native .mur session Save / Open

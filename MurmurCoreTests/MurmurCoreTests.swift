@@ -665,6 +665,41 @@ struct PurchaseStoreTests {
         #expect(PurchaseStore.fallbackDisplayName(for: .studio) == "Murmur Studio")
     }
 
+    /// The strip renders `summary` when present and the unlock seam when
+    /// `isLocked`. Those states must be mutually exclusive: a summary left
+    /// standing after entitlement loss would show a departed user real
+    /// measurements, and a seam alongside live numbers would tell an entitled
+    /// analyst to go buy what they are already looking at.
+    @Test("Variability metrics context: summary and locked are mutually exclusive")
+    @MainActor
+    func variabilityMetricsContextStates() {
+        let context = VariabilityMetricsContext()
+        #expect(context.summary == nil)
+        #expect(!context.isLocked)
+
+        let fixture = VariabilityMetricsSummary(
+            sections: [.init(id: "s", title: "t", rows: [.init(id: "r", label: "SDNN", value: "118.2", unit: "ms")])],
+            provenance: "16786 · 101604 beats · 23.3 h",
+            exportText: "ECG Metrics"
+        )
+        context.set(summary: fixture)
+        #expect(context.summary == fixture)
+        #expect(!context.isLocked, "a populated summary must never also be locked")
+
+        // Entitlement lost mid-session: the numbers must go, not linger.
+        context.setLocked()
+        #expect(context.summary == nil, "locking must drop any summary already published")
+        #expect(context.isLocked)
+
+        // Entitlement regained.
+        context.set(summary: fixture)
+        #expect(!context.isLocked, "publishing a summary must clear the locked seam")
+
+        context.clear()
+        #expect(context.summary == nil)
+        #expect(!context.isLocked)
+    }
+
     @Test("Row state distinguishes the two non-resolving conditions (X55 §3)")
     func rowStateNonResolving() {
         // Transient failure → retry.

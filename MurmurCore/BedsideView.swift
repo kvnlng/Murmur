@@ -1234,6 +1234,7 @@ struct BedsideView: View {
                         )
                     }
                     variabilityLaneStrip
+                    VariabilityMetricsStrip()
                     intervalTrendLaneStrip
                     trendStrip
                     alarmStrip
@@ -1259,6 +1260,7 @@ struct BedsideView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     summaryHeader
                     variabilityLaneStrip
+                    VariabilityMetricsStrip()
                     intervalTrendLaneStrip
                     trendStrip
                     alarmStrip
