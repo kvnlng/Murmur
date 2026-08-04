@@ -13,6 +13,7 @@ import UniformTypeIdentifiers
 
 @main
 struct MurmurApp: App {
+
     /// User-facing Help menu destinations. The docs site is the public face
     /// of the app now that the source repo is private; every entry below
     /// links into it (or to a mailto for direct support).
@@ -25,6 +26,14 @@ struct MurmurApp: App {
     }
 
     init() {
+        // X60: open the toolbar on Icon and Text. Seeds the preference AppKit
+        // reads while BUILDING the toolbar — assigning `displayMode` to a live
+        // toolbar instead makes SwiftUI rebuild the items and drop their
+        // accessibility identifiers for that launch. Must run before any
+        // window exists, hence here. One-time; Customize Toolbar… wins from
+        // then on. See ToolbarDisplayModeDefault.
+        ToolbarDisplayModeDefault.seedIfNeeded()
+
         // Register the baseline producers that ship with the free viewer.
         // The MurmurCore bootstrap encapsulates the DEBUG vs RELEASE
         // policy — in DEBUG it registers the synthetic producer so the
