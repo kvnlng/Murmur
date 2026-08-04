@@ -896,6 +896,64 @@ extension SnapshotTests {
         assertSnapshot(of: render(view, size: CGSize(width: 552, height: 160)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 
+    // MARK: - X61: does a layer toggle change what is DRAWN?
+    //
+    // The layer tests in MurmurTests cover persistence; the policy tests
+    // cover the rule. These two cover the wiring between them — that
+    // `FiducialOverlay` actually consults the policy — by rendering the same
+    // beat twice and comparing the images to each other. No recorded
+    // baseline, so they can't drift with font metrics; they assert a
+    // relationship between two renders on whatever machine runs them.
+
+    private func fiducialBeat() -> MarkingsBeat {
+        MarkingsBeat(rPeakSampleIndex: 500, rPeakConfidence: 1.0,
+            pOnset: MarkingsFiducial(kind: .pOnset, sampleIndex: 380, confidence: 0.85),
+            pOffset: MarkingsFiducial(kind: .pOffset, sampleIndex: 430, confidence: 0.85),
+            qrsOnset: MarkingsFiducial(kind: .qrsOnset, sampleIndex: 470, confidence: 0.95),
+            qrsOffset: MarkingsFiducial(kind: .qrsOffset, sampleIndex: 540, confidence: 0.90),
+            tOnset: MarkingsFiducial(kind: .tOnset, sampleIndex: 620, confidence: 0.75),
+            tOffset: MarkingsFiducial(kind: .tOffset, sampleIndex: 700, confidence: 0.70))
+    }
+
+    private func fiducialPNG(
+        detailLevel: MarkingsDetailLevel,
+        layers: Set<MarkingsFiducialLayer>
+    ) -> Data? {
+        let view = FiducialOverlay(beats: [fiducialBeat()], viewportSampleRange: 300..<900,
+            sampleRate: 250, detailLevel: detailLevel, focusedRPeakSampleIndex: 500,
+            enabledLayers: layers, canvasSize: CGSize(width: 520, height: 120))
+            .frame(width: 520, height: 120).background(Color.white)
+        return render(view, size: CGSize(width: 520, height: 120)).tiffRepresentation
+    }
+
+    /// Below the full-fiducial threshold the T toggle MUST change the canvas.
+    /// This is the assertion whose absence let X61 ship: every existing test
+    /// passed whether or not the overlay honoured `enabledLayers`.
+    func testFiducialLayers_toggleActsBelowFullFiducialThreshold() {
+        let seconds = MarkingsDetailLevel.fullFiducialsMaxSeconds - 0.5
+        let level = MarkingsDetailLevel.level(forViewportSeconds: seconds)
+        XCTAssertEqual(level, .fullFiducials)
+        XCTAssertNotEqual(
+            fiducialPNG(detailLevel: level, layers: [.p, .qrs, .t]),
+            fiducialPNG(detailLevel: level, layers: [.p, .qrs]),
+            "Turning T off must change what is drawn at full-fiducial zoom"
+        )
+    }
+
+    /// At the ~4.5 s window Standard View opens on, the T toggle is inert —
+    /// the LOD gate drops T regardless. That is the RATIFIED behaviour
+    /// (project_waveform_zoom_lod_spec.md), not a bug, so it is pinned here;
+    /// X61's fix was to make the chip SAY so, not to loosen the gate.
+    func testFiducialLayers_toggleIsInertAtStandardViewOpenWindow() {
+        let level = MarkingsDetailLevel.level(forViewportSeconds: 4.5)
+        XCTAssertEqual(level, .qrsOnly)
+        XCTAssertEqual(
+            fiducialPNG(detailLevel: level, layers: [.p, .qrs, .t]),
+            fiducialPNG(detailLevel: level, layers: [.qrs]),
+            "P and T are dropped at this zoom, so toggling them must be a no-op"
+        )
+    }
+
     /// Same annotation set as `_lowZoomClusterBadge`, but at the Scan
     /// tier the rail collapses chips into short colored ticks and drops
     /// normal ("N") beats entirely. Locks in the

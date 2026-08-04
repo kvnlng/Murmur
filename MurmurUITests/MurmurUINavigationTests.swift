@@ -419,4 +419,66 @@ final class MurmurUINavigationTests: XCTestCase {
         XCTAssertTrue(position.label.hasPrefix("Viewing "),
                       "Viewport position should speak a clock-time window, got '\(position.label)'")
     }
+
+    // MARK: - X61: the Layers chip reports the zoom's render policy
+
+    /// The chip's readout is computed by `FiducialRenderPolicy` and unit-
+    /// tested there. What no unit test can reach is the PUBLISH — whether the
+    /// focused channel panel actually pushes its resolved policy into
+    /// `IntervalMarkingsContext` for the chip to read. That is the wire-up
+    /// `feedback_verify_wire_up_with_xcui.md` exists to catch, so it is
+    /// asserted here rather than assumed.
+    ///
+    /// At a 2 s window every layer renders, so the chip must NOT claim
+    /// anything is hidden. If the publish never fires the context keeps its
+    /// permissive default and this still passes — which is why the 5 s case
+    /// below is the load-bearing half.
+    @MainActor
+    func testLayersChipReportsNoSuppressionAtFullFiducialZoom() throws {
+        let label = try layersChipLabel(initialDuration: 2)
+        XCTAssertFalse(label.contains("hidden"),
+                       "At a 2 s window every layer renders; chip should not report anything hidden. Got '\(label)'")
+    }
+
+    /// At a 5 s window the detail level is `.qrsOnly`, so P and T are dropped
+    /// by the LOD gate. The chip must say so. Before X61 this read
+    /// `Layers · all` — the control asserting a state the canvas was not
+    /// honouring, which is why it read as doing nothing.
+    ///
+    /// This is the assertion that fails if the publish regresses: the
+    /// permissive default would report "all" again.
+    @MainActor
+    func testLayersChipReportsSuppressionAtStandardViewZoom() throws {
+        let label = try layersChipLabel(initialDuration: 5)
+        XCTAssertTrue(label.contains("hidden"),
+                      "At a 5 s window P and T are dropped by the LOD gate; chip must report it. Got '\(label)'")
+        XCTAssertTrue(label.contains("QRS"),
+                      "QRS still renders at this zoom and should be named. Got '\(label)'")
+    }
+
+    /// Launches with an entitlement (the chip only exists once the paid
+    /// delineator has produced beats) and returns the chip's spoken label.
+    /// Skips rather than fails when the chip never appears — a delineator
+    /// that finds no beats in the synthetic sample is a different problem
+    /// from the one under test, and a test that quietly passes in that case
+    /// would be worse than one that says why it stopped.
+    @MainActor
+    private func layersChipLabel(initialDuration: Int) throws -> String {
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "--ui-test-sample",
+            "--ui-test-initial-duration=\(initialDuration)",
+            // Grants Studio and skips the entitlement walk — the existing
+            // hook for "this XCUI run owns the paid module".
+            "--ui-test-inject-qtc-lane=1"
+        ]
+        app.launch()
+
+        let chip = app.descendants(matching: .any)
+            .matching(identifier: "fiducial-layers-picker").firstMatch
+        guard chip.waitForExistence(timeout: 15) else {
+            throw XCTSkip("Layers chip absent — the delineator produced no beats for the sample fixture")
+        }
+        return chip.label
+    }
 }

@@ -1503,26 +1503,47 @@ struct BedsideView: View {
 
     /// Menu chip that toggles P / QRS / T fiducial overlays. R marks
     /// are non-toggleable (they anchor every beat's identity).
+    ///
+    /// X61: the chip reports the CURRENT ZOOM'S render policy, not just the
+    /// analyst's toggles. The overlay is gated twice — by the semantic zoom
+    /// tier and by the viewport-keyed detail level — and until this landed
+    /// the chip read `Layers · all` at the 4.5 s window Standard View opens
+    /// on, while the renderer was dropping P and T. A control that claims a
+    /// state the canvas is not honouring reads, correctly, as a control that
+    /// does nothing. Both this and `FiducialOverlay` resolve the SAME
+    /// `FiducialRenderPolicy`; the gates are unchanged, only their visibility.
     private var fiducialLayersChip: some View {
-        Menu {
+        let policy = markingsContext.renderPolicy
+        let suppressed = policy.suppressedLayers(enabled: markingsContext.enabledLayers)
+        return Menu {
             ForEach(MarkingsFiducialLayer.allCases, id: \.self) { layer in
+                let enabled = markingsContext.enabledLayers.contains(layer)
+                let renders = policy.drawsMarks && policy.renderableLayers.contains(layer)
                 Button {
                     toggleFiducialLayer(layer)
                 } label: {
                     Label(
-                        layer.displayName,
-                        systemImage: markingsContext.enabledLayers.contains(layer) ? "checkmark" : ""
+                        renders || !enabled
+                            ? layer.displayName
+                            : "\(layer.displayName) — hidden at this zoom",
+                        systemImage: enabled ? "checkmark" : ""
                     )
                 }
+                // Enabled-but-not-rendering stays TOGGLEABLE: the analyst's
+                // intent is still recorded and takes effect on zoom in. Only
+                // the label says the canvas isn't showing it right now.
+            }
+            if let explanation = policy.explanation(enabled: markingsContext.enabledLayers) {
+                Section { Text(explanation) }
             }
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "square.stack.3d.up.badge.a")
                     .font(.caption2)
-                Text("Layers · \(enabledLayersSummary)")
+                Text("Layers · \(layersSummary)")
                     .font(.caption2)
             }
-            .foregroundStyle(.secondary)
+            .foregroundStyle(suppressed.isEmpty ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
             .background(Capsule().fill(Color.secondary.opacity(0.10)))
@@ -1530,19 +1551,25 @@ struct BedsideView: View {
         }
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Show or hide P / QRS / T fiducial overlays")
+        .help(chipHelp)
         .accessibilityIdentifier("fiducial-layers-picker")
+        // The summary is what X61 is about, so expose it to XCUI as the
+        // element's own label rather than leaving it inside the capsule's
+        // nested Text (which `.firstMatch` binds to arbitrarily — X51 §4).
+        .accessibilityLabel("Layers \(layersSummary)")
     }
 
-    private var enabledLayersSummary: String {
-        // Preserve canonical P·QRS·T order for the readout so a
-        // conduction-study analyst can visually confirm the set at a
-        // glance (e.g. "P·QRS" means T is hidden).
-        let ordered: [MarkingsFiducialLayer] = [.p, .qrs, .t]
-        let active = ordered.filter { markingsContext.enabledLayers.contains($0) }
-        if active.isEmpty { return "R only" }
-        if active.count == ordered.count { return "all" }
-        return active.map(\.displayName).joined(separator: "·")
+    /// The chip's readout — computed by `FiducialRenderPolicy` so the copy is
+    /// unit-tested rather than trapped in a private view property.
+    private var layersSummary: String {
+        markingsContext.renderPolicy.summary(enabled: markingsContext.enabledLayers)
+    }
+
+    private var chipHelp: String {
+        let base = "Show or hide P / QRS / T fiducial overlays"
+        guard let explanation = markingsContext.renderPolicy
+            .explanation(enabled: markingsContext.enabledLayers) else { return base }
+        return "\(base). \(explanation)"
     }
 
     private func toggleFiducialLayer(_ layer: MarkingsFiducialLayer) {
@@ -2434,6 +2461,22 @@ private struct ChannelPanel: View {
                 if resolvedTier != waveformZoomTier {
                     waveformZoomTier = resolvedTier
                 }
+            }
+            // X61: publish what the fiducial overlay is actually drawing, so
+            // the Layers chip (a level up, with no access to canvas geometry
+            // and therefore no way to know the tier) can report it instead of
+            // claiming every enabled layer is on screen. Only the focus-sized
+            // panel writes — same rule as the calibration geometry below, and
+            // the chip only exists in focus mode.
+            .task(id: FiducialRenderPolicy.resolve(
+                tier: resolvedTier,
+                detailLevel: MarkingsDetailLevel.level(forViewportSeconds: viewport.durationSeconds)
+            )) {
+                guard sizing == .focus else { return }
+                markingsContext.set(renderPolicy: FiducialRenderPolicy.resolve(
+                    tier: resolvedTier,
+                    detailLevel: MarkingsDetailLevel.level(forViewportSeconds: viewport.durationSeconds)
+                ))
             }
             .contentShape(Rectangle())
             .gesture(panGesture(in: liveSize))

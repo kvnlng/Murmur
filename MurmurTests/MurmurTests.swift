@@ -5762,6 +5762,117 @@ struct FiducialLayerToggleTests {
     }
 }
 
+/// X61. The toggle tests above cover PERSISTENCE and nothing else — they
+/// pass identically whether the overlay honours the enabled set or ignores
+/// it, which is exactly how a chip reading `Layers · all` while the renderer
+/// dropped P and T survived unnoticed. These pin the rule the renderer and
+/// the chip now share.
+@Suite("Fiducial render policy (X61)")
+struct FiducialRenderPolicyTests {
+
+    private func policy(
+        _ tier: WaveformZoomTier,
+        _ level: MarkingsDetailLevel
+    ) -> FiducialRenderPolicy {
+        FiducialRenderPolicy.resolve(tier: tier, detailLevel: level)
+    }
+
+    @Test("Above Inspect nothing is drawn, whatever the detail level says")
+    func tierDominates() {
+        for level: MarkingsDetailLevel in [.fullFiducials, .qrsOnly, .rTicksOnly] {
+            for tier: WaveformZoomTier in [.scan, .context] {
+                let p = policy(tier, level)
+                #expect(!p.drawsMarks)
+                #expect(p.renderableLayers.isEmpty)
+                #expect(p.suppression == .tooManyBeatsOnScreen)
+            }
+        }
+    }
+
+    @Test("Detail level selects which layers the renderer will honour")
+    func layersPerDetailLevel() {
+        #expect(policy(.inspect, .fullFiducials).renderableLayers == [.p, .qrs, .t])
+        #expect(policy(.inspect, .qrsOnly).renderableLayers == [.qrs])
+        #expect(policy(.inspect, .rTicksOnly).renderableLayers == [])
+        // R ticks still draw at rTicksOnly — the layer set is empty but the
+        // overlay is not off.
+        #expect(policy(.inspect, .rTicksOnly).drawsMarks)
+    }
+
+    /// THE BUG, as a test. Standard View (X50) opens a raw record at roughly
+    /// a 4.5 s window. That lands in `.qrsOnly`, so on a freshly opened
+    /// record two of the chip's three toggles cannot act — and the chip used
+    /// to report `all` anyway.
+    @Test("At the window Standard View opens on, P and T are suppressed")
+    func standardViewOpenWindowSuppressesPAndT() {
+        let level = MarkingsDetailLevel.level(forViewportSeconds: 4.5)
+        #expect(level == .qrsOnly)
+        let p = policy(.inspect, level)
+        #expect(p.suppressedLayers(enabled: [.p, .qrs, .t]) == [.p, .t])
+        #expect(p.explanation(enabled: [.p, .qrs, .t]) != nil)
+    }
+
+    @Test("Nothing enabled-and-dropped means no explanation to give")
+    func silentWhenControlAndCanvasAgree() {
+        // Everything renders.
+        #expect(policy(.inspect, .fullFiducials).explanation(enabled: [.p, .qrs, .t]) == nil)
+        // QRS-only window, but the analyst only asked for QRS — nothing is
+        // being held back, so the chip must not manufacture a warning.
+        #expect(policy(.inspect, .qrsOnly).explanation(enabled: [.qrs]) == nil)
+        #expect(policy(.inspect, .qrsOnly).suppressedLayers(enabled: [.qrs]).isEmpty)
+    }
+
+    @Test("With marks off entirely, every enabled layer counts as suppressed")
+    func allSuppressedAboveInspect() {
+        let p = policy(.scan, .fullFiducials)
+        #expect(p.suppressedLayers(enabled: [.p, .qrs, .t]) == [.p, .qrs, .t])
+    }
+
+    /// The copy quotes the thresholds, so the copy and the rule must move
+    /// together. A literal in one and a constant in the other is the drift
+    /// this whole issue was about.
+    @Test("Explanations quote the detail-level thresholds, not literals")
+    func explanationQuotesThresholds() throws {
+        let qrsWindow = try #require(policy(.inspect, .qrsOnly).explanation(enabled: [.p, .t]))
+        #expect(qrsWindow.contains("\(Int(MarkingsDetailLevel.fullFiducialsMaxSeconds)) s"))
+        let rOnly = try #require(policy(.inspect, .rTicksOnly).explanation(enabled: [.qrs]))
+        #expect(rOnly.contains("\(Int(MarkingsDetailLevel.qrsMaxSeconds)) s"))
+    }
+
+    /// The readout is the whole point of X61 — the old chip said `all` while
+    /// P and T were being dropped. These pin every state it can report.
+    @Test("The readout names what is showing and what the zoom holds back")
+    func summaryReportsSuppression() {
+        // Everything the analyst asked for is on screen.
+        #expect(policy(.inspect, .fullFiducials).summary(enabled: [.p, .qrs, .t]) == "all")
+        // The Standard View open window: QRS shows, P and T are held back.
+        // This string is what used to read "all".
+        #expect(policy(.inspect, .qrsOnly).summary(enabled: [.p, .qrs, .t]) == "QRS · P·T hidden")
+        // Analyst asked only for QRS at the same zoom — nothing held back.
+        #expect(policy(.inspect, .qrsOnly).summary(enabled: [.qrs]) == "QRS")
+        // R ticks only: no layer marks, but the overlay is still drawing.
+        #expect(policy(.inspect, .rTicksOnly).summary(enabled: [.qrs]) == "R only · QRS hidden")
+        // Above Inspect the overlay is off entirely — not "R only".
+        #expect(policy(.scan, .fullFiducials).summary(enabled: [.p, .qrs, .t]) == "hidden")
+    }
+
+    @Test("Readout keeps canonical P·QRS·T order regardless of set ordering")
+    func summaryOrdering() {
+        #expect(policy(.inspect, .fullFiducials).summary(enabled: [.t, .p]) == "P·T")
+        #expect(policy(.inspect, .qrsOnly).summary(enabled: [.t, .p]) == "R only · P·T hidden")
+    }
+
+    @Test("Detail-level boundaries sit exactly on the named constants")
+    func boundariesMatchConstants() {
+        let full = MarkingsDetailLevel.fullFiducialsMaxSeconds
+        let qrs = MarkingsDetailLevel.qrsMaxSeconds
+        #expect(MarkingsDetailLevel.level(forViewportSeconds: full - 0.01) == .fullFiducials)
+        #expect(MarkingsDetailLevel.level(forViewportSeconds: full) == .qrsOnly)
+        #expect(MarkingsDetailLevel.level(forViewportSeconds: qrs - 0.01) == .qrsOnly)
+        #expect(MarkingsDetailLevel.level(forViewportSeconds: qrs) == .rTicksOnly)
+    }
+}
+
 // MARK: - Tier 1 analytic tests — HRV / rolling metrics
 //
 // Tier 1 of the ECG testing strategy (project_ecg_testing_strategy.md):
