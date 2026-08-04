@@ -162,6 +162,10 @@ public struct IntervalTrendBin: Sendable, Equatable, Identifiable {
     /// qualifying-window compute; the free viewer leaves it nil. A statement
     /// about the rate-correction INPUT, never a validity verdict.
     public let rateMaxDeviationBpm: Double?
+    /// Max deviation of a SUB-WINDOW MEAN rate from the preceding window's
+    /// overall mean — the quantity `rateStable` is actually decided on, and so
+    /// the figure the X43 marker quotes. `nil` when not computed.
+    public let rateDriftBpm: Double?
     /// Whether the preceding-window rate held within `rateStabilityToleranceBpm`.
     /// Defaults true (no marker) for bins that were never evaluated.
     public let rateStable: Bool
@@ -195,6 +199,15 @@ public struct IntervalTrendBin: Sendable, Equatable, Identifiable {
         rateMaxDeviationBpm != nil && !rateStable
     }
 
+    /// The figure the X43 marker quotes: mean-rate DRIFT, which is what
+    /// `rateStable` is decided on. Falls back to the instantaneous deviation
+    /// only for bins computed before drift existed — quoting a number that had
+    /// nothing to do with the verdict is how the marker read "Δ17 bpm" on
+    /// perfectly ordinary sinus rhythm.
+    public var rateUnstableMarkerBpm: Double? {
+        rateDriftBpm ?? rateMaxDeviationBpm
+    }
+
     public init(
         startSeconds: Double,
         endSeconds: Double,
@@ -209,6 +222,7 @@ public struct IntervalTrendBin: Sendable, Equatable, Identifiable {
         perBeatValues: [Double],
         rrCVPercent: Double? = nil,
         rateMaxDeviationBpm: Double? = nil,
+        rateDriftBpm: Double? = nil,
         rateStable: Bool = true,
         rateStabilityToleranceBpm: Double = 2,
         excludedBeatFraction: Double? = nil,
@@ -227,6 +241,7 @@ public struct IntervalTrendBin: Sendable, Equatable, Identifiable {
         self.perBeatValues = perBeatValues
         self.rrCVPercent = rrCVPercent
         self.rateMaxDeviationBpm = rateMaxDeviationBpm
+        self.rateDriftBpm = rateDriftBpm
         self.rateStable = rateStable
         self.rateStabilityToleranceBpm = rateStabilityToleranceBpm
         self.excludedBeatFraction = excludedBeatFraction
@@ -433,6 +448,7 @@ public enum IntervalTrendComputer {
                         perBeatValues: eligible ? values : [],
                         rrCVPercent: coefficientOfVariationPercent(rrValues),
                         rateMaxDeviationBpm: q?.rateMaxDeviationBpm,
+                        rateDriftBpm: q?.rateDriftBpm,
                         rateStable: q?.rateStable ?? true,
                         excludedBeatFraction: q?.excludedBeatFraction,
                         qtImplausibleFraction: qtImplausibleFraction

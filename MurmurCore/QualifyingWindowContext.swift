@@ -20,18 +20,26 @@ public struct IntervalBinQualifier: Sendable, Equatable {
     /// Bin start (seconds from recording start) — the join key to a trend bin.
     public let startSeconds: Double
     public let rateStable: Bool
+    /// Max deviation of INSTANTANEOUS rate from the preceding window's mean.
+    /// Reported, but no longer what `rateStable` rests on — see `rateDriftBpm`.
     public let rateMaxDeviationBpm: Double?
+    /// Max deviation of a SUB-WINDOW MEAN rate from the preceding window's
+    /// overall mean. This is the quantity `rateStable` is decided on, so it is
+    /// the one the X43 marker must quote.
+    public let rateDriftBpm: Double?
     public let excludedBeatFraction: Double?
 
     public init(
         startSeconds: Double,
         rateStable: Bool,
         rateMaxDeviationBpm: Double?,
+        rateDriftBpm: Double? = nil,
         excludedBeatFraction: Double?
     ) {
         self.startSeconds = startSeconds
         self.rateStable = rateStable
         self.rateMaxDeviationBpm = rateMaxDeviationBpm
+        self.rateDriftBpm = rateDriftBpm
         self.excludedBeatFraction = excludedBeatFraction
     }
 }

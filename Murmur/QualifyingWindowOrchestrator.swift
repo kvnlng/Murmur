@@ -95,6 +95,7 @@ struct QualifyingWindowOrchestrator: View {
                     startSeconds: binStart,
                     rateStable: q.rateStable,
                     rateMaxDeviationBpm: q.rateMaxDeviationBpm,
+                    rateDriftBpm: q.rateDriftBpm,
                     excludedBeatFraction: q.excludedBeatFraction
                 ))
                 binStart += binSeconds
