@@ -311,8 +311,8 @@ struct BedsideView: View {
     }
 
     @ToolbarContentBuilder
-    private var windowLockToolbarItem: some ToolbarContent {
-        ToolbarItem {
+    private var windowLockToolbarItem: some CustomizableToolbarContent {
+        ToolbarItem(id: "window-lock-toggle", placement: .automatic, showsByDefault: true) {
             Button {
                 toggleWindowLock()
             } label: {
@@ -325,9 +325,9 @@ struct BedsideView: View {
     }
 
     @ToolbarContentBuilder
-    private var scanToolbarItem: some ToolbarContent {
+    private var scanToolbarItem: some CustomizableToolbarContent {
         if scanContext.isScanAvailable {
-            ToolbarItem {
+            ToolbarItem(id: "vtvf-scan-action", placement: .automatic, showsByDefault: true) {
                 Button {
                     scanContext.requestScanDialog(
                         viewStartSample: viewport.startSample,
@@ -497,8 +497,23 @@ struct BedsideView: View {
         .inspector(isPresented: $showFindings) {
             findingsInspector
         }
-        .toolbar {
-            ToolbarItem {
+        // X60: an ID'd toolbar is a CUSTOMISABLE one — macOS then offers
+        // View → Customize Toolbar…, where the analyst can switch the display
+        // mode to Icon and Text and drop the buttons they don't use.
+        //
+        // That matters more here than it normally would: `.help()` renders no
+        // tooltip anywhere in this app on macOS 26 (see X60), so an icon-only
+        // button has no way at all to say what it is. Customisation gives the
+        // analyst a route to visible labels that does not depend on a broken
+        // API. Default stays icon-only — ten labelled items would not fit a
+        // typical window, and curating the set is the analyst's call.
+        //
+        // The ids are the accessibility identifiers, deliberately: one name
+        // per button, already stable, and already what the XCUI suite binds
+        // to. They are persisted in the customisation, so DO NOT rename one
+        // without accepting that an analyst's saved layout loses that item.
+        .toolbar(id: MurmurToolbar.identifier) {
+            ToolbarItem(id: "edit-mode-toggle", placement: .automatic, showsByDefault: true) {
                 Button {
                     isEditing.toggle()
                 } label: {
@@ -511,7 +526,7 @@ struct BedsideView: View {
                 .tint(isEditing ? Color.accentColor : nil)
                 .accessibilityIdentifier("edit-mode-toggle")
             }
-            ToolbarItem {
+            ToolbarItem(id: "attach-findings", placement: .automatic, showsByDefault: true) {
                 Button {
                     showAttachFindings = true
                 } label: {
@@ -521,21 +536,21 @@ struct BedsideView: View {
                 .accessibilityIdentifier("attach-findings")
             }
             scanToolbarItem
-            ToolbarItem {
+            ToolbarItem(id: "export-report", placement: .automatic, showsByDefault: true) {
                 Button { exportMarkdownReport() } label: {
                     Label("Export report…", systemImage: ToolbarGlyph.exportReport)
                 }
                 .help(Self.exportReportHelp)
                 .accessibilityIdentifier("export-report")
             }
-            ToolbarItem {
+            ToolbarItem(id: "export-snapshot", placement: .automatic, showsByDefault: true) {
                 Button { exportSnapshotPNG() } label: {
                     Label("Export snapshot…", systemImage: ToolbarGlyph.exportSnapshot)
                 }
                 .help(Self.exportSnapshotHelp)
                 .accessibilityIdentifier("export-snapshot")
             }
-            ToolbarItem {
+            ToolbarItem(id: "export-wfdb", placement: .automatic, showsByDefault: true) {
                 Button { exportWFDBAnnotations() } label: {
                     Label("Export WFDB annotations…", systemImage: ToolbarGlyph.exportWFDB)
                 }
@@ -544,7 +559,7 @@ struct BedsideView: View {
                 .accessibilityIdentifier("export-wfdb")
             }
             #if DEBUG
-            ToolbarItem {
+            ToolbarItem(id: "producers-toggle", placement: .automatic, showsByDefault: true) {
                 Button {
                     showProducersPanel = true
                 } label: {
@@ -555,7 +570,7 @@ struct BedsideView: View {
             }
             #endif
             windowLockToolbarItem
-            ToolbarItem {
+            ToolbarItem(id: "findings-toggle", placement: .automatic, showsByDefault: true) {
                 Button {
                     showFindings.toggle()
                 } label: {

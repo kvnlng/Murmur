@@ -271,7 +271,7 @@ public struct ContentView: View {
                 onDropFolder: { openFolder($0) }
             )
             .navigationTitle("Murmur")
-            .toolbar { openFolderToolbarItem }
+            .toolbar(id: MurmurToolbar.identifier) { openFolderToolbarItem }
         }
     }
 
@@ -300,7 +300,7 @@ public struct ContentView: View {
         } detail: {
             detailPane
                 .navigationTitle(detailTitle)
-                .toolbar { openFolderToolbarItem }
+                .toolbar(id: MurmurToolbar.identifier) { openFolderToolbarItem }
         }
         .onChange(of: selection) { _, newValue in
             handleSelectionChanged(newValue, folder: folder)
@@ -311,15 +311,15 @@ public struct ContentView: View {
         NavigationStack {
             BedsideView(recording: recording, recordingDirectory: directory)
                 .navigationTitle(recording.device)
-                .toolbar { openFolderToolbarItem }
+                .toolbar(id: MurmurToolbar.identifier) { openFolderToolbarItem }
         }
     }
 
     private static let openFolderHelp =
         "Open a folder of WFDB records (.hea / .dat)"
 
-    private var openFolderToolbarItem: some ToolbarContent {
-        ToolbarItem {
+    private var openFolderToolbarItem: some CustomizableToolbarContent {
+        ToolbarItem(id: "toolbar-open-button", placement: .automatic, showsByDefault: true) {
             Button {
                 isImporterPresented = true
             } label: {

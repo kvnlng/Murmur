@@ -66,6 +66,16 @@ struct MurmurApp: App {
         }
         .defaultSize(width: 1320, height: 880)
         .commands {
+            // X60: puts View → Customize Toolbar… (and Show/Hide Toolbar) in
+            // the menu bar. Without this the bedside toolbar is customisable
+            // but the analyst has no way to reach the customisation sheet
+            // short of right-clicking the toolbar, which is not discoverable.
+            //
+            // This is how an analyst turns on Icon and Text. It matters here
+            // because `.help()` renders no tooltip anywhere in this app on
+            // macOS 26, so labels are the only way an icon-only button can
+            // say what it does.
+            ToolbarCommands()
             // File menu — native .mur session Save/Open. SAVE is free (per the
             // save-vs-export model): it reads the current recording + its bundle
             // and writes a portable Murmur session package. OPEN routes the
