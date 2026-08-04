@@ -1654,6 +1654,34 @@ struct RateStabilityMarkerTests {
         #expect(!bin(stable: false, deviation: nil).showsRateUnstableMarker)
     }
 
+    /// The marker must quote the quantity the verdict rests on. It used to
+    /// print `rateMaxDeviationBpm` — max INSTANTANEOUS deviation — which runs
+    /// ~17 bpm on ordinary sinus rhythm and had nothing to do with why the bin
+    /// was marked. Since v0.20.0 stability is decided on mean-rate drift, so
+    /// that is what the analyst must be shown.
+    @Test("The unstable marker quotes drift, not instantaneous deviation")
+    func markerQuotesDrift() {
+        let withDrift = IntervalTrendBin(
+            startSeconds: 0, endSeconds: 120, median: 440, q1: 435, q3: 445,
+            bandLowerMs: 438, bandUpperMs: 442, hasCensoredBeats: false,
+            isEligible: true, beatCount: 60, perBeatValues: [440],
+            rateMaxDeviationBpm: 17.4, rateDriftBpm: 4.2, rateStable: false
+        )
+        #expect(withDrift.showsRateUnstableMarker)
+        #expect(withDrift.rateUnstableMarkerBpm == 4.2,
+                "the marker must not quote the instantaneous figure")
+
+        // Bins computed before drift existed still say something rather than
+        // nothing — the fallback is the old figure, not a blank.
+        let legacy = IntervalTrendBin(
+            startSeconds: 0, endSeconds: 120, median: 440, q1: 435, q3: 445,
+            bandLowerMs: 438, bandUpperMs: 442, hasCensoredBeats: false,
+            isEligible: true, beatCount: 60, perBeatValues: [440],
+            rateMaxDeviationBpm: 17.4, rateStable: false
+        )
+        #expect(legacy.rateUnstableMarkerBpm == 17.4)
+    }
+
     @Test("Defaults leave a bin unmarked (free viewer computes no rate stability)")
     func defaultsUnmarked() {
         let plain = IntervalTrendBin(

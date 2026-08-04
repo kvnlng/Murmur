@@ -518,8 +518,12 @@ struct IntervalTrendLane: View {
         // X43: flag that the preceding-2-min rate wasn't stable — the rate
         // correction's own input assumption. A property of the input, not a
         // verdict on the QTc.
-        if metric == .qtc, bin.showsRateUnstableMarker, let dev = bin.rateMaxDeviationBpm {
-            text += String(format: " · rate unstable (Δ%.0f bpm / 2 min)", dev)
+        // Quotes the DRIFT, which is the quantity the verdict rests on. It used
+        // to quote the max instantaneous deviation — a figure that ran ~17 bpm
+        // on ordinary sinus rhythm and had nothing to do with why the bin was
+        // marked.
+        if metric == .qtc, bin.showsRateUnstableMarker, let drift = bin.rateUnstableMarkerBpm {
+            text += String(format: " · rate unstable (drift %.1f bpm / 2 min)", drift)
         }
         // X45: the working metric in practice is the CHANGE, not the absolute —
         // the numeric departure from the patient's own normal, alongside the

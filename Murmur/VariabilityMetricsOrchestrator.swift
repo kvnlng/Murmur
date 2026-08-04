@@ -225,18 +225,18 @@ struct VariabilityMetricsOrchestrator: View {
     /// disturbance". Reported as the median across qualifying segments; nil
     /// when none qualify.
     ///
-    /// NOTE: on a 24 h normal-sinus Holter this currently qualifies zero
-    /// segments, because `rateStableWithin` applies the ±2 bpm tolerance to
-    /// every beat's INSTANTANEOUS rate rather than to the segment mean, and
-    /// respiratory sinus arrhythmia alone exceeds that within a few beats.
-    /// Carried over unchanged here so this move is a pure relocation; whether
-    /// the gate is too strict is a separate question with its own measurement.
+    /// Stability comes from `QualifyingWindowComputer.isRateStable`, the same
+    /// definition the trend lane's X43 marker uses. This path used to carry its
+    /// own private copy that compared every beat's INSTANTANEOUS rate against
+    /// the ±2 bpm tolerance; respiratory sinus arrhythmia alone exceeds that
+    /// within a few beats, so it qualified 0 of 4,620 segments across the whole
+    /// normal-sinus database. Two copies of one rule is how they diverged —
+    /// there is now one.
     private func qtviSummary() -> QTVISummary? {
         let beats = markingsContext.beats
         let sampleRate = markingsContext.sampleRate
         guard sampleRate > 0, beats.count > 1 else { return nil }
         let segmentSeconds = QTVarianceComputer.minSegmentSeconds
-        let tolerance = QualifyingWindowComputer.defaultStabilityToleranceBpm
 
         var buckets: [Int: (qt: [Double], rr: [Double])] = [:]
         for beat in beats {
@@ -250,7 +250,7 @@ struct VariabilityMetricsOrchestrator: View {
         var indices: [QTVariabilityIndex] = []
         for (_, seg) in buckets {
             guard RRArtifactFilter.excludedFraction(for: seg.rr) == 0,
-                  Self.rateStableWithin(rrMs: seg.rr, toleranceBpm: tolerance),
+                  QualifyingWindowComputer.isRateStable(rrMs: seg.rr),
                   let idx = QTVarianceComputer.compute(
                       qtMs: seg.qt, rrMs: seg.rr, segmentSeconds: segmentSeconds
                   ) else { continue }
@@ -264,17 +264,6 @@ struct VariabilityMetricsOrchestrator: View {
             medianMeanNNMs: Self.median(indices.map(\.meanNNMs)),
             segmentCount: indices.count
         )
-    }
-
-    /// Max deviation of instantaneous HR from its mean over `rrMs`, within
-    /// `toleranceBpm` — the within-segment analogue of the qualifying-window
-    /// rate-stability check, applied to the segment's own beats.
-    private static func rateStableWithin(rrMs: [Double], toleranceBpm: Double) -> Bool {
-        let hr = rrMs.compactMap { $0 > 0 ? 60_000 / $0 : nil }
-        guard !hr.isEmpty else { return false }
-        let mean = hr.reduce(0, +) / Double(hr.count)
-        let maxDev = hr.map { abs($0 - mean) }.max() ?? 0
-        return maxDev <= toleranceBpm
     }
 
     private static func median(_ values: [Double]) -> Double {
