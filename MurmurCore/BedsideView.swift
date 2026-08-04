@@ -1233,17 +1233,31 @@ struct BedsideView: View {
                             sizing: .strip
                         )
                     }
-                    variabilityLaneStrip
-                    VariabilityMetricsStrip()
-                    intervalTrendLaneStrip
-                    trendStrip
-                    alarmStrip
-                    stateStrip
-                    qualityStrip
+                    contextLanes
                 }
                 .padding(16)
             }
         }
+    }
+
+    /// The scrolling context beneath the trace — the same lanes, in the same
+    /// order, in BOTH layouts. Focus mode and strips mode have drifted apart
+    /// before (X62 was filed because the order had to be corrected in two
+    /// places); sharing one property makes divergence impossible rather than
+    /// merely detectable.
+    ///
+    /// X62: the whole-record summary reads BEFORE the rolling lane — the
+    /// record's numbers, then how they move over time. That is the order an
+    /// analyst reads in.
+    @ViewBuilder
+    private var contextLanes: some View {
+        VariabilityMetricsStrip()
+        variabilityLaneStrip
+        intervalTrendLaneStrip
+        trendStrip
+        alarmStrip
+        stateStrip
+        qualityStrip
     }
 
     /// Persistent-stage focus-mode layout — the ECG trace + docked
@@ -1259,13 +1273,7 @@ struct BedsideView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     summaryHeader
-                    variabilityLaneStrip
-                    VariabilityMetricsStrip()
-                    intervalTrendLaneStrip
-                    trendStrip
-                    alarmStrip
-                    stateStrip
-                    qualityStrip
+                    contextLanes
                 }
                 .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
