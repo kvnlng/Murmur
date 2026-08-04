@@ -25,6 +25,40 @@ final class MurmurUIVTVFTests: XCTestCase {
         continueAfterFailure = false
     }
 
+    /// Click an element once it is actually clickable.
+    ///
+    /// X65: `waitForExistence` is not `waitForHittable`. An element enters the
+    /// accessibility tree as soon as SwiftUI renders it, but is not a valid
+    /// click target until layout settles — so `waitForExistence` can succeed
+    /// and the very next `.click()` still fail with "Not hittable". Both
+    /// disposition tests raced exactly there: they toggle edit mode, which
+    /// makes the per-row confirm/dismiss controls appear, then immediately
+    /// click one.
+    ///
+    /// This was intermittent, which is what made it hard to read — the first
+    /// diagnosis (a missing `--ui-test-expand-all-findings-groups`) was wrong,
+    /// and "confirmed" only because one run happened to pass with the flag
+    /// added. Two `print` statements passed just as convincingly. Anything
+    /// that shifts timing appears to fix a race; only removing the race does.
+    @MainActor
+    private func clickWhenHittable(
+        _ element: XCUIElement,
+        timeout: TimeInterval = 5,
+        _ what: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertTrue(element.waitForExistence(timeout: timeout),
+                      "\(what) should exist", file: file, line: line)
+        let hittable = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "isHittable == true"),
+            object: element
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [hittable], timeout: timeout), .completed,
+                       "\(what) exists but never became clickable", file: file, line: line)
+        element.click()
+    }
+
     private func launchWithCandidates() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments += ["--ui-test-sample", "--ui-test-vtvf-candidates"]
@@ -146,18 +180,20 @@ final class MurmurUIVTVFTests: XCTestCase {
                       "Top candidate row should exist")
 
         // Disposition controls are gated on the editing latch.
-        let editToggle = app.descendants(matching: .any)
-            .matching(identifier: "edit-mode-toggle").firstMatch
-        XCTAssertTrue(editToggle.waitForExistence(timeout: 3))
-        editToggle.click()
+        clickWhenHittable(
+            app.descendants(matching: .any).matching(identifier: "edit-mode-toggle").firstMatch,
+            "Edit-mode toggle"
+        )
 
-        let confirm = app.descendants(matching: .any)
-            .matching(identifier: "vtvf-candidate-confirm-0").firstMatch
-        XCTAssertTrue(confirm.waitForExistence(timeout: 3))
-        confirm.click()
+        // The confirm control only renders once editing is on, so it appears
+        // mid-relayout — wait for it to be clickable, not merely present.
+        clickWhenHittable(
+            app.descendants(matching: .any).matching(identifier: "vtvf-candidate-confirm-0").firstMatch,
+            "Candidate confirm control"
+        )
 
         let menuItem = app.menuItems["Confirm as VT"]
-        XCTAssertTrue(menuItem.waitForExistence(timeout: 3),
+        XCTAssertTrue(menuItem.waitForExistence(timeout: 5),
                       "Candidate confirm menu should expose VT/VF/unsure")
         menuItem.click()
 
@@ -175,15 +211,15 @@ final class MurmurUIVTVFTests: XCTestCase {
     func testDismissCandidateUpdatesState() throws {
         let app = launchWithCandidates()
 
-        let editToggle = app.descendants(matching: .any)
-            .matching(identifier: "edit-mode-toggle").firstMatch
-        XCTAssertTrue(editToggle.waitForExistence(timeout: 5))
-        editToggle.click()
+        clickWhenHittable(
+            app.descendants(matching: .any).matching(identifier: "edit-mode-toggle").firstMatch,
+            "Edit-mode toggle"
+        )
 
-        let dismiss = app.descendants(matching: .any)
-            .matching(identifier: "vtvf-candidate-dismiss-1").firstMatch
-        XCTAssertTrue(dismiss.waitForExistence(timeout: 3))
-        dismiss.click()
+        clickWhenHittable(
+            app.descendants(matching: .any).matching(identifier: "vtvf-candidate-dismiss-1").firstMatch,
+            "Candidate dismiss control"
+        )
 
         let state1 = app.descendants(matching: .any)
             .matching(identifier: "vtvf-candidate-state-1").firstMatch
