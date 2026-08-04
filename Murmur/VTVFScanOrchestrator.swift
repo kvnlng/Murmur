@@ -47,14 +47,42 @@ struct VTVFScanOrchestrator: View {
             )) {
                 await refreshAvailability()
             }
-            // A new recording invalidates the previous recording's
-            // candidates (the shared context tracks one active recording).
+            // A new recording invalidates the previous recording's candidates
+            // (the shared context tracks one active recording) — but the new
+            // recording may have a committed scan of its own on disk, so this
+            // is a SWAP, not a clear. Doing both here, in one place and
+            // synchronously, is deliberate: if the restore lived in BedsideView
+            // instead, this clear could land after it and wipe the restore.
             .onChange(of: recordingContext.recording?.id) { _, _ in
-                scanContext.clearCandidates()
+                loadCandidatesForCurrentRecording()
             }
+            // The first recording of the session sets the id from nil, which
+            // does fire `onChange` — but a recording already open when this
+            // orchestrator mounts would not, so cover that too.
+            .onAppear { loadCandidatesForCurrentRecording() }
             .sheet(isPresented: $scanContext.showScanDialog) {
                 sheetContent
             }
+    }
+
+    /// Replace the live candidate set with whatever the current recording has
+    /// committed on disk — nothing, when it has never been scanned.
+    @MainActor
+    private func loadCandidatesForCurrentRecording() {
+        guard let directory = recordingContext.directory,
+              let saved = VTVFCandidateStore(bundleDirectory: directory).load() else {
+            scanContext.clearCandidates()
+            return
+        }
+        scanContext.setCandidates(
+            saved.candidates,
+            parametersCaption: saved.parametersCaption,
+            provenance: VTVFScanContext.ModelProvenance(
+                modelIdentifier: saved.modelIdentifier,
+                modelVersion: saved.modelVersion,
+                tau: saved.tau
+            )
+        )
     }
 
     @MainActor
@@ -105,6 +133,16 @@ struct VTVFScanOrchestrator: View {
                             modelIdentifier: model.modelID,
                             tau: model.thresholdTau
                         )
+                    )
+                    // Persist alongside the dispositions that will adjudicate
+                    // it, with the operating point that produced it — a later
+                    // model or τ must not silently redefine what was reviewed.
+                    VTVFCandidateStore(bundleDirectory: directory).save(
+                        candidates: annotations,
+                        parametersCaption: caption,
+                        modelIdentifier: model.modelID,
+                        modelVersion: nil,
+                        tau: model.thresholdTau
                     )
                     scanContext.showScanDialog = false
                 },
