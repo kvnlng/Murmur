@@ -574,6 +574,30 @@ final class MurmurUIBypassTests: XCTestCase {
                       "openFolder(_:) → scanFolder → import → bedside should complete end-to-end")
     }
 
+    /// X63-B: the flag an analyst uses to pick records for Save Session lives
+    /// on the sidebar row, so the sidebar has to be reachable for the feature
+    /// to exist at all. Nothing asserted the record list before this — the
+    /// folder-open test above only checks that the bedside arrives.
+    ///
+    /// The flag appears once a record is IMPORTED (an unimported record has no
+    /// `Recording` to save), so this waits on the row first and the flag after.
+    @MainActor
+    func testOpenFolderShowsFlaggableRecordRows() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-open-folder"]
+        app.launch()
+
+        let row = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "record-row-")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 15),
+                      "A folder open should list its records in the sidebar")
+
+        let flag = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "record-flag-")).firstMatch
+        XCTAssertTrue(flag.waitForExistence(timeout: 15),
+                      "An imported record should expose the Save Session flag (X63-B)")
+    }
+
     // MARK: - Tier 8: attach findings bypass
 
     @MainActor
