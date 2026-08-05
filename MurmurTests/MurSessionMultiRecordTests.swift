@@ -59,8 +59,8 @@ struct MurSessionMultiRecordTests {
             },
             to: pkg
         )
-        #expect(manifest.records.count == 3)
-        #expect(manifest.records.map(\.recordingID) == bundles.map(\.recording.id),
+        #expect(manifest.records?.count == 3)
+        #expect(manifest.records?.map(\.recordingID) == bundles.map(\.recording.id),
                 "manifest.records IS the analyst's order")
 
         let out = try tempDir("open")

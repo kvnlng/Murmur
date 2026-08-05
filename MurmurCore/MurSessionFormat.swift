@@ -69,13 +69,40 @@ public struct MurSessionManifest: Codable, Equatable, Sendable {
     /// because two authorities on order is how they drift apart.
     ///
     /// Each entry's `recordingID` is the name of its subtree under `records/`.
-    public let records: [SourceIdentity]
+    ///
+    /// X63-D: **absent on an encrypted package.** `sourceFileName` identifies a
+    /// recording, and a record count is itself information, so neither may sit
+    /// on the outside of a sealed file. The identities live inside the
+    /// ciphertext; a reader learns them only after the passphrase opens it.
+    public let records: [SourceIdentity]?
+
+    /// Present when this package is encrypted; nil when it is plaintext.
+    /// Carries the parameters needed to re-derive the key — never the key.
+    public let encryption: EncryptionParameters?
+
+    /// How the payload was sealed. Recorded per package so raising the
+    /// iteration count later cannot strand files written before the change.
+    public struct EncryptionParameters: Codable, Equatable, Sendable {
+        public let kdf: String
+        public let iterations: Int
+        public let salt: Data
+        public let cipher: String
+
+        public init(kdf: String, iterations: Int, salt: Data, cipher: String) {
+            self.kdf = kdf
+            self.iterations = iterations
+            self.salt = salt
+            self.cipher = cipher
+        }
+    }
 
     /// How each record's `source/` subtree is stored — `none` for raw copies,
     /// `lzfse` after X14-B. Read uses this to decide whether to inflate.
     public let sourceStorage: SourceStorage
     /// Top-level parts present in this package (`records`, `session.json`).
-    public let contents: [String]
+    /// X63-D: absent on an encrypted package — a contents list describes the
+    /// shape of what was sealed.
+    public let contents: [String]?
 
     public enum SourceStorage: String, Codable, Sendable {
         case none        // raw files copied verbatim
@@ -272,6 +299,11 @@ public enum MurSessionError: LocalizedError, Equatable {
     case noRecords
     /// Two records with the same `recordingID` would collide in `records/`.
     case duplicateRecordingID(UUID)
+    /// The package is encrypted and no passphrase was supplied.
+    case passphraseRequired
+    /// The supplied passphrase did not open the package. Deliberately NOT
+    /// reported as damage — see MurSessionCrypto.open.
+    case wrongPassphrase
 
     public var errorDescription: String? {
         switch self {
@@ -285,6 +317,10 @@ public enum MurSessionError: LocalizedError, Equatable {
             return "A Murmur session must contain at least one recording."
         case .duplicateRecordingID(let id):
             return "This session lists the same recording twice (\(id))."
+        case .passphraseRequired:
+            return "This session is encrypted. Enter its passphrase to open it."
+        case .wrongPassphrase:
+            return "That passphrase didn't open this session."
         }
     }
 }
