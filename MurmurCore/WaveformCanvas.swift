@@ -70,6 +70,13 @@ final class WheelMTKView: MTKView {
     private var flushScheduled = false
 
     override func scrollWheel(with event: NSEvent) {
+        // An overlaid lead's canvas has no scroll handler — it sits on top of
+        // the primary's, so swallowing the event here would silently kill
+        // wheel pan/zoom the moment a second lead was added.
+        guard onScroll != nil else {
+            super.scrollWheel(with: event)
+            return
+        }
         let precise = event.hasPreciseScrollingDeltas
         let mods = event.modifierFlags
         let zoomMode = (mods.contains(.command) || mods.contains(.option))
@@ -155,6 +162,21 @@ struct WaveformCanvas: NSViewRepresentable {
     /// here. Nil disables wheel handling.
     var onScroll: ((WheelScroll) -> Void)? = nil
 
+    /// Trace ink. Nil keeps `WaveformStyle.trace` — pure black — which is what
+    /// the primary lead and every single-lead stage uses. Overlaid leads pass
+    /// a muted ink from `LeadPalette` (X64-B).
+    var traceColor: SIMD4<Float>? = nil
+
+    /// Whether this canvas paints the ECG paper and grid. False for the
+    /// overlaid leads stacked above the primary, which clear to transparent
+    /// and contribute only their trace.
+    var drawsPaper: Bool = true
+
+    /// Whether this canvas draws its channel's trace. False for the
+    /// paper-and-grid layer beneath a lead overlay, whose trace is drawn by a
+    /// separate canvas on top of the overlaid leads.
+    var drawsTrace: Bool = true
+
     func makeCoordinator() -> Coordinator {
         Coordinator()
     }
@@ -164,6 +186,14 @@ struct WaveformCanvas: NSViewRepresentable {
         view.onScroll = onScroll
         view.colorPixelFormat = .bgra8Unorm
         view.framebufferOnly  = true
+        if !drawsPaper {
+            // An overlaid lead's canvas is a sheet of glass with one line on
+            // it. The layer has to be non-opaque as well as cleared to alpha 0
+            // — a transparent clear into an opaque layer still composites as
+            // black and would black out every lead beneath.
+            view.layer?.isOpaque = false
+            view.layer?.backgroundColor = nil
+        }
         // On-demand rendering: each SwiftUI updateNSView synchronously
         // drives one draw via `nsView.draw()`. That avoids the judder
         // pattern that pure continuous (120 Hz) render produces when
@@ -220,6 +250,9 @@ struct WaveformCanvas: NSViewRepresentable {
         os_signpost(.begin, log: waveformRenderLog, name: "Sync", signpostID: signpostID)
         defer { os_signpost(.end, log: waveformRenderLog, name: "Sync", signpostID: signpostID) }
         guard let renderer = coordinator.renderer else { return }
+        renderer.drawsPaper = drawsPaper
+        renderer.drawsTrace = drawsTrace
+        renderer.style.trace = traceColor ?? WaveformStyle().trace
         renderer.uniforms.startSample = Float(startSample)
         renderer.uniforms.endSample   = Float(endSample)
         renderer.uniforms.yMin        = Float(displayMin)
@@ -236,14 +269,21 @@ struct WaveformCanvas: NSViewRepresentable {
         // points-per-millivolt), independent of the LOD tier (X37). Uses the
         // view's point size, not the drawable pixel size, so the ramp reads in
         // the same units the mockup traced against.
-        let durationSeconds = sampleCount / channel.sampleRate
-        let ladder = GridLadder.compute(
-            windowSeconds: durationSeconds,
-            windowMillivolts: displayMax - displayMin,
-            plotWidthPoints: Double(view.bounds.width),
-            plotHeightPoints: Double(view.bounds.height)
-        )
-        renderer.setGridLadder(ladder)
+        //
+        // Computed and drawn only by the canvas that owns the paper. The
+        // ladder is a property of the viewport, not of the lead, so every
+        // stacked canvas would produce the identical ladder — drawing it N
+        // times would just thicken the ruler by overdraw.
+        if drawsPaper {
+            let durationSeconds = sampleCount / channel.sampleRate
+            let ladder = GridLadder.compute(
+                windowSeconds: durationSeconds,
+                windowMillivolts: displayMax - displayMin,
+                plotWidthPoints: Double(view.bounds.width),
+                plotHeightPoints: Double(view.bounds.height)
+            )
+            renderer.setGridLadder(ladder)
+        }
 
         // Annotations — caller has already pre-filtered to the viewport.
         renderer.setAnnotations(annotations)

@@ -107,6 +107,20 @@
 //        third mode. Only affects the initial expandedGroups set; the
 //        analyst's toggle behaviour is unchanged.
 //
+//    --ui-test-overlay-leads=<name>,<name>,…
+//        Opens the focus stage with these leads overlaid, first one
+//        primary (X64). Exists because the gesture that builds an
+//        overlay is a ⌘-CLICK, and XCUI on macOS has no modifier-click:
+//        without this the entire overlay render path — stacked canvases,
+//        edge labels, legend, chip swatches — would be reachable only by
+//        hand. Names are matched against the record's ECG channels;
+//        unknown names are dropped, and an empty result leaves the
+//        default single-lead focus alone.
+//
+//        It seeds the SAME `LeadSelection` the chip bar builds, so what
+//        the test exercises is the rendering, not a parallel code path.
+//        The ⌘-click itself is not covered here.
+//
 
 #if DEBUG
 import Foundation
@@ -132,6 +146,15 @@ enum UITestSupport {
         guard let raw = value(forFlag: "ui-test-initial-duration"),
               let n = Double(raw), n > 0 else { return nil }
         return n
+    }
+
+    /// Lead names from `--ui-test-overlay-leads=I,V1`, in order, first
+    /// primary. Empty when the flag is absent.
+    static var overlayLeadNames: [String] {
+        guard let raw = value(forFlag: "ui-test-overlay-leads") else { return [] }
+        return raw.split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
     }
 
     /// True when the process was launched with ANY `--ui-test-*` argument —

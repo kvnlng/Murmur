@@ -127,6 +127,26 @@ final class WaveformRenderer: NSObject, MTKViewDelegate {
     /// calibrated grid rather than switching at a tier boundary.
     var ladderPaperColor: SIMD4<Float> = WaveformStyle().paper
 
+    /// Whether this canvas paints the ECG paper and the grid ladder (X64-B).
+    ///
+    /// The lead overlay stacks one canvas per lead. Exactly ONE of them draws
+    /// the paper — the primary, at the back. The rest clear to transparent and
+    /// contribute only their trace, because N canvases each painting
+    /// `WaveformStyle.paper` would wash out every trace beneath them, and N
+    /// grid ladders drawn on top of each other would thicken the ruler by
+    /// overdraw. The ruler is one ruler; there is one of it.
+    var drawsPaper = true
+
+    /// Whether this canvas draws its channel's trace at all (X64-B).
+    ///
+    /// False for the paper-and-grid layer underneath a lead overlay. The
+    /// primary's trace is drawn by a separate canvas placed ON TOP of the
+    /// overlaid leads, because the primary is the lead the marks, the
+    /// inspector and the calibration readout all belong to — a secondary
+    /// painting over it (which is exactly what happens where two leads share
+    /// an isoelectric baseline) would leave the reference trace invisible.
+    var drawsTrace = true
+
     /// One bucket per category, rebuilt when the visible-annotation set or its
     /// category breakdown changes. Each bucket renders with its own color.
     struct AnnotationBucket {
@@ -445,13 +465,17 @@ final class WaveformRenderer: NSObject, MTKViewDelegate {
         // Paper colour is driven by the grid ladder's `redPresence`, not the
         // LOD tier (X37): pink ECG surface while the calibrated grid is
         // legible, crossfading to a plain neutral surface as red leaves.
+        // An overlaid lead's canvas clears to fully transparent so the paper,
+        // grid and traces of the canvases beneath it show through untouched.
         let paper = ladderPaperColor
-        descriptor.colorAttachments[0].clearColor = MTLClearColor(
-            red:   Double(paper.x),
-            green: Double(paper.y),
-            blue:  Double(paper.z),
-            alpha: 1.0
-        )
+        descriptor.colorAttachments[0].clearColor = drawsPaper
+            ? MTLClearColor(
+                red:   Double(paper.x),
+                green: Double(paper.y),
+                blue:  Double(paper.z),
+                alpha: 1.0
+            )
+            : MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
         descriptor.colorAttachments[0].loadAction = .clear
         // When the MTKView is configured for MSAA, `currentRenderPassDescriptor`
         // comes back with a `resolveTexture` pointing at the drawable and a
@@ -518,7 +542,7 @@ final class WaveformRenderer: NSObject, MTKViewDelegate {
         // (so it's under the new one) — visually the analyst sees the
         // old shape soften out while the new shape strengthens in.
         let progress = lodTransitionProgress
-        if progress < 1, let prev = previousLOD {
+        if drawsTrace, progress < 1, let prev = previousLOD {
             let fadeOut = 1 - progress
             if prev.useEnvelope, let prevPyramid = prev.pyramidBuffer, prev.pyramidBinCount > 0 {
                 drawEnvelope(
@@ -540,7 +564,9 @@ final class WaveformRenderer: NSObject, MTKViewDelegate {
             }
         }
 
-        if useEnvelope, let pyramid = pyramidBuffer, pyramidBinCount > 0 {
+        if !drawsTrace {
+            // Paper-and-grid layer under a lead overlay: no trace of its own.
+        } else if useEnvelope, let pyramid = pyramidBuffer, pyramidBinCount > 0 {
             drawEnvelope(
                 encoder: encoder,
                 buffer: pyramid,

@@ -134,7 +134,18 @@ struct BedsideView: View {
         ))
         // Default: focus the first lead. Single-lead is the typical analyst
         // workflow; strips mode is opt-in for cross-lead comparison.
-        _layoutMode = State(initialValue: firstECG.map { .focus($0.id) } ?? .strips)
+        let defaultMode: BedsideLayoutMode = firstECG.map { .focus(only: $0.id) } ?? .strips
+        #if DEBUG
+        // `--ui-test-overlay-leads=I,V1` seeds the overlay a ⌘-click would
+        // build — XCUI on macOS can't hold a modifier while clicking.
+        let ecg = recording.channels.filter { !$0.isTrendChannel }
+        let requested = UITestSupport.overlayLeadNames.compactMap { name in
+            ecg.first { $0.name == name }?.id
+        }
+        _layoutMode = State(initialValue: LeadSelection(ordered: requested).map { .focus($0) } ?? defaultMode)
+        #else
+        _layoutMode = State(initialValue: defaultMode)
+        #endif
         _dispositionStore = State(initialValue: DispositionStore(bundleDirectory: recordingDirectory))
         _candidateDispositionStore = State(initialValue: VTVFCandidateDispositionStore(bundleDirectory: recordingDirectory))
         _trendGuideStore = State(initialValue: IntervalTrendGuideStore(bundleDirectory: recordingDirectory))
@@ -198,9 +209,22 @@ struct BedsideView: View {
         scanContext.candidates.filter { $0.matchesChannel(channel.name) }
     }
 
+    /// The lead everything per-channel follows: the trace on the stage, the
+    /// fiducial and annotation marks, the docked inspector, the calibration
+    /// readout, the off-scale scanner and the deviation-nav. With an overlay
+    /// selected this is the designated PRIMARY, because marks drawn over a
+    /// trace they were not measured from would imply a measurement nobody
+    /// made (`project_lead_overlay_focus_spec.md` §4).
     private var focusedChannel: Channel? {
-        guard case .focus(let id) = layoutMode else { return nil }
-        return ecgChannels.first { $0.id == id }
+        guard let selection = layoutMode.leadSelection else { return nil }
+        return ecgChannels.first { $0.id == selection.primary }
+    }
+
+    /// Leads overlaid on the focus stage above the primary, in selection
+    /// order. Empty in the ordinary single-lead case.
+    private var overlayChannels: [Channel] {
+        guard let selection = layoutMode.leadSelection else { return [] }
+        return selection.secondaries.compactMap { id in ecgChannels.first { $0.id == id } }
     }
 
     /// Extracted out of `body` to keep the view's type-check tractable —
@@ -734,7 +758,11 @@ struct BedsideView: View {
         }
         if let name = restore.focusedChannelName,
            let channel = ecgChannels.first(where: { $0.name == name }) {
-            layoutMode = .focus(channel.id)
+            // A saved session records ONE focused lead name, so a restore is
+            // always single-lead. Persisting the overlay is a `.mur` schema
+            // change and belongs with the rendering that makes it visible,
+            // not here.
+            layoutMode = .focus(only: channel.id)
         }
     }
 
@@ -1345,13 +1373,19 @@ struct BedsideView: View {
                     calibration: calibration,
                     annotations: annotationsForChannel(channel),
                     candidates: candidatesForChannel(channel),
-                    sizing: .focus
+                    sizing: .focus,
+                    overlayChannels: overlayChannels
                 )
                 // Tear down + rebuild when the focused lead changes —
                 // WaveformCanvas's MTKView caches the previous channel's
                 // sample buffer and the off-scale scanner is per-channel,
                 // so reusing the same SwiftUI identity would leave the
                 // viewer showing stale data after the chip-bar tap.
+                //
+                // Keyed on the PRIMARY only. Adding or removing an overlaid
+                // lead must not rebuild the whole panel — the overlay canvases
+                // carry their own identities, and rebuilding here would flash
+                // the paper and re-run the off-scale scan on every ⌘-click.
                 .id(channel.id)
 
                 dockedBeatInspector
@@ -1379,6 +1413,25 @@ struct BedsideView: View {
         .accessibilityIdentifier("pinned-stage")
     }
 
+    /// Names the lead every number in this column was measured from.
+    ///
+    /// Shown ONLY while leads are overlaid. With one lead on the stage there
+    /// is nothing to disambiguate and the note would be noise — but with two,
+    /// a QT interval or a calibration reading sitting beside two traces says
+    /// nothing about which trace produced it. The marks are drawn on the
+    /// primary; so are these numbers; the analyst is told so.
+    @ViewBuilder
+    private var primaryLeadNote: some View {
+        if !overlayChannels.isEmpty, let primary = focusedChannel {
+            Text("Measured on \(primary.name)")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Measured on \(primary.name)")
+                .accessibilityIdentifier("primary-lead-note")
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
     /// The focus-beat caliper docked beside the trace. Renders when
     /// a beat is focused; otherwise a placeholder holds the layout
     /// width so the trace doesn't reflow when focus changes.
@@ -1387,6 +1440,7 @@ struct BedsideView: View {
     /// P / QRS / T fiducials for QT vs. conduction studies.
     private var dockedBeatInspector: some View {
         VStack(alignment: .leading, spacing: 6) {
+            primaryLeadNote
             viewportIndicator
             CalibrationReadout(reading: calibrationReading)
             calibrationControls
@@ -2056,10 +2110,25 @@ struct ECGGridSpec: Equatable {
 // MARK: - Layout mode
 
 enum BedsideLayoutMode: Equatable {
-    /// Single lead, full available height — the analyst's default.
-    case focus(Channel.ID)
+    /// The focus stage: 1..n leads overlaid on one time axis and one
+    /// amplitude axis, full available height. One lead is the analyst's
+    /// default and stays the common case; the overlay is X64.
+    case focus(LeadSelection)
     /// All leads stacked in compact strips — opt-in cross-lead comparison.
     case strips
+
+    /// Focus a single lead, discarding any overlay. Spelled `only:` because
+    /// `.focus(id)` would read equally well as "make this the primary and keep
+    /// the rest", which is emphatically not what it does.
+    static func focus(only id: Channel.ID) -> BedsideLayoutMode {
+        .focus(LeadSelection(primary: id))
+    }
+
+    /// The leads on the stage, or nil in strips mode.
+    var leadSelection: LeadSelection? {
+        guard case .focus(let selection) = self else { return nil }
+        return selection
+    }
 }
 
 /// Horizontal lead-chip bar with a Focus/Strips mode toggle. Single-tap a lead
@@ -2126,25 +2195,76 @@ private struct LeadChipBar: View {
     }
 
     private func chip(for channel: Channel) -> some View {
-        let isFocused = (layoutMode == .focus(channel.id))
+        let selection = layoutMode.leadSelection
+        let rank = selection?.rank(of: channel.id)
+        let isPrimary = rank == 0
+        let isStaged = rank != nil
+        // The swatch appears only while more than one lead is on the stage.
+        // On the single-lead stage there is nothing to tell apart, and a black
+        // dot beside the only chip would be noise claiming to be information.
+        let showsSwatch = isStaged && (selection?.isSingle == false)
         return Button {
-            layoutMode = .focus(channel.id)
+            toggleOrSelect(channel)
         } label: {
-            Text(channel.name)
-                .font(.caption.monospaced().weight(.semibold))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(
+            HStack(spacing: 5) {
+                if showsSwatch, let rank {
                     Capsule()
-                        .fill(isFocused ? Color.accentColor.opacity(0.22) : Color.secondary.opacity(0.10))
-                )
-                .overlay(
-                    Capsule()
-                        .stroke(isFocused ? Color.accentColor : .clear, lineWidth: 1)
-                )
+                        .fill(LeadPalette.ink(rank: rank).color)
+                        .frame(width: 10, height: 3)
+                }
+                Text(channel.name)
+                    .font(.caption.monospaced().weight(.semibold))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(
+                Capsule()
+                    .fill(isStaged ? Color.accentColor.opacity(isPrimary ? 0.22 : 0.10) : Color.secondary.opacity(0.10))
+            )
+            .overlay(
+                // Solid ring for the primary, dashed for an overlaid lead —
+                // the two roles are not interchangeable (marks and the
+                // inspector follow the primary), so they must not look
+                // interchangeable either.
+                Capsule()
+                    .strokeBorder(
+                        isStaged ? Color.accentColor : .clear,
+                        style: StrokeStyle(lineWidth: 1, dash: isPrimary ? [] : [3, 2])
+                    )
+            )
         }
         .buttonStyle(.plain)
+        .help(chipHelp(channel: channel, rank: rank))
+        .accessibilityLabel(chipHelp(channel: channel, rank: rank))
         .accessibilityIdentifier("lead-chip-\(channel.name)")
+    }
+
+    /// Plain click selects this lead alone; ⌘-click adds or removes it from
+    /// the overlay.
+    ///
+    /// The modifier is read from `NSEvent` rather than through a SwiftUI
+    /// `TapGesture().modifiers(.command)` because that route needs the chip to
+    /// stop being a `Button` — and a Button is what gives the chip its
+    /// keyboard activation, its focus ring and its XCUI `.buttons` identity.
+    /// Reading the flags inside the action keeps ONE code path for both
+    /// clicks, so there is no gesture-precedence race between them.
+    private func toggleOrSelect(_ channel: Channel) {
+        let commandHeld = NSEvent.modifierFlags.contains(.command)
+        guard commandHeld, let selection = layoutMode.leadSelection else {
+            // Plain click always collapses to this lead alone — the way out of
+            // any overlay, from any state.
+            layoutMode = .focus(only: channel.id)
+            return
+        }
+        layoutMode = .focus(selection.toggling(channel.id))
+    }
+
+    private func chipHelp(channel: Channel, rank: Int?) -> String {
+        switch rank {
+        case 0:  return "\(channel.name) — primary lead. ⌘-click another lead to overlay it."
+        case .some(let rank): return "\(channel.name) — overlaid in \(LeadPalette.ink(rank: rank).name). ⌘-click to remove."
+        case nil: return "\(channel.name) — click to show alone, ⌘-click to overlay."
+        }
     }
 
     private var isFocusMode: Bool {
@@ -2154,7 +2274,7 @@ private struct LeadChipBar: View {
 
     private func switchToFocus() {
         if case .focus = layoutMode { return }
-        if let first = channels.first { layoutMode = .focus(first.id) }
+        if let first = channels.first { layoutMode = .focus(only: first.id) }
     }
 }
 
@@ -2195,6 +2315,14 @@ private struct ChannelPanel: View {
     /// through the region-keyed disposition store, not the annotation one.
     var candidates: [Annotation] = []
     var sizing: Sizing = .strip
+    /// Leads overlaid on top of `channel`, in selection order (X64-B). Empty
+    /// for the single-lead stage and for every strip panel — strips mode is
+    /// unchanged and remains the separated multi-lead reading.
+    ///
+    /// These contribute a trace and nothing else: no paper, no grid, no marks,
+    /// no hit testing. Everything that carries a MEASUREMENT belongs to
+    /// `channel`, the designated primary.
+    var overlayChannels: [Channel] = []
 
     @State private var clippedRanges: [ClippedRange] = []
     /// Recording-wide min/max for this channel, populated by the same
@@ -2287,6 +2415,7 @@ private struct ChannelPanel: View {
             // area at Context now shows envelope silhouette + rare
             // landmarks + focus locator ONLY; the Overview carries
             // the "where in the recording" density read.
+            leadLegend
             WaveformTimeAxis(startTime: startTime, endTime: endTime)
                 .padding(.leading, 56)
         }
@@ -2295,6 +2424,81 @@ private struct ChannelPanel: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("channel-panel-\(channel.name)")
         .task { await scanForOffScale() }
+    }
+
+    /// True when more than one lead is on this stage. Gates every piece of
+    /// overlay chrome, so the single-lead stage stays exactly what it was.
+    private var isOverlaying: Bool { !overlayChannels.isEmpty }
+
+    /// Every lead on this stage in render order — primary first, which is also
+    /// the rank `LeadPalette` hands out inks by.
+    private var stagedLeads: [Channel] { [channel] + overlayChannels }
+
+    /// Spoken description of one staged lead. The ink NAME is spoken because a
+    /// swatch says nothing to VoiceOver, and "which trace is which" is exactly
+    /// what this surface has to answer.
+    private func leadDescription(rank: Int, lead: Channel) -> String {
+        rank == 0
+            ? "\(lead.name), primary lead, black"
+            : "\(lead.name), overlaid in \(LeadPalette.ink(rank: rank).name)"
+    }
+
+    /// Left-edge label per overlaid trace, in that trace's ink.
+    ///
+    /// Absent entirely on the single-lead stage — one unlabelled black trace is
+    /// what the stage has always shown, and §5.3 requires that case to be
+    /// unchanged.
+    @ViewBuilder
+    private var leadEdgeLabels: some View {
+        if !overlayChannels.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(Array(stagedLeads.enumerated()), id: \.element.id) { rank, lead in
+                    Text(lead.name)
+                        .font(.caption2.monospaced().weight(.bold))
+                        .foregroundStyle(LeadPalette.ink(rank: rank).color)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(.regularMaterial))
+                        .accessibilityLabel(leadDescription(rank: rank, lead: lead))
+                        .accessibilityIdentifier("lead-edge-label-\(lead.name)")
+                }
+            }
+            .padding(6)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+    }
+
+    /// Legend beneath the stage, keyed to the trace inks, naming which lead is
+    /// primary. The primary is stated rather than implied because the marks,
+    /// the inspector and the calibration readout all belong to it — an analyst
+    /// reading a fiducial needs to know which trace it was measured from.
+    @ViewBuilder
+    private var leadLegend: some View {
+        if !overlayChannels.isEmpty {
+            HStack(spacing: 12) {
+                ForEach(Array(stagedLeads.enumerated()), id: \.element.id) { rank, lead in
+                    HStack(spacing: 4) {
+                        Capsule()
+                            .fill(LeadPalette.ink(rank: rank).color)
+                            .frame(width: 16, height: 3)
+                        Text(lead.name)
+                            .font(.caption2.monospaced().weight(.semibold))
+                        if rank == 0 {
+                            Text("primary")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(leadDescription(rank: rank, lead: lead))
+                    .accessibilityIdentifier("lead-legend-\(lead.name)")
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, 56)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("lead-legend")
+        }
     }
 
     /// Effective display range for the canvas + voltage axis.
@@ -2397,18 +2601,80 @@ private struct ChannelPanel: View {
                 // intentionally NOT offset so the crosshair / tooltip
                 // stay locked to the cursor while the chart bands away.
                 Group {
+                    // Layer 1 — paper, grid, and (single-lead only) the trace.
+                    //
+                    // This canvas always exists and always owns the paper, the
+                    // grid and the wheel handler, so its identity is the stable
+                    // one across ⌘-click. If the paper moved to whichever lead
+                    // happened to be last in the selection, every add would
+                    // tear down and rebuild the background.
+                    //
+                    // With leads overlaid it hands its TRACE and its MARKS to
+                    // layer 3 — see below for why.
                     WaveformCanvas(
                         channel: channel,
                         directory: directory,
                         startSample: viewport.startSample,
                         endSample: viewport.endSample,
-                        annotations: visibleAnnotations,
-                        focusedBeatSampleIndex: markingsContext.focusedBeatSampleIndex,
+                        annotations: isOverlaying ? [] : visibleAnnotations,
+                        focusedBeatSampleIndex: isOverlaying ? nil : markingsContext.focusedBeatSampleIndex,
                         displayMin: displayRange.lowerBound,
                         displayMax: displayRange.upperBound,
-                        onScroll: { handleWheelScroll($0, canvasWidth: liveSize.width) }
+                        onScroll: { handleWheelScroll($0, canvasWidth: liveSize.width) },
+                        drawsTrace: !isOverlaying
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                    // Layer 2 — the overlaid leads. Same viewport, same
+                    // `displayRange`: that is the true-shared-gain
+                    // requirement, and it holds BY CONSTRUCTION rather than by
+                    // agreement, because `displayRange` derives from the
+                    // shared calibration gain and this panel's height. There
+                    // is no per-lead value that could drift. No annotations
+                    // and no focused beat — marks belong to the lead they were
+                    // measured from.
+                    ForEach(Array(overlayChannels.enumerated()), id: \.element.id) { index, overlay in
+                        WaveformCanvas(
+                            channel: overlay,
+                            directory: directory,
+                            startSample: viewport.startSample,
+                            endSample: viewport.endSample,
+                            annotations: [],
+                            focusedBeatSampleIndex: nil,
+                            displayMin: displayRange.lowerBound,
+                            displayMax: displayRange.upperBound,
+                            traceColor: LeadPalette.ink(rank: index + 1).simd,
+                            drawsPaper: false
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .allowsHitTesting(false)
+                        .id(overlay.id)
+                    }
+
+                    // Layer 3 — the primary's trace and marks, ON TOP.
+                    //
+                    // Found by looking at the pixels, not by reasoning about
+                    // them: with the primary at the back, an overlaid lead
+                    // paints straight over it wherever the two traces coincide
+                    // — which is most of the record, since every lead shares
+                    // the isoelectric baseline. The reference trace, the one
+                    // every mark and every measurement belongs to, was the one
+                    // you couldn't see.
+                    if isOverlaying {
+                        WaveformCanvas(
+                            channel: channel,
+                            directory: directory,
+                            startSample: viewport.startSample,
+                            endSample: viewport.endSample,
+                            annotations: visibleAnnotations,
+                            focusedBeatSampleIndex: markingsContext.focusedBeatSampleIndex,
+                            displayMin: displayRange.lowerBound,
+                            displayMax: displayRange.upperBound,
+                            drawsPaper: false
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .allowsHitTesting(false)
+                    }
 
                     WaveformClippingOverlay(
                         clippedRanges: clippedRanges,
@@ -2434,6 +2700,16 @@ private struct ChannelPanel: View {
                     )
                 }
                 .offset(x: overscrollPx)
+
+                // Per-trace edge labels. Required, not decoration: colour is
+                // never the sole discriminator on this surface. An analyst
+                // with any red-green deficiency — or on a projector, or with
+                // the display's colour profile fighting them — still has to be
+                // able to say which trace is which. NOT offset by the
+                // rubber band: these are anchored to the frame like the axis
+                // labels, not painted onto the chart.
+                leadEdgeLabels
+                    .allowsHitTesting(false)
 
                 HoverTrackingView { location in
                     applyHover(location, in: liveSize)
