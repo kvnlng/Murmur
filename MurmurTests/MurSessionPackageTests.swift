@@ -55,17 +55,17 @@ struct MurSessionPackageTests {
         )
         #expect(manifest.formatVersion == MurSessionManifest.currentFormatVersion)
         #expect(manifest.sourceStorage == .lzfse)
-        #expect(manifest.source.recordingID == recording.id)
-        #expect(manifest.source.channelCount == 1)
+        #expect(manifest.records[0].recordingID == recording.id)
+        #expect(manifest.records[0].channelCount == 1)
 
         let out = try tempDir("open")
         let result = try MurSessionPackage.read(packageURL: pkg, into: out)
         for (name, data) in files {
-            let readBack = try Data(contentsOf: out.appendingPathComponent(name))
+            let readBack = try Data(contentsOf: result.records[0].recordingDirectory.appendingPathComponent(name))
             #expect(readBack == data, "\(name) should round-trip byte-identically")
         }
-        #expect(result.provenanceJSON == provenance)
-        #expect(result.sessionJSON == session)
+        #expect(result.records[0].provenanceJSON == provenance)
+        #expect(result.records[0].sessionJSON == session)
     }
 
     /// X11/X59: the bedside view republishes on every viewport change. If that
@@ -118,7 +118,7 @@ struct MurSessionPackageTests {
         )
         let a = try MurSessionPackage.read(packageURL: pkgA, into: try tempDir("open-paper"))
         let restoredA = try JSONDecoder().decode(
-            MurSessionState.self, from: #require(a.sessionJSON)
+            MurSessionState.self, from: #require(a.records[0].sessionJSON)
         )
         #expect(restoredA.gainMillimetersPerMillivolt == 20)
 
@@ -131,7 +131,7 @@ struct MurSessionPackageTests {
         )
         let b = try MurSessionPackage.read(packageURL: pkgB, into: try tempDir("open-nopaper"))
         let restoredB = try JSONDecoder().decode(
-            MurSessionState.self, from: #require(b.sessionJSON)
+            MurSessionState.self, from: #require(b.records[0].sessionJSON)
         )
         #expect(restoredB.gainMillimetersPerMillivolt == nil,
                 "no saved paper must stay absent — the open falls back to Standard View")
@@ -163,7 +163,7 @@ struct MurSessionPackageTests {
             packageURL: pkg, into: try tempDir("open-prov")
         )
         let restored = try JSONDecoder().decode(
-            MurProvenance.self, from: #require(result.provenanceJSON)
+            MurProvenance.self, from: #require(result.records[0].provenanceJSON)
         )
         #expect(restored == provenance)
         // The population statement is the point — each part must survive.
@@ -196,7 +196,7 @@ struct MurSessionPackageTests {
         let result = try MurSessionPackage.read(
             packageURL: pkg, into: try tempDir("open-nostate")
         )
-        #expect(result.sessionJSON == nil)
+        #expect(result.records[0].sessionJSON == nil)
     }
 
     @Test("Portable: reopens after the original bundle is deleted")
@@ -209,9 +209,9 @@ struct MurSessionPackageTests {
         try FileManager.default.removeItem(at: dir)
 
         let out = try tempDir("open")
-        _ = try MurSessionPackage.read(packageURL: pkg, into: out)
+        let result = try MurSessionPackage.read(packageURL: pkg, into: out)
         for name in ["recording.json", "ch0.bin"] {
-            let readBack = try Data(contentsOf: out.appendingPathComponent(name))
+            let readBack = try Data(contentsOf: result.records[0].recordingDirectory.appendingPathComponent(name))
             #expect(readBack == files[name])
         }
     }
@@ -223,15 +223,17 @@ struct MurSessionPackageTests {
         try MurSessionPackage.write(recording: recording, recordingDirectory: dir, to: pkg)
 
         // The stored source blob is the compressed form, not the raw bytes.
-        let storedChannel = try Data(contentsOf: pkg.appendingPathComponent("source/ch0.bin"))
+        let storedChannel = try Data(
+            contentsOf: pkg.appendingPathComponent("records/\(recording.id.uuidString)/source/ch0.bin"))
         let rawChannel = try #require(files["ch0.bin"])
         let inflated = try MurSessionPackage.decompress(storedChannel)
         #expect(inflated == rawChannel)
 
         // And a full open reconstitutes the raw bytes.
         let out = try tempDir("open")
-        _ = try MurSessionPackage.read(packageURL: pkg, into: out)
-        #expect(try Data(contentsOf: out.appendingPathComponent("ch0.bin")) == rawChannel)
+        let result = try MurSessionPackage.read(packageURL: pkg, into: out)
+        #expect(try Data(contentsOf: result.records[0].recordingDirectory
+            .appendingPathComponent("ch0.bin")) == rawChannel)
     }
 
     @Test("Session state round-trips through the package's session.json slot")
@@ -251,7 +253,7 @@ struct MurSessionPackageTests {
 
         let out = try tempDir("open")
         let result = try MurSessionPackage.read(packageURL: pkg, into: out)
-        let decoded = try JSONDecoder().decode(MurSessionState.self, from: #require(result.sessionJSON))
+        let decoded = try JSONDecoder().decode(MurSessionState.self, from: #require(result.records[0].sessionJSON))
         #expect(decoded == state)
     }
 
@@ -268,7 +270,7 @@ struct MurSessionPackageTests {
 
         let out = try tempDir("open")
         let result = try MurSessionPackage.read(packageURL: pkg, into: out)
-        let restored = try Data(contentsOf: result.cacheDirectory.appendingPathComponent("fiducials.blob"))
+        let restored = try Data(contentsOf: result.records[0].cacheDirectory.appendingPathComponent("fiducials.blob"))
         // Same app stamp → cache hit.
         #expect(MurSessionCache.decode(restored, expected: stamp) == payload)
         // Newer delineator → cache miss → recompute.
@@ -278,7 +280,11 @@ struct MurSessionPackageTests {
 
     @Test("Refuses a newer format version rather than misreading it")
     func refusesNewerVersion() throws {
-        // Hand-build a package whose manifest claims a future format.
+        // Hand-build a package whose manifest claims a future format AND whose
+        // body this app cannot decode — which is what a future format looks
+        // like from here. The refusal must name the version, not call the file
+        // damaged: version-refusal has to win over shape-failure, or the
+        // version field buys nothing.
         let pkg = try tempDir("pkg").appendingPathComponent("Future.mur")
         let future = """
         {"formatVersion": 999, "appVersion": "x", "createdAt": "2026-07-28T00:00:00Z",
@@ -310,8 +316,9 @@ struct MurSessionPackageTests {
         let pkg = try tempDir("pkg").appendingPathComponent("Bare.mur")
         try MurSessionPackage.write(recording: recording, recordingDirectory: dir, to: pkg)
         let out = try tempDir("open")
-        _ = try MurSessionPackage.read(packageURL: pkg, into: out)
-        #expect(try Data(contentsOf: out.appendingPathComponent("ch0.bin")) == Data([9, 9]))
-        #expect(!FileManager.default.fileExists(atPath: out.appendingPathComponent("annotations.json").path))
+        let result = try MurSessionPackage.read(packageURL: pkg, into: out)
+        let recordDir = result.records[0].recordingDirectory
+        #expect(try Data(contentsOf: recordDir.appendingPathComponent("ch0.bin")) == Data([9, 9]))
+        #expect(!FileManager.default.fileExists(atPath: recordDir.appendingPathComponent("annotations.json").path))
     }
 }

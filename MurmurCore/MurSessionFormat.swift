@@ -1,0 +1,297 @@
+//
+//  MurSessionFormat.swift
+//  MurmurCore
+//
+//  The native Murmur Studio SAVE format — `.mur` — per
+//  project_mur_save_format_spec.md. SAVE writes the analyst's whole session at
+//  Murmur Studio's OWN detail (a superset of WFDB); EXPORT projects DOWN to a
+//  plain WFDB annotator (`.mrm`, see WFDBAnnotationExport). You SAVE to Murmur
+//  (up), you EXPORT to WFDB (down).
+//
+//  `.mur` is an Apple DOCUMENT PACKAGE — a directory Finder presents as one
+//  file (LSTypeIsPackage; UTType registration is X14-D).
+//
+//  X63-A: a session holds MANY records, not one. An analyst works a DIRECTORY,
+//  flags the records that matter, and saves them as one file — which is the
+//  only thing that makes them a set.
+//
+//      Session.mur/
+//        manifest.json          versioned contract — first thing read; carries
+//                               `records`, and that array IS the analyst's order
+//        session.json           SESSION-LEVEL state (MurCollectionState): which
+//                               record was active at save
+//        records/
+//          <recordingID>/       one subtree per record, keyed by UUID
+//            source/            embedded copy of the raw recording, LZFSE
+//                               (reopens with no original WFDB present)
+//            annotations/       analyst layer — the bundle sidecars, reused as-is
+//            dispositions/      annotation + candidate dispositions
+//            guides/            interval-trend threshold guides
+//            provenance.json    what the numbers were MADE OF (X26)
+//            session.json       PER-RECORD state: viewport, saved paper,
+//                               focused lead (X59)
+//            cache/             derived, REBUILDABLE, version-stamped (X14-C)
+//
+//  Subtrees are keyed by `recordingID` rather than source filename: two records
+//  in one directory can share a base name, and once X63-D adds encryption a
+//  filename on the outside of the package would identify its contents.
+//
+//  The two `session.json` files answer different questions and must not be
+//  merged — a reopen has to restore both WHICH record was active and WHERE the
+//  analyst was inside it.
+//
+//  NO COMPATIBILITY READER, deliberately. Nothing has been released, so the
+//  multi-record layout is the only layout this code has ever supported;
+//  `formatVersion` stays in the manifest as the mechanism for the NEXT change,
+//  not this one. Packages written by earlier development builds do not open.
+//
+
+import Foundation
+
+/// The versioned contract at the head of every `.mur` package. Small, human-
+/// diffable, and the first thing read — a newer `formatVersion` than the app
+/// understands is a clear refusal, never a silent misread.
+public struct MurSessionManifest: Codable, Equatable, Sendable {
+
+    /// Bump when the on-disk layout changes incompatibly. Reads gate on this.
+    public static let currentFormatVersion = 1
+
+    public let formatVersion: Int
+    /// App short version string that wrote the package (best-effort).
+    public let appVersion: String
+    public let createdAt: Date
+    public let modifiedAt: Date
+
+    /// Every record in this session, in the analyst's order.
+    ///
+    /// X63-A: a `.mur` holds MANY records. This array IS the ordering — the
+    /// session-level `session.json` deliberately does not carry a second copy,
+    /// because two authorities on order is how they drift apart.
+    ///
+    /// Each entry's `recordingID` is the name of its subtree under `records/`.
+    public let records: [SourceIdentity]
+
+    /// How each record's `source/` subtree is stored — `none` for raw copies,
+    /// `lzfse` after X14-B. Read uses this to decide whether to inflate.
+    public let sourceStorage: SourceStorage
+    /// Top-level parts present in this package (`records`, `session.json`).
+    public let contents: [String]
+
+    public enum SourceStorage: String, Codable, Sendable {
+        case none        // raw files copied verbatim
+        case lzfse       // AppleArchive/Compression (X14-B)
+    }
+
+    /// Enough to identify the recording without inflating the source — shown in
+    /// pickers and used to sanity-check a reopen.
+    public struct SourceIdentity: Codable, Equatable, Sendable {
+        public let recordingID: UUID
+        public let sourceFileName: String
+        public let sampleRate: Double
+        public let channelCount: Int
+        public let sampleCount: Int64
+        /// Optional absolute time base (Unix ms) for the first sample, present
+        /// only when the SOURCE genuinely carries wall-clock time (C6).
+        /// MIT-BIH/WFDB and the CSV importer don't, so this stays nil today —
+        /// the field exists so the format can carry an absolute base (for the
+        /// circadian / encounter-time analysis the ICU-telemetry buyer works
+        /// in) the moment a source provides one, without a format-version
+        /// bump. Never populated from a synthetic/import-derived timestamp.
+        /// Optional so older `.mur` files decode unchanged.
+        public let absoluteStartUnixMillis: Int64?
+    }
+}
+
+/// The `session.json` schema — UI/session state so a reopen lands the analyst
+/// back where they were. Plain snapshot; all optional so partial/older sessions
+/// decode. The app composes/consumes it (X14-D); this is the shape it round-trips.
+public struct MurSessionState: Codable, Equatable, Sendable {
+    public var viewportStartSample: Int64?
+    public var viewportEndSample: Int64?
+    public var focusedChannelName: String?
+    public var windowLockedTo10s: Bool?
+    public var selectedTrendMetric: String?
+    public var selectedBinPreset: String?
+    /// X50(b) — the analyst's saved paper (mm/mV). Present only when the
+    /// session was saved with a resolved gain; `nil` means "this package
+    /// carries no paper", and the open falls back to Standard View exactly as
+    /// a raw import does. The time scale (mm/s) is not stored separately: it is
+    /// implied by the saved viewport width against the canvas.
+    public var gainMillimetersPerMillivolt: Double?
+    /// VT/VF scan operating point in effect.
+    public var tau: Double?
+    public var minDurationSeconds: Double?
+    public var mergeGapSeconds: Double?
+    public var scanScopeWholeRecording: Bool?
+
+    public init(
+        viewportStartSample: Int64? = nil,
+        viewportEndSample: Int64? = nil,
+        focusedChannelName: String? = nil,
+        windowLockedTo10s: Bool? = nil,
+        selectedTrendMetric: String? = nil,
+        selectedBinPreset: String? = nil,
+        gainMillimetersPerMillivolt: Double? = nil,
+        tau: Double? = nil,
+        minDurationSeconds: Double? = nil,
+        mergeGapSeconds: Double? = nil,
+        scanScopeWholeRecording: Bool? = nil
+    ) {
+        self.viewportStartSample = viewportStartSample
+        self.viewportEndSample = viewportEndSample
+        self.focusedChannelName = focusedChannelName
+        self.windowLockedTo10s = windowLockedTo10s
+        self.selectedTrendMetric = selectedTrendMetric
+        self.selectedBinPreset = selectedBinPreset
+        self.gainMillimetersPerMillivolt = gainMillimetersPerMillivolt
+        self.tau = tau
+        self.minDurationSeconds = minDurationSeconds
+        self.mergeGapSeconds = mergeGapSeconds
+        self.scanScopeWholeRecording = scanScopeWholeRecording
+    }
+
+    /// X59/X11 — replace only the fields the bedside view owns, preserving the
+    /// ones other surfaces own (the scan dials).
+    ///
+    /// The bedside view republishes on every viewport change; assigning a state
+    /// built solely from its own `@State` would silently wipe an operating point
+    /// the scan sheet had just set. Stated once here rather than inline at the
+    /// call site, so the ownership split is testable and hard to get wrong.
+    public func replacingViewState(with other: MurSessionState) -> MurSessionState {
+        var copy = self
+        copy.viewportStartSample = other.viewportStartSample
+        copy.viewportEndSample = other.viewportEndSample
+        copy.focusedChannelName = other.focusedChannelName
+        copy.windowLockedTo10s = other.windowLockedTo10s
+        copy.gainMillimetersPerMillivolt = other.gainMillimetersPerMillivolt
+        return copy
+    }
+}
+
+/// The `provenance.json` schema — what the analyst's numbers were MADE OF at
+/// save time (X26). The package already reconstitutes enough to recompute a
+/// template, but a recomputed number is not the saved one: the delineator, the
+/// exclusion rules, or the formula default can all move between versions.
+/// Recording the population alongside the value is what makes the saved
+/// measurement auditable rather than merely repeatable — X48's rule (a number
+/// without its population is not reproducible) applied to the file format.
+///
+/// All optional so partial/older packages decode. App version and record
+/// identity already live on the manifest and are deliberately not duplicated.
+public struct MurProvenance: Codable, Equatable, Sendable {
+
+    /// The patient-normal template as it stood when the session was saved.
+    public struct NormalTemplate: Codable, Equatable, Sendable {
+        /// Beats that CONTRIBUTED to the medians.
+        public var beatCount: Int?
+        /// Beats withheld — physically impossible (X53) or unreliable T-offset
+        /// (X58). Merged, as the builder merges them; do not attribute this to
+        /// a single cause when rendering it.
+        public var excludedBeatCount: Int?
+        /// The lead the intervals were measured in. A QT without its lead is
+        /// not comparable (the X58 rec-212 lesson).
+        public var sourceLead: String?
+        public var spanStartSample: Int64?
+        public var spanEndSample: Int64?
+        /// Rate-correction formula in effect — the app never arbitrates it
+        /// (X44), so the saved number is only interpretable alongside it.
+        public var qtcFormulaName: String?
+        /// The template median AS SAVED, so a later recompute can be compared
+        /// against it rather than silently replacing it.
+        public var medianQTcMs: Double?
+
+        public init(
+            beatCount: Int? = nil,
+            excludedBeatCount: Int? = nil,
+            sourceLead: String? = nil,
+            spanStartSample: Int64? = nil,
+            spanEndSample: Int64? = nil,
+            qtcFormulaName: String? = nil,
+            medianQTcMs: Double? = nil
+        ) {
+            self.beatCount = beatCount
+            self.excludedBeatCount = excludedBeatCount
+            self.sourceLead = sourceLead
+            self.spanStartSample = spanStartSample
+            self.spanEndSample = spanEndSample
+            self.qtcFormulaName = qtcFormulaName
+            self.medianQTcMs = medianQTcMs
+        }
+    }
+
+    public var normalTemplate: NormalTemplate?
+
+    public init(normalTemplate: NormalTemplate? = nil) {
+        self.normalTemplate = normalTemplate
+    }
+}
+
+extension MurProvenance.NormalTemplate {
+    /// Snapshot a live template for saving. `nil` when there is no template —
+    /// absent must stay absent rather than becoming a zero-beat template.
+    public init?(_ template: MarkingsTemplate?) {
+        guard let template else { return nil }
+        self.init(
+            beatCount: template.sampleCount,
+            excludedBeatCount: template.excludedBeatCount,
+            sourceLead: template.sourceLead,
+            spanStartSample: template.spanStartSample,
+            spanEndSample: template.spanEndSample,
+            qtcFormulaName: template.qtcFormulaName,
+            medianQTcMs: template.medianQTcMs
+        )
+    }
+}
+
+/// The SESSION-LEVEL `session.json` — state that belongs to the SET of records
+/// rather than to any one of them (X63-A).
+///
+/// Deliberately tiny. Record ordering lives in `MurSessionManifest.records` and
+/// is not duplicated here; per-record viewport / paper / focused lead stay in
+/// each record's own `session.json` (`MurSessionState`). The split matters: a
+/// reopen has to restore both *which* record was active and *where* the analyst
+/// was inside it, and those are different questions.
+public struct MurCollectionState: Codable, Equatable, Sendable {
+
+    /// The record the analyst was looking at when they saved, so a reopen lands
+    /// somewhere they chose rather than on whichever record sorted first. `nil`
+    /// means "no preference" — the reader falls back to the first record.
+    public var activeRecordingID: UUID?
+
+    public init(activeRecordingID: UUID? = nil) {
+        self.activeRecordingID = activeRecordingID
+    }
+}
+
+public enum MurSessionError: LocalizedError, Equatable {
+    case missingManifest
+    case unsupportedFormatVersion(Int)
+    case malformedPackage(String)
+    /// A session must contain at least one record; an empty package is a bug
+    /// at the call site, not a file to write.
+    case noRecords
+    /// Two records with the same `recordingID` would collide in `records/`.
+    case duplicateRecordingID(UUID)
+
+    public var errorDescription: String? {
+        switch self {
+        case .missingManifest:
+            return "This .mur file is missing its manifest and can't be opened."
+        case .unsupportedFormatVersion(let v):
+            return "This .mur file was written by a newer version of Murmur Studio (format \(v)). Update to open it."
+        case .malformedPackage(let detail):
+            return "This .mur file is damaged: \(detail)."
+        case .noRecords:
+            return "A Murmur session must contain at least one recording."
+        case .duplicateRecordingID(let id):
+            return "This session lists the same recording twice (\(id))."
+        }
+    }
+}
+
+/// The one field a manifest of ANY format version is contractually required to
+/// carry. Decoded on its own so the version refusal survives a future layout
+/// change — see `MurSessionPackage.read`.
+struct FormatVersionProbe: Decodable {
+    let formatVersion: Int
+}

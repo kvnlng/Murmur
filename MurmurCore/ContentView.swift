@@ -213,8 +213,16 @@ public struct ContentView: View {
             let workingDirectory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("mur-session-\(UUID().uuidString)", isDirectory: true)
             let result = try MurSessionPackage.read(packageURL: url, into: workingDirectory)
-            let recording = try RecordingStore.shared.loadManifest(at: result.recordingDirectory)
-            setAppState(.directView(directory: result.recordingDirectory, recording: recording))
+            // X63-A: a package now holds MANY records. Presenting the ACTIVE
+            // one (whatever the analyst had open at save, else the first)
+            // keeps this path behaving exactly as it did for a single-record
+            // package. Reaching the other records — populating the existing
+            // record sidebar from `result.records` — is X63-C; until then a
+            // multi-record package opens on its active record and the rest
+            // are on disk but not yet surfaced.
+            let record = result.activeRecord
+            let recording = try RecordingStore.shared.loadManifest(at: record.recordingDirectory)
+            setAppState(.directView(directory: record.recordingDirectory, recording: recording))
             // X59: stage any saved session state for the bedside view to apply
             // when it appears. Sequenced after `setAppState` so the context's
             // recording is already published when the restore lands. (The
@@ -224,7 +232,7 @@ public struct ContentView: View {
             // A package written before session capture (or by an older build)
             // carries no session.json — decode failure leaves it nil, and the
             // open behaves exactly as it does today.
-            if let data = result.sessionJSON,
+            if let data = record.sessionJSON,
                let restored = try? JSONDecoder().decode(MurSessionState.self, from: data) {
                 CurrentRecordingContext.shared.pendingSessionRestore = restored
             }
@@ -232,7 +240,7 @@ public struct ContentView: View {
             // template. Deliberately NOT applied — the template is always
             // recomputed from the recording; this is the record of what it was,
             // so a divergence is visible rather than silent.
-            if let data = result.provenanceJSON,
+            if let data = record.provenanceJSON,
                let provenance = try? JSONDecoder().decode(MurProvenance.self, from: data) {
                 CurrentRecordingContext.shared.restoredProvenance = provenance
             }

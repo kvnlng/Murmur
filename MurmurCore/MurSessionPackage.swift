@@ -2,246 +2,16 @@
 //  MurSessionPackage.swift
 //  MurmurCore
 //
-//  The native Murmur Studio SAVE format — `.mur` — per
-//  project_mur_save_format_spec.md. SAVE writes the analyst's whole session at
-//  Murmur Studio's OWN detail (a superset of WFDB); EXPORT projects DOWN to a
-//  plain WFDB annotator (`.mrm`, see WFDBAnnotationExport). You SAVE to Murmur
-//  (up), you EXPORT to WFDB (down).
+//  Read/write engine for the native `.mur` SAVE format. The on-disk CONTRACT
+//  — manifest, per-record and session-level state, provenance, errors — lives
+//  in MurSessionFormat.swift; this file is the NSFileWrapper plumbing that
+//  serialises to it and reconstitutes from it.
 //
-//  `.mur` is an Apple DOCUMENT PACKAGE — a directory Finder presents as one
-//  file (LSTypeIsPackage; UTType registration is X14-D). Internally it is a
-//  flat NSFileWrapper directory:
-//
-//      Recording.mur/
-//        manifest.json     versioned contract — first thing read
-//        source/           embedded copy of the raw recording (reopens with no
-//                          original WFDB files present); COMPRESSED in X14-B
-//        annotations/      analyst layer — the bundle sidecars, reused as-is
-//        dispositions/     annotation + candidate dispositions
-//        guides/           interval-trend threshold guides
-//        provenance.json   model id/version/tau, app version, analyst labels
-//                          — SCHEMA ONLY: never written today, see X59
-//        session.json      UI/session state (viewport, tau, scan scope)
-//                          — SCHEMA ONLY: never written today, see X59. NB
-//                          `MurSessionState` carries NO layout and NO
-//                          calibration field; earlier wording here claimed
-//                          "layout" and was wrong. Both `write` call sites omit
-//                          `sessionJSON:`/`provenanceJSON:`, and `read`'s
-//                          `sessionJSON` is discarded by `openMurPackage`.
-//        cache/            derived, REBUILDABLE, version-stamped (X14-C)
-//
-//  This file is Phase A: manifest + read/write over NSFileWrapper with the
-//  source embedded UNCOMPRESSED. LZFSE compression (X14-B), the cache + session
-//  (X14-C), and the UTType/free-viewer wiring (X14-D) layer on without changing
-//  the manifest contract (the manifest records what's present + how source is
-//  stored).
+//  Split at X63-A: multi-record support pushed the single file past 650 lines
+//  with three more phases (flagging, open path, encryption) still to land.
 //
 
 import Foundation
-
-/// The versioned contract at the head of every `.mur` package. Small, human-
-/// diffable, and the first thing read — a newer `formatVersion` than the app
-/// understands is a clear refusal, never a silent misread.
-public struct MurSessionManifest: Codable, Equatable, Sendable {
-
-    /// Bump when the on-disk layout changes incompatibly. Reads gate on this.
-    public static let currentFormatVersion = 1
-
-    public let formatVersion: Int
-    /// App short version string that wrote the package (best-effort).
-    public let appVersion: String
-    public let createdAt: Date
-    public let modifiedAt: Date
-    public let source: SourceIdentity
-    /// How the `source/` subtree is stored — `none` in Phase A, `lzfse` after
-    /// X14-B. Read uses this to decide whether to inflate.
-    public let sourceStorage: SourceStorage
-    /// Top-level parts present in this package (`source`, `annotations`,
-    /// `dispositions`, `guides`, `provenance.json`, `session.json`, `cache`).
-    public let contents: [String]
-
-    public enum SourceStorage: String, Codable, Sendable {
-        case none        // raw files copied verbatim
-        case lzfse       // AppleArchive/Compression (X14-B)
-    }
-
-    /// Enough to identify the recording without inflating the source — shown in
-    /// pickers and used to sanity-check a reopen.
-    public struct SourceIdentity: Codable, Equatable, Sendable {
-        public let recordingID: UUID
-        public let sourceFileName: String
-        public let sampleRate: Double
-        public let channelCount: Int
-        public let sampleCount: Int64
-        /// Optional absolute time base (Unix ms) for the first sample, present
-        /// only when the SOURCE genuinely carries wall-clock time (C6).
-        /// MIT-BIH/WFDB and the CSV importer don't, so this stays nil today —
-        /// the field exists so the format can carry an absolute base (for the
-        /// circadian / encounter-time analysis the ICU-telemetry buyer works
-        /// in) the moment a source provides one, without a format-version
-        /// bump. Never populated from a synthetic/import-derived timestamp.
-        /// Optional so older `.mur` files decode unchanged.
-        public let absoluteStartUnixMillis: Int64?
-    }
-}
-
-/// The `session.json` schema — UI/session state so a reopen lands the analyst
-/// back where they were. Plain snapshot; all optional so partial/older sessions
-/// decode. The app composes/consumes it (X14-D); this is the shape it round-trips.
-public struct MurSessionState: Codable, Equatable, Sendable {
-    public var viewportStartSample: Int64?
-    public var viewportEndSample: Int64?
-    public var focusedChannelName: String?
-    public var windowLockedTo10s: Bool?
-    public var selectedTrendMetric: String?
-    public var selectedBinPreset: String?
-    /// X50(b) — the analyst's saved paper (mm/mV). Present only when the
-    /// session was saved with a resolved gain; `nil` means "this package
-    /// carries no paper", and the open falls back to Standard View exactly as
-    /// a raw import does. The time scale (mm/s) is not stored separately: it is
-    /// implied by the saved viewport width against the canvas.
-    public var gainMillimetersPerMillivolt: Double?
-    /// VT/VF scan operating point in effect.
-    public var tau: Double?
-    public var minDurationSeconds: Double?
-    public var mergeGapSeconds: Double?
-    public var scanScopeWholeRecording: Bool?
-
-    public init(
-        viewportStartSample: Int64? = nil,
-        viewportEndSample: Int64? = nil,
-        focusedChannelName: String? = nil,
-        windowLockedTo10s: Bool? = nil,
-        selectedTrendMetric: String? = nil,
-        selectedBinPreset: String? = nil,
-        gainMillimetersPerMillivolt: Double? = nil,
-        tau: Double? = nil,
-        minDurationSeconds: Double? = nil,
-        mergeGapSeconds: Double? = nil,
-        scanScopeWholeRecording: Bool? = nil
-    ) {
-        self.viewportStartSample = viewportStartSample
-        self.viewportEndSample = viewportEndSample
-        self.focusedChannelName = focusedChannelName
-        self.windowLockedTo10s = windowLockedTo10s
-        self.selectedTrendMetric = selectedTrendMetric
-        self.selectedBinPreset = selectedBinPreset
-        self.gainMillimetersPerMillivolt = gainMillimetersPerMillivolt
-        self.tau = tau
-        self.minDurationSeconds = minDurationSeconds
-        self.mergeGapSeconds = mergeGapSeconds
-        self.scanScopeWholeRecording = scanScopeWholeRecording
-    }
-
-    /// X59/X11 — replace only the fields the bedside view owns, preserving the
-    /// ones other surfaces own (the scan dials).
-    ///
-    /// The bedside view republishes on every viewport change; assigning a state
-    /// built solely from its own `@State` would silently wipe an operating point
-    /// the scan sheet had just set. Stated once here rather than inline at the
-    /// call site, so the ownership split is testable and hard to get wrong.
-    public func replacingViewState(with other: MurSessionState) -> MurSessionState {
-        var copy = self
-        copy.viewportStartSample = other.viewportStartSample
-        copy.viewportEndSample = other.viewportEndSample
-        copy.focusedChannelName = other.focusedChannelName
-        copy.windowLockedTo10s = other.windowLockedTo10s
-        copy.gainMillimetersPerMillivolt = other.gainMillimetersPerMillivolt
-        return copy
-    }
-}
-
-/// The `provenance.json` schema — what the analyst's numbers were MADE OF at
-/// save time (X26). The package already reconstitutes enough to recompute a
-/// template, but a recomputed number is not the saved one: the delineator, the
-/// exclusion rules, or the formula default can all move between versions.
-/// Recording the population alongside the value is what makes the saved
-/// measurement auditable rather than merely repeatable — X48's rule (a number
-/// without its population is not reproducible) applied to the file format.
-///
-/// All optional so partial/older packages decode. App version and record
-/// identity already live on the manifest and are deliberately not duplicated.
-public struct MurProvenance: Codable, Equatable, Sendable {
-
-    /// The patient-normal template as it stood when the session was saved.
-    public struct NormalTemplate: Codable, Equatable, Sendable {
-        /// Beats that CONTRIBUTED to the medians.
-        public var beatCount: Int?
-        /// Beats withheld — physically impossible (X53) or unreliable T-offset
-        /// (X58). Merged, as the builder merges them; do not attribute this to
-        /// a single cause when rendering it.
-        public var excludedBeatCount: Int?
-        /// The lead the intervals were measured in. A QT without its lead is
-        /// not comparable (the X58 rec-212 lesson).
-        public var sourceLead: String?
-        public var spanStartSample: Int64?
-        public var spanEndSample: Int64?
-        /// Rate-correction formula in effect — the app never arbitrates it
-        /// (X44), so the saved number is only interpretable alongside it.
-        public var qtcFormulaName: String?
-        /// The template median AS SAVED, so a later recompute can be compared
-        /// against it rather than silently replacing it.
-        public var medianQTcMs: Double?
-
-        public init(
-            beatCount: Int? = nil,
-            excludedBeatCount: Int? = nil,
-            sourceLead: String? = nil,
-            spanStartSample: Int64? = nil,
-            spanEndSample: Int64? = nil,
-            qtcFormulaName: String? = nil,
-            medianQTcMs: Double? = nil
-        ) {
-            self.beatCount = beatCount
-            self.excludedBeatCount = excludedBeatCount
-            self.sourceLead = sourceLead
-            self.spanStartSample = spanStartSample
-            self.spanEndSample = spanEndSample
-            self.qtcFormulaName = qtcFormulaName
-            self.medianQTcMs = medianQTcMs
-        }
-    }
-
-    public var normalTemplate: NormalTemplate?
-
-    public init(normalTemplate: NormalTemplate? = nil) {
-        self.normalTemplate = normalTemplate
-    }
-}
-
-extension MurProvenance.NormalTemplate {
-    /// Snapshot a live template for saving. `nil` when there is no template —
-    /// absent must stay absent rather than becoming a zero-beat template.
-    public init?(_ template: MarkingsTemplate?) {
-        guard let template else { return nil }
-        self.init(
-            beatCount: template.sampleCount,
-            excludedBeatCount: template.excludedBeatCount,
-            sourceLead: template.sourceLead,
-            spanStartSample: template.spanStartSample,
-            spanEndSample: template.spanEndSample,
-            qtcFormulaName: template.qtcFormulaName,
-            medianQTcMs: template.medianQTcMs
-        )
-    }
-}
-
-public enum MurSessionError: LocalizedError, Equatable {
-    case missingManifest
-    case unsupportedFormatVersion(Int)
-    case malformedPackage(String)
-
-    public var errorDescription: String? {
-        switch self {
-        case .missingManifest:
-            return "This .mur file is missing its manifest and can't be opened."
-        case .unsupportedFormatVersion(let v):
-            return "This .mur file was written by a newer version of Murmur Studio (format \(v)). Update to open it."
-        case .malformedPackage(let detail):
-            return "This .mur file is damaged: \(detail)."
-        }
-    }
-}
 
 public enum MurSessionPackage {
 
@@ -252,6 +22,13 @@ public enum MurSessionPackage {
     static let provenanceFile = "provenance.json"
     static let sessionFile = "session.json"
     static let cacheDir = "cache"
+
+    /// Holds one subtree per record, named by `recordingID` (X63-A).
+    ///
+    /// Keyed by UUID rather than by source filename on purpose: two records in
+    /// one directory can share a base name, and — once X63-D lands encryption —
+    /// a filename on the outside of the package would identify its contents.
+    static let recordsDir = "records"
 
     /// Analyst-layer sidecars folded into the package by their real filenames,
     /// grouped into spec subdirectories. Reconstitution writes each back to the
@@ -271,62 +48,71 @@ public enum MurSessionPackage {
 
     // MARK: - Write
 
-    /// Serialises a session into a `.mur` document package at `packageURL`
-    /// (atomic). Embeds the raw recording (so the package reopens with no
-    /// original files present) and folds in whatever analyst sidecars exist
-    /// beside the recording. `provenanceJSON` / `sessionJSON` are opaque to this
-    /// layer — the caller composes them.
+    /// One record's contribution to a session. `provenanceJSON` / `sessionJSON`
+    /// stay opaque to this layer — the caller composes them.
+    public struct RecordPayload: Sendable {
+        public let recording: Recording
+        public let recordingDirectory: URL
+        public let provenanceJSON: Data?
+        public let sessionJSON: Data?
+        public let cacheBlobs: [String: Data]
+
+        public init(
+            recording: Recording,
+            recordingDirectory: URL,
+            provenanceJSON: Data? = nil,
+            sessionJSON: Data? = nil,
+            cacheBlobs: [String: Data] = [:]
+        ) {
+            self.recording = recording
+            self.recordingDirectory = recordingDirectory
+            self.provenanceJSON = provenanceJSON
+            self.sessionJSON = sessionJSON
+            self.cacheBlobs = cacheBlobs
+        }
+    }
+
+    /// Serialises a session of one or more records into a `.mur` document
+    /// package at `packageURL` (atomic). Each record embeds its own raw source
+    /// (so the package reopens with no original files present) plus whatever
+    /// analyst sidecars sit beside it.
+    ///
+    /// `payloads` order is the analyst's order and is preserved in
+    /// `manifest.records`.
     @discardableResult
     public static func write(
-        recording: Recording,
-        recordingDirectory: URL,
-        provenanceJSON: Data? = nil,
-        sessionJSON: Data? = nil,
-        cacheBlobs: [String: Data] = [:],
+        records payloads: [RecordPayload],
+        collectionJSON: Data? = nil,
         to packageURL: URL,
         now: Date = .now
     ) throws -> MurSessionManifest {
-        var children: [String: FileWrapper] = [:]
+        guard !payloads.isEmpty else { throw MurSessionError.noRecords }
 
-        // source/ — the raw recording files (manifest + channel binaries +
-        // pyramids + notes), each LZFSE-compressed so the package stays
-        // portable without bloating. The manifest records `sourceStorage` so
-        // read knows to inflate.
-        var sourceChildren: [String: FileWrapper] = [:]
-        for name in rawSourceFileNames(for: recording) {
-            let url = recordingDirectory.appendingPathComponent(name)
-            guard let data = try? Data(contentsOf: url) else { continue }
-            sourceChildren[name] = FileWrapper(regularFileWithContents: try compress(data))
-        }
-        children[sourceDir] = FileWrapper(directoryWithFileWrappers: sourceChildren)
-
-        // Analyst layer — group present sidecars into their spec subdirs.
-        var subdirs: [String: [String: FileWrapper]] = [:]
-        for sidecar in analystSidecars {
-            let url = recordingDirectory.appendingPathComponent(sidecar.file)
-            guard let data = try? Data(contentsOf: url) else { continue }
-            subdirs[sidecar.subdir, default: [:]][sidecar.file] = FileWrapper(regularFileWithContents: data)
-        }
-        for (dir, files) in subdirs {
-            children[dir] = FileWrapper(directoryWithFileWrappers: files)
+        // Subtrees are keyed by recordingID, so a repeat would silently
+        // overwrite rather than produce the set the analyst asked for.
+        var seen = Set<UUID>()
+        for payload in payloads where !seen.insert(payload.recording.id).inserted {
+            throw MurSessionError.duplicateRecordingID(payload.recording.id)
         }
 
-        if let provenanceJSON { children[provenanceFile] = FileWrapper(regularFileWithContents: provenanceJSON) }
-        if let sessionJSON { children[sessionFile] = FileWrapper(regularFileWithContents: sessionJSON) }
-        // cache/ — pre-encoded (stamped) blobs from the compute layer. Opaque
-        // here; each is a MurSessionCache blob carrying its own version stamp.
-        var cacheChildren: [String: FileWrapper] = [:]
-        for (key, blob) in cacheBlobs {
-            cacheChildren[key] = FileWrapper(regularFileWithContents: blob)
+        var recordChildren: [String: FileWrapper] = [:]
+        for payload in payloads {
+            recordChildren[payload.recording.id.uuidString] = try recordWrapper(for: payload)
         }
-        children[cacheDir] = FileWrapper(directoryWithFileWrappers: cacheChildren)
+
+        var children: [String: FileWrapper] = [
+            recordsDir: FileWrapper(directoryWithFileWrappers: recordChildren),
+        ]
+        if let collectionJSON {
+            children[sessionFile] = FileWrapper(regularFileWithContents: collectionJSON)
+        }
 
         let manifest = MurSessionManifest(
             formatVersion: MurSessionManifest.currentFormatVersion,
             appVersion: appShortVersion,
             createdAt: now,
             modifiedAt: now,
-            source: sourceIdentity(for: recording),
+            records: payloads.map { sourceIdentity(for: $0.recording) },
             sourceStorage: .lzfse,
             contents: children.keys.sorted()
         )
@@ -340,12 +126,90 @@ public enum MurSessionPackage {
         return manifest
     }
 
+    /// Single-record convenience — the shape of a save with nothing flagged.
+    /// The multi-record path is the real one; this just spares every call site
+    /// from wrapping a lone payload (X63-B replaces the app's use of it with
+    /// the sidebar-flagged set).
+    @discardableResult
+    public static func write(
+        recording: Recording,
+        recordingDirectory: URL,
+        provenanceJSON: Data? = nil,
+        sessionJSON: Data? = nil,
+        cacheBlobs: [String: Data] = [:],
+        to packageURL: URL,
+        now: Date = .now
+    ) throws -> MurSessionManifest {
+        try write(
+            records: [
+                RecordPayload(
+                    recording: recording,
+                    recordingDirectory: recordingDirectory,
+                    provenanceJSON: provenanceJSON,
+                    sessionJSON: sessionJSON,
+                    cacheBlobs: cacheBlobs
+                ),
+            ],
+            collectionJSON: try? JSONEncoder().encode(
+                MurCollectionState(activeRecordingID: recording.id)
+            ),
+            to: packageURL,
+            now: now
+        )
+    }
+
+    /// Everything belonging to ONE record: `source/`, the analyst sidecars,
+    /// `provenance.json`, `session.json`, `cache/`.
+    private static func recordWrapper(for payload: RecordPayload) throws -> FileWrapper {
+        var children: [String: FileWrapper] = [:]
+
+        // source/ — the raw recording files (manifest + channel binaries +
+        // pyramids + notes), each LZFSE-compressed so the package stays
+        // portable without bloating. The manifest records `sourceStorage` so
+        // read knows to inflate.
+        var sourceChildren: [String: FileWrapper] = [:]
+        for name in rawSourceFileNames(for: payload.recording) {
+            let url = payload.recordingDirectory.appendingPathComponent(name)
+            guard let data = try? Data(contentsOf: url) else { continue }
+            sourceChildren[name] = FileWrapper(regularFileWithContents: try compress(data))
+        }
+        children[sourceDir] = FileWrapper(directoryWithFileWrappers: sourceChildren)
+
+        // Analyst layer — group present sidecars into their spec subdirs.
+        var subdirs: [String: [String: FileWrapper]] = [:]
+        for sidecar in analystSidecars {
+            let url = payload.recordingDirectory.appendingPathComponent(sidecar.file)
+            guard let data = try? Data(contentsOf: url) else { continue }
+            subdirs[sidecar.subdir, default: [:]][sidecar.file] = FileWrapper(regularFileWithContents: data)
+        }
+        for (dir, files) in subdirs {
+            children[dir] = FileWrapper(directoryWithFileWrappers: files)
+        }
+
+        if let provenanceJSON = payload.provenanceJSON {
+            children[provenanceFile] = FileWrapper(regularFileWithContents: provenanceJSON)
+        }
+        if let sessionJSON = payload.sessionJSON {
+            children[sessionFile] = FileWrapper(regularFileWithContents: sessionJSON)
+        }
+        // cache/ — pre-encoded (stamped) blobs from the compute layer. Opaque
+        // here; each is a MurSessionCache blob carrying its own version stamp.
+        var cacheChildren: [String: FileWrapper] = [:]
+        for (key, blob) in payload.cacheBlobs {
+            cacheChildren[key] = FileWrapper(regularFileWithContents: blob)
+        }
+        children[cacheDir] = FileWrapper(directoryWithFileWrappers: cacheChildren)
+
+        return FileWrapper(directoryWithFileWrappers: children)
+    }
+
     // MARK: - Read
 
-    public struct ReadResult: Sendable {
-        public let manifest: MurSessionManifest
+    /// One reconstituted record, ready for `RecordingStore.loadManifest`.
+    public struct RecordResult: Sendable {
+        public let identity: MurSessionManifest.SourceIdentity
         /// A freshly reconstituted recording directory (source + analyst
-        /// sidecars written back) ready for `RecordingStore.loadManifest`.
+        /// sidecars written back).
         public let recordingDirectory: URL
         public let provenanceJSON: Data?
         public let sessionJSON: Data?
@@ -355,9 +219,30 @@ public enum MurSessionPackage {
         public let cacheDirectory: URL
     }
 
-    /// Reads a `.mur` package, reconstituting a working recording directory
-    /// under `workingDirectory` (created if needed). Refuses a newer format
-    /// version rather than misreading it.
+    public struct ReadResult: Sendable {
+        public let manifest: MurSessionManifest
+        /// Every record in the package, in `manifest.records` order.
+        /// Never empty — `write` refuses to produce a record-less package and
+        /// `read` refuses to return one.
+        public let records: [RecordResult]
+        /// Session-level state (`MurCollectionState`), opaque here.
+        public let collectionJSON: Data?
+
+        /// The record to present first: whatever the analyst had active at
+        /// save, else the first in order.
+        public var activeRecord: RecordResult {
+            guard let json = collectionJSON,
+                  let state = try? JSONDecoder().decode(MurCollectionState.self, from: json),
+                  let id = state.activeRecordingID,
+                  let match = records.first(where: { $0.identity.recordingID == id })
+            else { return records[0] }
+            return match
+        }
+    }
+
+    /// Reads a `.mur` package, reconstituting one working directory PER RECORD
+    /// under `workingDirectory` (created if needed), each named by its
+    /// `recordingID`. Refuses a newer format version rather than misreading it.
     public static func read(packageURL: URL, into workingDirectory: URL) throws -> ReadResult {
         let root = try FileWrapper(url: packageURL, options: [])
         guard let children = root.fileWrappers else {
@@ -368,33 +253,82 @@ public enum MurSessionPackage {
         }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        let manifest = try decoder.decode(MurSessionManifest.self, from: manifestData)
-        guard manifest.formatVersion <= MurSessionManifest.currentFormatVersion else {
-            throw MurSessionError.unsupportedFormatVersion(manifest.formatVersion)
+
+        // VERSION FIRST, then shape. A newer format is free to change the
+        // manifest's shape — that is what a version is for — so decoding the
+        // whole manifest before checking the version would report a future
+        // package as "damaged" instead of "update to open it". Read only the
+        // one field the contract guarantees, and refuse on that.
+        if let probe = try? decoder.decode(FormatVersionProbe.self, from: manifestData),
+           probe.formatVersion > MurSessionManifest.currentFormatVersion {
+            throw MurSessionError.unsupportedFormatVersion(probe.formatVersion)
         }
+
+        // A manifest at OUR version that still won't decode is damage, not a
+        // crash. X63-A deliberately ships no compatibility reader (nothing has
+        // been released), so a package written before the multi-record layout
+        // also lands here — with a message rather than a raw DecodingError.
+        let manifest: MurSessionManifest
+        do {
+            manifest = try decoder.decode(MurSessionManifest.self, from: manifestData)
+        } catch {
+            throw MurSessionError.malformedPackage("its manifest could not be read")
+        }
+        guard !manifest.records.isEmpty else { throw MurSessionError.noRecords }
 
         let fm = FileManager.default
         try fm.createDirectory(at: workingDirectory, withIntermediateDirectories: true)
 
-        // source/ → working root, inflating per `sourceStorage`.
+        guard let recordWrappers = children[recordsDir]?.fileWrappers else {
+            throw MurSessionError.malformedPackage("it has no records")
+        }
+
+        var results: [RecordResult] = []
+        for identity in manifest.records {
+            let key = identity.recordingID.uuidString
+            guard let recordChildren = recordWrappers[key]?.fileWrappers else {
+                throw MurSessionError.malformedPackage("a record listed in its manifest is missing")
+            }
+            let directory = workingDirectory.appendingPathComponent(key, isDirectory: true)
+            try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+            results.append(
+                try reconstitute(recordChildren, identity: identity, storage: manifest.sourceStorage, into: directory)
+            )
+        }
+
+        return ReadResult(
+            manifest: manifest,
+            records: results,
+            collectionJSON: children[sessionFile]?.regularFileContents
+        )
+    }
+
+    /// Writes one record's subtree back out into `directory`.
+    private static func reconstitute(
+        _ children: [String: FileWrapper],
+        identity: MurSessionManifest.SourceIdentity,
+        storage: MurSessionManifest.SourceStorage,
+        into directory: URL
+    ) throws -> RecordResult {
+        // source/ → record root, inflating per `sourceStorage`.
         if let source = children[sourceDir]?.fileWrappers {
             for (name, wrapper) in source {
                 guard let stored = wrapper.regularFileContents else { continue }
-                let data = manifest.sourceStorage == .lzfse ? try decompress(stored) : stored
-                try data.write(to: workingDirectory.appendingPathComponent(name), options: .atomic)
+                let data = storage == .lzfse ? try decompress(stored) : stored
+                try data.write(to: directory.appendingPathComponent(name), options: .atomic)
             }
         }
-        // Analyst sidecars → working root under their original filenames.
+        // Analyst sidecars → record root under their original filenames.
         for sidecar in analystSidecars {
             guard let data = children[sidecar.subdir]?.fileWrappers?[sidecar.file]?.regularFileContents
             else { continue }
-            try data.write(to: workingDirectory.appendingPathComponent(sidecar.file), options: .atomic)
+            try data.write(to: directory.appendingPathComponent(sidecar.file), options: .atomic)
         }
 
-        // cache/ → working cache dir, blobs verbatim (still stamped; the caller
+        // cache/ → record cache dir, blobs verbatim (still stamped; the caller
         // validates each stamp on use and recomputes on a miss).
-        let cacheDirectoryURL = workingDirectory.appendingPathComponent(cacheDir, isDirectory: true)
-        try fm.createDirectory(at: cacheDirectoryURL, withIntermediateDirectories: true)
+        let cacheDirectoryURL = directory.appendingPathComponent(cacheDir, isDirectory: true)
+        try FileManager.default.createDirectory(at: cacheDirectoryURL, withIntermediateDirectories: true)
         if let cache = children[cacheDir]?.fileWrappers {
             for (key, wrapper) in cache {
                 guard let blob = wrapper.regularFileContents else { continue }
@@ -402,9 +336,9 @@ public enum MurSessionPackage {
             }
         }
 
-        return ReadResult(
-            manifest: manifest,
-            recordingDirectory: workingDirectory,
+        return RecordResult(
+            identity: identity,
+            recordingDirectory: directory,
             provenanceJSON: children[provenanceFile]?.regularFileContents,
             sessionJSON: children[sessionFile]?.regularFileContents,
             cacheDirectory: cacheDirectoryURL
