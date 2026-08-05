@@ -24,6 +24,12 @@ public struct ContentView: View {
     /// is exactly when an analyst wants the record list, and without a binding
     /// there was no way back once macOS collapsed it.
     @State private var navigatorVisibility: NavigationSplitViewVisibility = .all
+    /// X63-C: per-record session state + provenance from an opened `.mur`,
+    /// keyed by the same id the navigator and `importStates` use. Staged into
+    /// `CurrentRecordingContext` as each record is activated, so every record
+    /// restores ITS OWN paper rather than the active one's.
+    @State private var sessionStates: [String: MurSessionState] = [:]
+    @State private var sessionProvenances: [String: MurProvenance] = [:]
 
     struct PendingCSVImport: Identifiable {
         let id = UUID()
@@ -36,7 +42,11 @@ public struct ContentView: View {
 
     enum AppState {
         case empty
-        case browsing(folder: URL, records: [WFDBRecordEntry])
+        // X63-C: `browsing` is no longer folder-only. An opened multi-record
+        // `.mur` lands here too, so the navigator, the flag and the detail
+        // pane all stay one code path — the spec's "populate the EXISTING
+        // record sidebar, do not build a second record list".
+        case browsing(source: RecordListSource, records: [RecordListEntry])
         case directView(directory: URL, recording: Recording)
     }
 
@@ -51,8 +61,8 @@ public struct ContentView: View {
             switch state {
             case .empty:
                 emptyShell
-            case .browsing(let folder, let records):
-                browseShell(folder: folder, records: records)
+            case .browsing(let source, let records):
+                browseShell(source: source, records: records)
             case .directView(let directory, let recording):
                 directShell(directory: directory, recording: recording)
             }
@@ -218,37 +228,48 @@ public struct ContentView: View {
             let workingDirectory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("mur-session-\(UUID().uuidString)", isDirectory: true)
             let result = try MurSessionPackage.read(packageURL: url, into: workingDirectory)
-            // X63-A: a package now holds MANY records. Presenting the ACTIVE
-            // one (whatever the analyst had open at save, else the first)
-            // keeps this path behaving exactly as it did for a single-record
-            // package. Reaching the other records — populating the existing
-            // record sidebar from `result.records` — is X63-C; until then a
-            // multi-record package opens on its active record and the rest
-            // are on disk but not yet surfaced.
-            let record = result.activeRecord
-            let recording = try RecordingStore.shared.loadManifest(at: record.recordingDirectory)
-            setAppState(.directView(directory: record.recordingDirectory, recording: recording))
-            // X59: stage any saved session state for the bedside view to apply
-            // when it appears. Sequenced after `setAppState` so the context's
-            // recording is already published when the restore lands. (The
-            // `.directView` branch calls `set(...)`, not `clear()` — only the
-            // `.empty`/`.browsing` branches clear — so this ordering is a
-            // readability choice, not a correctness dependency.)
-            // A package written before session capture (or by an older build)
-            // carries no session.json — decode failure leaves it nil, and the
-            // open behaves exactly as it does today.
-            if let data = record.sessionJSON,
-               let restored = try? JSONDecoder().decode(MurSessionState.self, from: data) {
-                CurrentRecordingContext.shared.pendingSessionRestore = restored
+            // X63-C: surface EVERY record through the same navigator a folder
+            // open uses — the spec's "populate the EXISTING record sidebar, do
+            // not build a second record list". Each record was reconstituted to
+            // its own directory by `read`, so all of them are already
+            // "imported": pre-populating `importStates` is what lets selection,
+            // the flag and the detail pane stay one code path.
+            let plan = try SessionOpenPlan.make(from: result) {
+                try RecordingStore.shared.loadManifest(at: $0)
             }
-            // X26: keep the saved provenance alongside the live (recomputed)
-            // template. Deliberately NOT applied — the template is always
-            // recomputed from the recording; this is the record of what it was,
-            // so a divergence is visible rather than silent.
-            if let data = record.provenanceJSON,
-               let provenance = try? JSONDecoder().decode(MurProvenance.self, from: data) {
-                CurrentRecordingContext.shared.restoredProvenance = provenance
+
+            currentImportTask?.cancel()
+            importStates = plan.records.reduce(into: [:]) { states, record in
+                states[record.id] = .imported(directory: record.directory, recording: record.recording)
             }
+            sessionStates = plan.records.reduce(into: [:]) { states, record in
+                states[record.id] = record.sessionState
+            }
+            sessionProvenances = plan.records.reduce(into: [:]) { store, record in
+                store[record.id] = record.provenance
+            }
+            // A session is its own working set; flags from a previously-open
+            // folder do not belong to it.
+            SessionFlagStore.shared.reset()
+            for record in plan.records {
+                SessionFlagStore.shared.register(
+                    FlaggedRecord(id: record.id, recording: record.recording, directory: record.directory)
+                )
+                // FLAGGED, not merely registered. The records in a session ARE
+                // the analyst's set — that is what saving them together meant.
+                // Leaving them unflagged makes File → Save Session write only
+                // the open record, so opening a 4-record session and saving it
+                // again would silently drop three. A round-trip must not lose
+                // records.
+                SessionFlagStore.shared.flag(record.id)
+            }
+            setAppState(.browsing(source: .session(url), records: plan.records.map(\.entry)))
+
+            // Land on the record the analyst had open when they saved. Setting
+            // `selection` drives `handleSelectionChanged`, which publishes the
+            // recording and stages that record's own saved paper — one path,
+            // whether the analyst arrives here or clicks a row later.
+            selection = plan.activeID
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -305,7 +326,7 @@ public struct ContentView: View {
         }
     }
 
-    private func browseShell(folder: URL, records: [WFDBRecordEntry]) -> some View {
+    private func browseShell(source: RecordListSource, records: [RecordListEntry]) -> some View {
         // X63-B: the record navigator was not appearing when a folder opened —
         // no rows in the accessibility tree and no splitter in the window, on a
         // real 48-record MIT-BIH directory opened through File → Open Record….
@@ -324,7 +345,7 @@ public struct ContentView: View {
         // cannot be reached.
         NavigationSplitView(columnVisibility: $navigatorVisibility) {
             RecordSidebar(records: records, importStates: importStates, selection: $selection)
-                .navigationTitle(folder.lastPathComponent)
+                .navigationTitle(source.displayName)
                 .navigationSplitViewColumnWidth(min: 160, ideal: 240, max: 320)
         } detail: {
             detailPane
@@ -332,7 +353,7 @@ public struct ContentView: View {
                 .toolbar(id: MurmurToolbar.identifier) { openFolderToolbarItem }
         }
         .onChange(of: selection) { _, newValue in
-            handleSelectionChanged(newValue, folder: folder)
+            handleSelectionChanged(newValue, source: source)
         }
     }
 
@@ -407,8 +428,10 @@ public struct ContentView: View {
                 .foregroundStyle(.red)
                 .multilineTextAlignment(.center)
             Button("Retry") {
-                if case .browsing(let folder, _) = state {
-                    startImport(filename: filename, folder: folder)
+                // Only a folder record can be re-imported; a session record's
+                // bytes came out of the package and there is nothing to retry.
+                if case .browsing(.folder(let folder), _) = state {
+                    startImport(filename: filename, source: folder)
                 }
             }
         }
@@ -455,12 +478,14 @@ public struct ContentView: View {
             // session is scoped to the folder being worked. A different folder
             // is a different working set.
             SessionFlagStore.shared.reset()
-            setAppState(.browsing(folder: folderURL, records: records))
+            sessionStates = [:]
+            sessionProvenances = [:]
+            setAppState(.browsing(source: .folder(folderURL), records: records.map(RecordListEntry.init)))
             recentsStore.record(folder: folderURL)
             let firstFilename = records.first?.filename
             selection = firstFilename
             if let firstFilename {
-                startImport(filename: firstFilename, folder: folderURL)
+                startImport(filename: firstFilename, source: folderURL)
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -497,7 +522,7 @@ public struct ContentView: View {
     }
 
     /// Called when the sidebar selection changes.
-    private func handleSelectionChanged(_ filename: String?, folder: URL) {
+    private func handleSelectionChanged(_ filename: String?, source: RecordListSource) {
         // The browsing view keeps `state` at `.browsing` and shows the
         // picked record inline in its detail pane — the whole
         // browse-then-select flow never transitions state to
@@ -511,14 +536,41 @@ public struct ContentView: View {
         switch importStates[filename] {
         case .imported(let dir, let recording):
             CurrentRecordingContext.shared.set(recording: recording, directory: dir)
+            // X63-C: hand this record's OWN saved viewport + paper to the
+            // bedside view. `project_standard_view_is_the_open_state.md` says a
+            // `.mur` restores the analyst's paper rather than snapping to
+            // Standard View; with many records in a package that rule applies
+            // per record, on each activation — not once at open.
+            stageSessionRestore(for: filename)
         case .importing:
             return     // waiting for startImport's completion to fire the set
         default:
-            startImport(filename: filename, folder: folder)
+            // Only a folder record needs importing. A session record was
+            // reconstituted when the package opened, so reaching here for one
+            // means its subtree is missing — surface that rather than kicking
+            // off a WFDB import that has no `.hea` to read.
+            switch source {
+            case .folder(let folder):
+                startImport(filename: filename, source: folder)
+            case .session:
+                errorMessage = "That recording is missing from this session file."
+            }
         }
     }
 
-    private func startImport(filename: String, folder: URL) {
+    /// Stage the per-record session state an opened `.mur` carried, if any.
+    /// Consumed by the bedside view on appear (X59), so a later re-render can
+    /// not re-apply a stale restore over the analyst's own navigation.
+    private func stageSessionRestore(for id: String) {
+        if let state = sessionStates[id] {
+            CurrentRecordingContext.shared.pendingSessionRestore = state
+        }
+        if let provenance = sessionProvenances[id] {
+            CurrentRecordingContext.shared.restoredProvenance = provenance
+        }
+    }
+
+    private func startImport(filename: String, source folder: URL) {
         importStates[filename] = .importing(progress: nil)
         currentImportTask?.cancel()
         currentImportTask = Task {
@@ -810,7 +862,7 @@ public struct ContentView: View {
 // MARK: - Sidebar
 
 private struct RecordSidebar: View {
-    let records: [WFDBRecordEntry]
+    let records: [RecordListEntry]
     let importStates: [String: ContentView.RecordImportState]
     @Binding var selection: String?
     @State private var flags = SessionFlagStore.shared
@@ -820,12 +872,12 @@ private struct RecordSidebar: View {
             ForEach(records) { record in
                 RecordRow(
                     record: record,
-                    importState: importStates[record.filename],
-                    isFlagged: flags.isFlagged(record.filename),
-                    canFlag: isImported(record.filename),
-                    onToggleFlag: { flags.toggle(record.filename) }
+                    importState: importStates[record.id],
+                    isFlagged: flags.isFlagged(record.id),
+                    canFlag: isImported(record.id),
+                    onToggleFlag: { flags.toggle(record.id) }
                 )
-                .tag(record.filename)
+                .tag(record.id)
                 // `.contain` keeps the row's own controls addressable. An
                 // identifier on a container otherwise collapses its subtree to
                 // one element, which is how the Save Session flag ended up
@@ -833,7 +885,7 @@ private struct RecordSidebar: View {
                 // the same defect X51 §1 chased, and the rule
                 // feedback_swiftui_accessibility_contain exists to prevent.
                 .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("record-row-\(record.filename)")
+                .accessibilityIdentifier("record-row-\(record.id)")
             }
         }
     }
@@ -848,7 +900,7 @@ private struct RecordSidebar: View {
 }
 
 private struct RecordRow: View {
-    let record: WFDBRecordEntry
+    let record: RecordListEntry
     let importState: ContentView.RecordImportState?
     let isFlagged: Bool
     let canFlag: Bool
@@ -858,9 +910,9 @@ private struct RecordRow: View {
         HStack(spacing: 8) {
             flagButton
             VStack(alignment: .leading, spacing: 2) {
-                Text(record.header.recordName)
+                Text(record.title)
                     .font(.body.monospaced())
-                Text(subtitle)
+                Text(record.subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -870,26 +922,6 @@ private struct RecordRow: View {
             statusIcon
         }
         .padding(.vertical, 2)
-    }
-
-    private var subtitle: String {
-        let sigs = record.header.signalCount
-        let hz   = Int(record.header.samplingFrequency)
-        var parts = ["\(sigs) sig", "\(hz) Hz"]
-        if record.durationSeconds > 0 {
-            parts.append(formatDuration(record.durationSeconds))
-        }
-        // X56 §3: "N sig • H Hz • M min" is identical for all 48 MIT-BIH records,
-        // so it discriminates nothing while costing a row of height. The first
-        // .hea comment is record-specific (the patient line, or a rhythm note
-        // like 212's rate-related RBBB), so surface it — anything record-specific
-        // beats a constant. Truncated to one line by the Text above.
-        if let note = record.header.comments
-            .map({ $0.trimmingCharacters(in: .whitespaces) })
-            .first(where: { !$0.isEmpty }) {
-            parts.append(note)
-        }
-        return parts.joined(separator: " • ")
     }
 
     /// X63-B: the analyst's "this one matters". File → Save Session writes
@@ -908,7 +940,7 @@ private struct RecordRow: View {
                   ? "Flagged for Save Session. Click to remove."
                   : "Flag this record to include it in Save Session.")
             .accessibilityLabel(isFlagged ? "Flagged" : "Not flagged")
-            .accessibilityIdentifier("record-flag-\(record.filename)")
+            .accessibilityIdentifier("record-flag-\(record.id)")
         } else {
             // Keeps the rows' text aligned whether or not a record is
             // flaggable, so the list doesn't jitter as imports land.
@@ -937,12 +969,6 @@ private struct RecordRow: View {
         case .none:
             EmptyView()
         }
-    }
-
-    private func formatDuration(_ seconds: Double) -> String {
-        if seconds < 60 { return String(format: "%.0f s", seconds) }
-        if seconds < 3600 { return String(format: "%.1f min", seconds / 60) }
-        return String(format: "%.1f hr", seconds / 3600)
     }
 }
 

@@ -189,4 +189,122 @@ struct MurSessionMultiRecordTests {
         #expect(!fm.fileExists(atPath: zero.path), "record 0 had no findings and must not inherit record 1's")
         #expect(try Data(contentsOf: one) == findings)
     }
+
+    // MARK: - X63-C: what the navigator gets
+
+    /// The open path lived inside a SwiftUI view body, reachable only by
+    /// driving the UI. These drive `SessionOpenPlan` directly — it is the step
+    /// where a multi-record package either surfaces every record or quietly
+    /// drops some.
+
+    @Test("Every record in the package becomes a navigator row, in order")
+    func planSurfacesEveryRecord() throws {
+        let bundles = try makeBundles(3)
+        let pkg = try tempDir("pkg").appendingPathComponent("Set.mur")
+        try MurSessionPackage.write(
+            records: bundles.map { .init(recording: $0.recording, recordingDirectory: $0.dir) },
+            to: pkg
+        )
+        let result = try MurSessionPackage.read(packageURL: pkg, into: try tempDir("open"))
+        let plan = try SessionOpenPlan.make(from: result) { dir in
+            try JSONDecoder().decode(Recording.self, from: Data(contentsOf: dir.appendingPathComponent("recording.json")))
+        }
+
+        #expect(plan.records.count == 3, "a package listing 3 records must show 3 rows")
+        #expect(plan.records.map(\.id) == bundles.map { $0.recording.id.uuidString })
+        // Each row points at its OWN reconstituted directory — three rows all
+        // aimed at record 0's bundle would satisfy a bare count assertion.
+        #expect(Set(plan.records.map(\.directory)).count == 3)
+    }
+
+    @Test("The plan selects the record the analyst had open at save")
+    func planSelectsActiveRecord() throws {
+        let bundles = try makeBundles(3)
+        let pkg = try tempDir("pkg").appendingPathComponent("Set.mur")
+        let wanted = bundles[2].recording.id
+        try MurSessionPackage.write(
+            records: bundles.map { .init(recording: $0.recording, recordingDirectory: $0.dir) },
+            collectionJSON: try JSONEncoder().encode(MurCollectionState(activeRecordingID: wanted)),
+            to: pkg
+        )
+        let result = try MurSessionPackage.read(packageURL: pkg, into: try tempDir("open"))
+        let plan = try SessionOpenPlan.make(from: result) { dir in
+            try JSONDecoder().decode(Recording.self, from: Data(contentsOf: dir.appendingPathComponent("recording.json")))
+        }
+        #expect(plan.activeID == wanted.uuidString)
+    }
+
+    /// `project_standard_view_is_the_open_state.md` says a `.mur` restores the
+    /// analyst's saved paper rather than snapping to Standard View. With many
+    /// records that rule is PER RECORD — each row must carry its own, or
+    /// activating record B would restore record A's viewport.
+    @Test("Each record carries its own saved paper, not the active one's")
+    func planKeepsPerRecordState() throws {
+        let bundles = try makeBundles(2)
+        let pkg = try tempDir("pkg").appendingPathComponent("Set.mur")
+        let first = MurSessionState(viewportStartSample: 11, gainMillimetersPerMillivolt: 10)
+        let second = MurSessionState(viewportStartSample: 22, gainMillimetersPerMillivolt: 20)
+        try MurSessionPackage.write(
+            records: [
+                .init(recording: bundles[0].recording, recordingDirectory: bundles[0].dir,
+                      sessionJSON: try JSONEncoder().encode(first)),
+                .init(recording: bundles[1].recording, recordingDirectory: bundles[1].dir,
+                      sessionJSON: try JSONEncoder().encode(second)),
+            ],
+            to: pkg
+        )
+        let result = try MurSessionPackage.read(packageURL: pkg, into: try tempDir("open"))
+        let plan = try SessionOpenPlan.make(from: result) { dir in
+            try JSONDecoder().decode(Recording.self, from: Data(contentsOf: dir.appendingPathComponent("recording.json")))
+        }
+        #expect(plan.records[0].sessionState?.viewportStartSample == 11)
+        #expect(plan.records[0].sessionState?.gainMillimetersPerMillivolt == 10)
+        #expect(plan.records[1].sessionState?.viewportStartSample == 22)
+        #expect(plan.records[1].sessionState?.gainMillimetersPerMillivolt == 20)
+    }
+
+    @Test("A record with no saved state carries none, rather than inheriting")
+    func planLeavesAbsentStateAbsent() throws {
+        let bundles = try makeBundles(2)
+        let pkg = try tempDir("pkg").appendingPathComponent("Set.mur")
+        try MurSessionPackage.write(
+            records: [
+                .init(recording: bundles[0].recording, recordingDirectory: bundles[0].dir,
+                      sessionJSON: try JSONEncoder().encode(MurSessionState(viewportStartSample: 11))),
+                .init(recording: bundles[1].recording, recordingDirectory: bundles[1].dir),
+            ],
+            to: pkg
+        )
+        let result = try MurSessionPackage.read(packageURL: pkg, into: try tempDir("open"))
+        let plan = try SessionOpenPlan.make(from: result) { dir in
+            try JSONDecoder().decode(Recording.self, from: Data(contentsOf: dir.appendingPathComponent("recording.json")))
+        }
+        #expect(plan.records[0].sessionState != nil)
+        #expect(plan.records[1].sessionState == nil,
+                "an unsaved record opens like a raw import, not on its neighbour's paper")
+    }
+
+    /// A navigator that lists four records and shows three is worse than one
+    /// that refuses: the analyst would not know which was missing.
+    @Test("A record that fails to load fails the open, rather than vanishing")
+    func planRefusesPartialLoad() throws {
+        let bundles = try makeBundles(2)
+        let pkg = try tempDir("pkg").appendingPathComponent("Set.mur")
+        try MurSessionPackage.write(
+            records: bundles.map { .init(recording: $0.recording, recordingDirectory: $0.dir) },
+            to: pkg
+        )
+        let result = try MurSessionPackage.read(packageURL: pkg, into: try tempDir("open"))
+        struct LoadFailure: Error {}
+        var seen = 0
+        #expect(throws: LoadFailure.self) {
+            _ = try SessionOpenPlan.make(from: result) { dir in
+                seen += 1
+                if seen == 2 { throw LoadFailure() }
+                return try JSONDecoder().decode(
+                    Recording.self, from: Data(contentsOf: dir.appendingPathComponent("recording.json"))
+                )
+            }
+        }
+    }
 }

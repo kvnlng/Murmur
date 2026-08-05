@@ -83,6 +83,13 @@ public final class SessionFlagStore {
         }
     }
 
+    /// Flag a record outright, and settle its pre-flag default. Used when a
+    /// session is opened: its records are already the analyst's chosen set.
+    public func flag(_ id: String) {
+        defaulted.insert(id)
+        flaggedIDs.insert(id)
+    }
+
     /// Register (or re-register) an imported record. Idempotent: re-importing
     /// the same record replaces its entry without disturbing its flag.
     public func register(_ record: FlaggedRecord) {
