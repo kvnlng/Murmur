@@ -153,6 +153,24 @@ struct SessionFlagStoreTests {
         #expect(!AnalystLayerProbe.hasAnalystWork(in: try tempDir("empty")))
     }
 
+    /// X63-C: opening a session flags its records, because those records ARE
+    /// the analyst's set. Without this, opening a 4-record session and hitting
+    /// Save Session would write only the open record and drop three.
+    @Test("Flagging outright also settles the pre-flag default")
+    func flagIsExplicitAndSticks() throws {
+        let dir = try tempDir("session-record")
+        let store = SessionFlagStore()
+        store.flag("100.hea")
+        #expect(store.isFlagged("100.hea"))
+        // A later default pass must not un-flag it, and must not re-flag it
+        // after the analyst clears it.
+        store.applyDefaultFlag(for: "100.hea", directory: dir)
+        #expect(store.isFlagged("100.hea"))
+        store.toggle("100.hea")
+        store.applyDefaultFlag(for: "100.hea", directory: dir)
+        #expect(!store.isFlagged("100.hea"))
+    }
+
     // MARK: - What a save actually writes
 
     private let sessionJSON = Data(#"{"viewportStartSample":7}"#.utf8)
