@@ -209,6 +209,11 @@ struct MurmurApp: App {
             recordCount: payloads.count,
             singleSourceFileName: payloads.first?.recording.sourceFileName
         )
+        // X63-D: encryption is OPTIONAL PER SAVE — off by default, opted into
+        // here. SAVE stays free, encrypted or not; this is never an entitlement
+        // check.
+        let accessory = SessionPassphrasePrompt.SaveAccessory()
+        panel.accessoryView = accessory
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             try MurSessionPackage.write(
@@ -218,6 +223,7 @@ struct MurmurApp: App {
                 collectionJSON: try? JSONEncoder().encode(
                     MurCollectionState(activeRecordingID: context.recording?.id)
                 ),
+                passphrase: accessory.passphrase,
                 to: url
             )
         } catch {

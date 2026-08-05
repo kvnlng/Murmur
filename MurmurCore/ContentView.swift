@@ -227,7 +227,16 @@ public struct ContentView: View {
         do {
             let workingDirectory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("mur-session-\(UUID().uuidString)", isDirectory: true)
-            let result = try MurSessionPackage.read(packageURL: url, into: workingDirectory)
+            // Cancelling the passphrase prompt yields nil — "not now", not a
+            // failure, so nothing is surfaced.
+            guard let result = try SessionPackageOpener.read(
+                packageURL: url, into: workingDirectory,
+                prompt: { retry in
+                    SessionPassphrasePrompt.askToOpen(
+                        fileName: url.lastPathComponent, retryAfterFailure: retry
+                    ).map { .passphrase($0) } ?? .cancelled
+                }
+            ) else { return }
             // X63-C: surface EVERY record through the same navigator a folder
             // open uses — the spec's "populate the EXISTING record sidebar, do
             // not build a second record list". Each record was reconstituted to

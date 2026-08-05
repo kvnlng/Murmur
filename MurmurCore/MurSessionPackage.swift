@@ -30,6 +30,10 @@ public enum MurSessionPackage {
     /// a filename on the outside of the package would identify its contents.
     static let recordsDir = "records"
 
+    /// The sealed blob on an encrypted package — the entire plaintext package,
+    /// serialized and encrypted as one unit (X63-D).
+    static let payloadFile = "payload.enc"
+
     /// Analyst-layer sidecars folded into the package by their real filenames,
     /// grouped into spec subdirectories. Reconstitution writes each back to the
     /// working directory root under its original filename, so the subdir is
@@ -83,6 +87,7 @@ public enum MurSessionPackage {
     public static func write(
         records payloads: [RecordPayload],
         collectionJSON: Data? = nil,
+        passphrase: String? = nil,
         to packageURL: URL,
         now: Date = .now
     ) throws -> MurSessionManifest {
@@ -113,17 +118,86 @@ public enum MurSessionPackage {
             createdAt: now,
             modifiedAt: now,
             records: payloads.map { sourceIdentity(for: $0.recording) },
+            encryption: nil,
             sourceStorage: .lzfse,
             contents: children.keys.sorted()
         )
+        children[manifestFile] = FileWrapper(regularFileWithContents: try encode(manifest))
+
+        guard let passphrase, !passphrase.isEmpty else {
+            let root = FileWrapper(directoryWithFileWrappers: children)
+            try root.write(to: packageURL, options: .atomic, originalContentsURL: nil)
+            return manifest
+        }
+        return try writeEncrypted(
+            plaintextChildren: children, passphrase: passphrase, manifest: manifest,
+            to: packageURL, now: now
+        )
+    }
+
+    /// Seal the ENTIRE plaintext package — its own manifest, `records/`, and
+    /// session state — as one blob, and write it beside a minimal manifest.
+    ///
+    /// Sealing the whole tree rather than each file is deliberate. Per-file
+    /// encryption would preserve the directory structure on the outside, so the
+    /// record count and every `recordingID` would remain readable — the thing
+    /// encryption is here to prevent. The accepted cost is that an encrypted
+    /// package is resealed whole on every save and loses `NSFileWrapper`'s
+    /// incremental writes.
+    private static func writeEncrypted(
+        plaintextChildren: [String: FileWrapper],
+        passphrase: String,
+        manifest: MurSessionManifest,
+        to packageURL: URL,
+        now: Date
+    ) throws -> MurSessionManifest {
+        let salt = MurSessionCrypto.makeSalt()
+        let parameters = MurSessionManifest.EncryptionParameters(
+            kdf: MurSessionCrypto.kdfIdentifier,
+            iterations: MurSessionCrypto.defaultIterations,
+            salt: salt,
+            cipher: MurSessionCrypto.cipherIdentifier
+        )
+        // The outward-facing manifest says only that this is a Murmur session,
+        // that it is sealed, and how to re-derive the key. `records` and
+        // `contents` are omitted: a filename identifies a recording and a count
+        // is information.
+        let outer = MurSessionManifest(
+            formatVersion: MurSessionManifest.currentFormatVersion,
+            appVersion: manifest.appVersion,
+            createdAt: now,
+            modifiedAt: now,
+            records: nil,
+            encryption: parameters,
+            sourceStorage: manifest.sourceStorage,
+            contents: nil
+        )
+        let outerData = try encode(outer)
+
+        let plaintextRoot = FileWrapper(directoryWithFileWrappers: plaintextChildren)
+        let key = try MurSessionCrypto.deriveKey(
+            passphrase: passphrase, salt: salt, iterations: parameters.iterations
+        )
+        // The outer manifest is the AAD, so swapping it invalidates the seal.
+        let sealed = try MurSessionCrypto.seal(
+            plaintextRoot.serializedRepresentation ?? Data(),
+            key: key,
+            authenticating: outerData
+        )
+
+        let root = FileWrapper(directoryWithFileWrappers: [
+            manifestFile: FileWrapper(regularFileWithContents: outerData),
+            payloadFile: FileWrapper(regularFileWithContents: sealed),
+        ])
+        try root.write(to: packageURL, options: .atomic, originalContentsURL: nil)
+        return outer
+    }
+
+    private static func encode(_ manifest: MurSessionManifest) throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
-        children[manifestFile] = FileWrapper(regularFileWithContents: try encoder.encode(manifest))
-
-        let root = FileWrapper(directoryWithFileWrappers: children)
-        try root.write(to: packageURL, options: .atomic, originalContentsURL: nil)
-        return manifest
+        return try encoder.encode(manifest)
     }
 
     /// Single-record convenience — the shape of a save with nothing flagged.
@@ -137,6 +211,7 @@ public enum MurSessionPackage {
         provenanceJSON: Data? = nil,
         sessionJSON: Data? = nil,
         cacheBlobs: [String: Data] = [:],
+        passphrase: String? = nil,
         to packageURL: URL,
         now: Date = .now
     ) throws -> MurSessionManifest {
@@ -153,6 +228,7 @@ public enum MurSessionPackage {
             collectionJSON: try? JSONEncoder().encode(
                 MurCollectionState(activeRecordingID: recording.id)
             ),
+            passphrase: passphrase,
             to: packageURL,
             now: now
         )
@@ -243,13 +319,49 @@ public enum MurSessionPackage {
     /// Reads a `.mur` package, reconstituting one working directory PER RECORD
     /// under `workingDirectory` (created if needed), each named by its
     /// `recordingID`. Refuses a newer format version rather than misreading it.
-    public static func read(packageURL: URL, into workingDirectory: URL) throws -> ReadResult {
+    public static func read(
+        packageURL: URL,
+        into workingDirectory: URL,
+        passphrase: String? = nil
+    ) throws -> ReadResult {
         let root = try FileWrapper(url: packageURL, options: [])
-        guard let children = root.fileWrappers else {
+        guard var children = root.fileWrappers else {
             throw MurSessionError.malformedPackage("not a package directory")
         }
-        guard let manifestData = children[manifestFile]?.regularFileContents else {
+        guard var manifestData = children[manifestFile]?.regularFileContents else {
             throw MurSessionError.missingManifest
+        }
+
+        // X63-D: an encrypted package is a minimal manifest plus one sealed
+        // blob holding the ENTIRE plaintext package. Unsealing yields exactly
+        // the structure the plaintext reader below already understands, so
+        // there is one reader rather than two — the encrypted path is a
+        // decrypt step in front of it, not a parallel implementation.
+        if let parameters = try encryptionParameters(from: manifestData) {
+            guard let passphrase, !passphrase.isEmpty else {
+                throw MurSessionError.passphraseRequired
+            }
+            guard let sealed = children[payloadFile]?.regularFileContents else {
+                throw MurSessionError.malformedPackage("its encrypted payload is missing")
+            }
+            let key = try MurSessionCrypto.deriveKey(
+                passphrase: passphrase, salt: parameters.salt, iterations: parameters.iterations
+            )
+            // The outer manifest is the AAD, so a swapped header fails here
+            // rather than being silently accepted.
+            let plaintext = try MurSessionCrypto.open(
+                sealed, key: key, authenticating: manifestData
+            )
+            let inner = FileWrapper(serializedRepresentation: plaintext)
+            guard let innerChildren = inner?.fileWrappers,
+                  let innerManifest = innerChildren[manifestFile]?.regularFileContents else {
+                // Authentication already passed, so the bytes are ours and
+                // intact — a failure here is a real structural problem, not a
+                // wrong passphrase, and must not be reported as one.
+                throw MurSessionError.malformedPackage("its decrypted contents could not be read")
+            }
+            children = innerChildren
+            manifestData = innerManifest
         }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
@@ -274,7 +386,11 @@ public enum MurSessionPackage {
         } catch {
             throw MurSessionError.malformedPackage("its manifest could not be read")
         }
-        guard !manifest.records.isEmpty else { throw MurSessionError.noRecords }
+        // `records` is absent only on an encrypted manifest, and by here the
+        // payload has been opened and `manifest` is the INNER one.
+        guard let identities = manifest.records, !identities.isEmpty else {
+            throw MurSessionError.noRecords
+        }
 
         let fm = FileManager.default
         try fm.createDirectory(at: workingDirectory, withIntermediateDirectories: true)
@@ -284,7 +400,7 @@ public enum MurSessionPackage {
         }
 
         var results: [RecordResult] = []
-        for identity in manifest.records {
+        for identity in identities {
             let key = identity.recordingID.uuidString
             guard let recordChildren = recordWrappers[key]?.fileWrappers else {
                 throw MurSessionError.malformedPackage("a record listed in its manifest is missing")
@@ -301,6 +417,18 @@ public enum MurSessionPackage {
             records: results,
             collectionJSON: children[sessionFile]?.regularFileContents
         )
+    }
+
+    /// Read only the encryption block from a manifest, without committing to
+    /// the rest of its shape — an encrypted manifest deliberately omits fields
+    /// the plaintext one requires.
+    private static func encryptionParameters(
+        from manifestData: Data
+    ) throws -> MurSessionManifest.EncryptionParameters? {
+        struct Probe: Decodable {
+            let encryption: MurSessionManifest.EncryptionParameters?
+        }
+        return (try? JSONDecoder().decode(Probe.self, from: manifestData))?.encryption
     }
 
     /// Writes one record's subtree back out into `directory`.

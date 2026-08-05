@@ -55,8 +55,8 @@ struct MurSessionPackageTests {
         )
         #expect(manifest.formatVersion == MurSessionManifest.currentFormatVersion)
         #expect(manifest.sourceStorage == .lzfse)
-        #expect(manifest.records[0].recordingID == recording.id)
-        #expect(manifest.records[0].channelCount == 1)
+        #expect(manifest.records?[0].recordingID == recording.id)
+        #expect(manifest.records?[0].channelCount == 1)
 
         let out = try tempDir("open")
         let result = try MurSessionPackage.read(packageURL: pkg, into: out)
