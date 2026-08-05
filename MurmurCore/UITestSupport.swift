@@ -88,13 +88,24 @@
 //        letting XCUI assert the URL each Help menu item / link targets
 //        without launching a browser.
 //
-//    --ui-test-expand-all-findings-groups
-//        Auto-expands every deviation-ranked group row in the review
-//        queue on first render, so tests that need `finding-row-<cat>`
-//        exemplars visible can proceed without first driving a click
-//        on the group's disclosure chevron. Only affects the default
-//        expandedGroups set; the analyst's toggle behaviour is
-//        unchanged.
+//    --ui-test-collapse-findings-groups
+//        Restores the SHIPPING collapsed state of the review queue's
+//        deviation-ranked group rows.
+//
+//        X65 (2026-08-04) INVERTED this: under a UI test, groups now
+//        render EXPANDED by default, so a test needing
+//        `finding-row-<cat>` exemplars no longer has to ask. The old
+//        opt-in `--ui-test-expand-all-findings-groups` is GONE; twelve
+//        tests each had to remember it, and forgetting produced a bare
+//        "element does not exist" that named nothing.
+//
+//        Pass this flag only when collapse itself is what you are
+//        exercising. Note what that means: under XCUI the app's real
+//        default is no longer observable, so such a test asserts a state
+//        it asked for rather than the shipping default. Kevin took that
+//        trade knowingly — do not quietly reverse it, and do not add a
+//        third mode. Only affects the initial expandedGroups set; the
+//        analyst's toggle behaviour is unchanged.
 //
 
 #if DEBUG
@@ -269,13 +280,32 @@ enum UITestSupport {
         ProcessInfo.processInfo.arguments.contains("--ui-test-author-range")
     }
 
-    /// True when `--ui-test-expand-all-findings-groups` is passed.
-    /// The review-queue rail reads this and initialises its expanded-
-    /// groups set to include every category, so exemplar rows
-    /// (`finding-row-<category>`) are addressable without first
-    /// driving a click on the group's disclosure chevron.
-    static var expandAllFindingsGroups: Bool {
-        ProcessInfo.processInfo.arguments.contains("--ui-test-expand-all-findings-groups")
+    /// True when `--ui-test-collapse-findings-groups` is passed. Restores the
+    /// SHIPPING collapsed default for a test that is specifically exercising
+    /// collapse — see `shouldExpandFindingsGroups`.
+    static var collapseFindingsGroups: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-collapse-findings-groups")
+    }
+
+    /// Whether the review-queue rail should initialise with every group
+    /// expanded, so exemplar rows (`finding-row-<category>`) are addressable
+    /// without first clicking a disclosure chevron.
+    ///
+    /// X65: **expanded is the default under UI test, collapsed elsewhere.**
+    /// This inverts the previous opt-in `--ui-test-expand-all-findings-groups`,
+    /// which twelve tests each had to remember. Forgetting it was invisible in
+    /// the worst way — the row was in no tree, so the failure read "element
+    /// does not exist" with nothing pointing at the cause.
+    ///
+    /// **The cost, stated plainly:** the app's real collapsed default is no
+    /// longer what a UI test sees, so no XCUI test can observe it. The two
+    /// tests that exercise collapse now pass
+    /// `--ui-test-collapse-findings-groups` and are asserting a state they
+    /// asked for rather than the shipping default. Kevin took this trade
+    /// knowingly on 2026-08-04; do not quietly reverse it, and do not add a
+    /// third mode.
+    static var shouldExpandFindingsGroups: Bool {
+        isRunningUITest && !collapseFindingsGroups
     }
 
     /// If `--ui-test-seed-beat-annotations=N` is set, returns N. The

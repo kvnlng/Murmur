@@ -161,7 +161,9 @@ final class MurmurUILargeDatasetTests: XCTestCase {
         // animateJump path on a 1-hour viewport. The scaled annotation
         // generator places findings evenly through the recording, so the
         // last few finding-row-VT / -VF entries are >55 min in.
-        let app = launchWithExpandedFindingsGroups(["--ui-test-load-prepped-bundle"], replacingDefaults: true)
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-test-load-prepped-bundle"]
+        app.launch()
 
         let bedside = app.descendants(matching: .any)
             .matching(identifier: "bedside-view").firstMatch

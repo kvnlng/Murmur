@@ -93,7 +93,12 @@ final class MurmurUIPerformanceTests: XCTestCase {
         //
         // Launch happens outside the measure block so we're timing the
         // interaction, not the launch (covered by testSyntheticFixtureLoadTime).
-        let app = launchWithExpandedFindingsGroups(["--ui-test-sample", "--ui-test-initial-duration=2"], replacingDefaults: true)
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--ui-test-sample",
+            "--ui-test-initial-duration=2"
+        ]
+        app.launch()
 
         let viewportState = app.descendants(matching: .any)
             .matching(identifier: "ui-test-viewport-state").firstMatch
@@ -367,7 +372,9 @@ final class MurmurUIPerformanceTests: XCTestCase {
         // Measures the toolbar-click → panel-content-disappears round-trip.
         // Catches regressions in the inspector animation cost as the
         // findings panel grows feature-wise (chips, badges, etc.).
-        let app = launchWithExpandedFindingsGroups(["--ui-test-sample"], replacingDefaults: true)
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-test-sample"]
+        app.launch()
 
         let toggle = app.buttons.matching(identifier: "findings-toggle").firstMatch
         XCTAssertTrue(toggle.waitForExistence(timeout: 10))

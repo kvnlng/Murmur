@@ -154,14 +154,14 @@ struct FindingsPanel: View {
         }
     }
 
-    /// If the `--ui-test-expand-all-findings-groups` launch arg is
-    /// set, expand every group's exemplar list so tests can address
-    /// `finding-row-<category>` directly. Analyst behaviour is
-    /// unchanged; the toggle path still works — the override just
-    /// widens the set to include every category currently present.
+    /// Under a UI test, expand every group's exemplar list so tests can
+    /// address `finding-row-<category>` directly (X65 — expanded is now the
+    /// default under XCUI; `--ui-test-collapse-findings-groups` opts back
+    /// out). Analyst behaviour is unchanged; the toggle path still works —
+    /// the override just widens the set to include every category present.
     private func applyUITestExpandOverride() {
         #if DEBUG
-        guard UITestSupport.expandAllFindingsGroups else { return }
+        guard UITestSupport.shouldExpandFindingsGroups else { return }
         let allCategories = Set(annotations.map(\.category))
         expandedGroups = allCategories
         #endif
