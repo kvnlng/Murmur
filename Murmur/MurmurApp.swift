@@ -85,6 +85,12 @@ struct MurmurApp: App {
             // macOS 26, so labels are the only way an icon-only button can
             // say what it does.
             ToolbarCommands()
+            // X63-B: View ▸ Show/Hide Sidebar. The record navigator had no
+            // toggle of any kind — no menu item, no toolbar button — so once
+            // macOS collapsed the column an analyst could not get the record
+            // list back. That also made the Save Session flag, which lives on
+            // a navigator row, unreachable.
+            SidebarCommands()
             // File menu — native .mur session Save/Open. SAVE is free (per the
             // save-vs-export model): it reads the current recording + its bundle
             // and writes a portable Murmur session package. OPEN routes the
@@ -176,45 +182,83 @@ struct MurmurApp: App {
 
     private static let sessionType = UTType("com.kevinlong.murmur.session")
 
-    /// Writes the current recording + its analyst layer to a `.mur` package the
-    /// analyst chooses the location of, including the live session snapshot
-    /// (X59) so a reopen lands them back where they were. Provenance capture is
-    /// still a later refinement.
+    /// Writes the analyst's session to a `.mur` package they choose the location
+    /// of, including the live session snapshot (X59) so a reopen lands them back
+    /// where they were.
+    ///
+    /// X63-B: this writes the FLAGGED SET from the record sidebar. With nothing
+    /// flagged it writes the open record alone, so the single-record gesture is
+    /// unchanged — an analyst who never touches a flag never notices this.
+    ///
+    /// The panel states what it is about to write. An analyst must not discover
+    /// the scope of their own save afterwards.
     @MainActor private func saveSessionPanel() {
         let context = CurrentRecordingContext.shared
-        guard let recording = context.recording, let directory = context.directory else {
+        let payloads = sessionPayloads()
+        guard !payloads.isEmpty else {
             presentSessionAlert(title: "No recording open",
                                 message: "Open a recording before saving a Murmur session.")
             return
         }
         let panel = NSSavePanel()
         panel.title = "Save Murmur Session"
+        panel.message = SessionSaveScope.message(recordCount: payloads.count)
         if let type = Self.sessionType { panel.allowedContentTypes = [type] }
         panel.canCreateDirectories = true
-        let base = (recording.sourceFileName as NSString).deletingPathExtension
-        panel.nameFieldStringValue = "\(base.isEmpty ? "Session" : base).mur"
+        panel.nameFieldStringValue = SessionSaveScope.defaultFileName(
+            recordCount: payloads.count,
+            singleSourceFileName: payloads.first?.recording.sourceFileName
+        )
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            // X59: capture the live session snapshot the bedside view publishes.
-            // Encoding failure must not cost the analyst their save — fall back
-            // to writing without it rather than throwing the whole save away.
-            let sessionJSON = try? JSONEncoder().encode(context.liveSessionState)
-            // X26: record what the analyst's numbers were MADE OF — the
-            // template's population, lead, span and formula — so the saved
-            // measurement stays auditable if the delineator or the formula
-            // default moves in a later version. Absent when there is no
-            // template; never a fabricated zero-beat one.
-            let provenanceJSON = MurProvenance.NormalTemplate(
-                IntervalMarkingsContext.shared.template
-            ).flatMap { try? JSONEncoder().encode(MurProvenance(normalTemplate: $0)) }
-            try MurSessionPackage.write(recording: recording,
-                                        recordingDirectory: directory,
-                                        provenanceJSON: provenanceJSON,
-                                        sessionJSON: sessionJSON,
-                                        to: url)
+            try MurSessionPackage.write(
+                records: payloads,
+                // Land the reopen on whatever the analyst had open, which is
+                // rarely whichever record sorted first.
+                collectionJSON: try? JSONEncoder().encode(
+                    MurCollectionState(activeRecordingID: context.recording?.id)
+                ),
+                to: url
+            )
         } catch {
             presentSessionAlert(title: "Couldn't save session", message: error.localizedDescription)
         }
+    }
+
+    /// The records a save would write: the flagged set, or — with nothing
+    /// flagged — the open record alone.
+    ///
+    /// Only the OPEN record gets the live session snapshot and provenance:
+    /// those describe where the analyst is and what the on-screen numbers were
+    /// made of, and neither is knowable for a record that is merely flagged.
+    /// Writing the open record's viewport onto every record in the set would be
+    /// a fabricated coordinate — the X32 error class.
+    @MainActor private func sessionPayloads() -> [MurSessionPackage.RecordPayload] {
+        let context = CurrentRecordingContext.shared
+        // X59: capture the live session snapshot the bedside view publishes.
+        // Encoding failure must not cost the analyst their save — fall back to
+        // writing without it rather than throwing the whole save away.
+        let sessionJSON = try? JSONEncoder().encode(context.liveSessionState)
+        // X26: record what the analyst's numbers were MADE OF — the template's
+        // population, lead, span and formula — so the saved measurement stays
+        // auditable if the delineator or the formula default moves in a later
+        // version. Absent when there is no template; never a fabricated
+        // zero-beat one.
+        let provenanceJSON = MurProvenance.NormalTemplate(
+            IntervalMarkingsContext.shared.template
+        ).flatMap { try? JSONEncoder().encode(MurProvenance(normalTemplate: $0)) }
+
+        // The RULE lives in MurmurCore so it can be unit-tested. This command
+        // is a menu handler wrapped around an NSSavePanel — system-modal, not
+        // XCUI-drivable — so anything decided in here is untestable by
+        // construction.
+        return SessionSaveSet.payloads(
+            flagged: SessionFlagStore.shared.flaggedRecords,
+            openRecording: context.recording,
+            openDirectory: context.directory,
+            sessionJSON: sessionJSON,
+            provenanceJSON: provenanceJSON
+        )
     }
 
     /// Opens a folder of WFDB records — the primary open action, previously

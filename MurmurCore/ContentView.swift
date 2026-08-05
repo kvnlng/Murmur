@@ -19,6 +19,11 @@ public struct ContentView: View {
     @State private var docCoordinator = SessionDocumentCoordinator.shared
     /// A header-less CSV awaiting metadata from the import dialog.
     @State private var pendingCSV: PendingCSVImport?
+    /// X63-B: the record navigator's column state. Held by the app rather than
+    /// left to the split view so it can be shown deliberately — a folder open
+    /// is exactly when an analyst wants the record list, and without a binding
+    /// there was no way back once macOS collapsed it.
+    @State private var navigatorVisibility: NavigationSplitViewVisibility = .all
 
     struct PendingCSVImport: Identifiable {
         let id = UUID()
@@ -301,7 +306,23 @@ public struct ContentView: View {
     }
 
     private func browseShell(folder: URL, records: [WFDBRecordEntry]) -> some View {
-        NavigationSplitView {
+        // X63-B: the record navigator was not appearing when a folder opened —
+        // no rows in the accessibility tree and no splitter in the window, on a
+        // real 48-record MIT-BIH directory opened through File → Open Record….
+        // Verified longstanding, not a regression: the same probe returns
+        // nothing on the commit before the X60 toolbar work.
+        //
+        // The split view had no `columnVisibility` binding, so once macOS
+        // collapsed the column nothing could bring it back — the app ships no
+        // `SidebarCommands()` either, so there was no menu item and no toolbar
+        // toggle. Holding the binding here makes the navigator's visibility
+        // state the app's to control; `SidebarCommands()` in MurmurApp gives
+        // the analyst the View ▸ Show/Hide Sidebar item to drive it.
+        //
+        // This matters beyond navigation: the Save Session flag lives on a
+        // sidebar row, so a navigator that cannot be shown is a feature that
+        // cannot be reached.
+        NavigationSplitView(columnVisibility: $navigatorVisibility) {
             RecordSidebar(records: records, importStates: importStates, selection: $selection)
                 .navigationTitle(folder.lastPathComponent)
                 .navigationSplitViewColumnWidth(min: 160, ideal: 240, max: 320)
@@ -430,6 +451,10 @@ public struct ContentView: View {
             }
             currentImportTask?.cancel()
             importStates = [:]
+            // X63-B: a flag says "this record belongs in my session", and a
+            // session is scoped to the folder being worked. A different folder
+            // is a different working set.
+            SessionFlagStore.shared.reset()
             setAppState(.browsing(folder: folderURL, records: records))
             recentsStore.record(folder: folderURL)
             let firstFilename = records.first?.filename
@@ -511,6 +536,20 @@ public struct ContentView: View {
                 )
                 await MainActor.run {
                     importStates[filename] = .imported(directory: summary.directory, recording: summary.recording)
+                    // X63-B: only an imported record can be saved, so this is
+                    // where it becomes flaggable. The pre-flag default fires
+                    // once — a record already carrying analyst work starts
+                    // flagged, and an analyst who unflags it stays unflagged.
+                    SessionFlagStore.shared.register(
+                        FlaggedRecord(
+                            id: filename,
+                            recording: summary.recording,
+                            directory: summary.directory
+                        )
+                    )
+                    SessionFlagStore.shared.applyDefaultFlag(
+                        for: filename, directory: summary.directory
+                    )
                     // If this import corresponds to the record currently
                     // selected in the browsing sidebar, publish it as the
                     // current recording so ECG Metrics + friends light up.
@@ -774,27 +813,50 @@ private struct RecordSidebar: View {
     let records: [WFDBRecordEntry]
     let importStates: [String: ContentView.RecordImportState]
     @Binding var selection: String?
+    @State private var flags = SessionFlagStore.shared
 
     var body: some View {
         List(selection: $selection) {
             ForEach(records) { record in
                 RecordRow(
                     record: record,
-                    importState: importStates[record.filename]
+                    importState: importStates[record.filename],
+                    isFlagged: flags.isFlagged(record.filename),
+                    canFlag: isImported(record.filename),
+                    onToggleFlag: { flags.toggle(record.filename) }
                 )
                 .tag(record.filename)
+                // `.contain` keeps the row's own controls addressable. An
+                // identifier on a container otherwise collapses its subtree to
+                // one element, which is how the Save Session flag ended up
+                // clickable by hand but invisible to VoiceOver and XCUI —
+                // the same defect X51 §1 chased, and the rule
+                // feedback_swiftui_accessibility_contain exists to prevent.
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("record-row-\(record.filename)")
             }
         }
+    }
+
+    /// Only an IMPORTED record can be saved — it is the import that produces
+    /// the `Recording` and the bundle a `.mur` embeds. Flagging one that has
+    /// never been opened would promise a save that could not include it.
+    private func isImported(_ filename: String) -> Bool {
+        if case .imported = importStates[filename] { return true }
+        return false
     }
 }
 
 private struct RecordRow: View {
     let record: WFDBRecordEntry
     let importState: ContentView.RecordImportState?
+    let isFlagged: Bool
+    let canFlag: Bool
+    let onToggleFlag: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
+            flagButton
             VStack(alignment: .leading, spacing: 2) {
                 Text(record.header.recordName)
                     .font(.body.monospaced())
@@ -828,6 +890,30 @@ private struct RecordRow: View {
             parts.append(note)
         }
         return parts.joined(separator: " • ")
+    }
+
+    /// X63-B: the analyst's "this one matters". File → Save Session writes
+    /// exactly the flagged set, so this is the only selection concept — there
+    /// is no separate basket or multi-select.
+    @ViewBuilder
+    private var flagButton: some View {
+        if canFlag {
+            Button(action: onToggleFlag) {
+                Image(systemName: isFlagged ? "flag.fill" : "flag")
+                    .foregroundStyle(isFlagged ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.tertiary))
+                    .imageScale(.small)
+            }
+            .buttonStyle(.plain)
+            .help(isFlagged
+                  ? "Flagged for Save Session. Click to remove."
+                  : "Flag this record to include it in Save Session.")
+            .accessibilityLabel(isFlagged ? "Flagged" : "Not flagged")
+            .accessibilityIdentifier("record-flag-\(record.filename)")
+        } else {
+            // Keeps the rows' text aligned whether or not a record is
+            // flaggable, so the list doesn't jitter as imports land.
+            Color.clear.frame(width: 13, height: 13)
+        }
     }
 
     @ViewBuilder
