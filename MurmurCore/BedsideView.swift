@@ -156,29 +156,22 @@ struct BedsideView: View {
         recording.channels.filter { !$0.isTrendChannel }
     }
 
-    /// Low-rate channels split by intent. Alarms and state probabilities
-    /// get their own dedicated strips; everything else (continuous-valued
-    /// vital trends) goes through the sparkline strip.
+    /// The low-rate channels this view renders: the HR trend and the
+    /// quality ratios. X66 retired the alarm and ventilation-state lanes —
+    /// see `LowRatePartition`.
     private var lowRatePartition: LowRatePartition {
         LowRatePartition(channels: recording.channels.filter(\.isTrendChannel))
     }
 
-    /// Pure-numeric vital trends (HR, SpO₂, etCO₂, BPM, tidal volume…)
-    /// rendered as sparklines in `ChannelTrendStrip`.
-    private var vitalTrendChannels: [Channel] { lowRatePartition.trends }
-
-    /// Boolean-valued alarm / status channels rendered in `AlarmStrip`.
-    private var alarmChannels: [Channel] { lowRatePartition.alarms }
+    /// The heart-rate trend, as the single-element list `ChannelTrendStrip`
+    /// takes. Empty when the record carries no HR channel, which is what
+    /// hides the lane — HR is never derived from the beat series here.
+    private var heartRateTrendChannels: [Channel] {
+        lowRatePartition.heartRate.map { [$0] } ?? []
+    }
 
     /// Continuous quality / artifact-ratio channels rendered in `QualityStrip`.
     private var qualityChannels: [Channel] { lowRatePartition.quality }
-
-    /// The matched `prob_state_*` channel pair for `StateBackdropStrip`.
-    /// Either side may be nil — the strip still renders with whatever's
-    /// present and falls silent only if both are missing.
-    private var stateChannels: (spontaneous: Channel?, assist: Channel?) {
-        (lowRatePartition.spontaneous, lowRatePartition.assistControl)
-    }
 
     /// Union of the producer's findings and anything the analyst has
     /// attached via the "Attach findings…" toolbar action. Every downstream
@@ -1333,8 +1326,6 @@ struct BedsideView: View {
         variabilityLaneStrip
         intervalTrendLaneStrip
         trendStrip
-        alarmStrip
-        stateStrip
         qualityStrip
     }
 
@@ -1914,47 +1905,14 @@ struct BedsideView: View {
         return start...max(start + 0.001, end)
     }
 
-    /// Sparkline panel for the continuous-valued vital trend channels.
-    /// Hidden when no such channels exist (the legacy single-rate case
-    /// stays unchanged).
+    /// Sparkline panel for the heart-rate trend. Hidden when the record
+    /// carries no HR channel (the legacy single-rate case stays unchanged).
     @ViewBuilder
     private var trendStrip: some View {
-        if !vitalTrendChannels.isEmpty {
+        if !heartRateTrendChannels.isEmpty {
             ChannelTrendStrip(
-                channels: vitalTrendChannels,
+                channels: heartRateTrendChannels,
                 recordingDirectory: recordingDirectory,
-                viewport: viewport
-            )
-        }
-    }
-
-    /// Per-channel alarm / status lanes. Hidden when the recording carries
-    /// no alarm channels.
-    @ViewBuilder
-    private var alarmStrip: some View {
-        if !alarmChannels.isEmpty, let primary = ecgChannels.first {
-            AlarmStrip(
-                channels: alarmChannels,
-                recordingDirectory: recordingDirectory,
-                totalSamplesPrimary: primary.sampleCount,
-                primarySampleRate: primary.sampleRate,
-                viewport: viewport
-            )
-        }
-    }
-
-    /// One-row colored strip showing ventilation state (spontaneous vs
-    /// assist-control). Hidden when neither probability channel is present.
-    @ViewBuilder
-    private var stateStrip: some View {
-        let (spontaneous, assist) = stateChannels
-        if (spontaneous != nil || assist != nil), let primary = ecgChannels.first {
-            StateBackdropStrip(
-                spontaneousChannel: spontaneous,
-                assistControlChannel: assist,
-                recordingDirectory: recordingDirectory,
-                totalSamplesPrimary: primary.sampleCount,
-                primarySampleRate: primary.sampleRate,
                 viewport: viewport
             )
         }

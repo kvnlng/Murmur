@@ -2,10 +2,15 @@
 //  ChannelTrendStrip.swift
 //  Murmur
 //
-//  Stacked sparklines for low-rate ("trend") channels — HR, SpO₂, etCO₂,
-//  tidal volume, P(spontaneous), and anything else the producer drops in
-//  at 1/60 Hz or similar. Time-locked to the shared `RecordingViewport`
-//  so panning the ECG canvas also pans the vitals.
+//  Sparkline for the low-rate heart-rate trend channel. Time-locked to the
+//  shared `RecordingViewport`, so panning the ECG canvas also pans it.
+//
+//  X66 narrowed what reaches this view. It used to render every vital the
+//  producer supplied — SpO₂, etCO₂, tidal volume, P(spontaneous) — and the
+//  main-window redesign keeps only HR (DECISIONS.md §2). The view itself is
+//  unchanged and still renders N rows correctly; the narrowing lives in
+//  `LowRatePartition`, which is where it is tested. X74 re-anatomises this
+//  into a lane of the shared-axis trend stack.
 //
 //  Each trend channel's full sample buffer is loaded once at panel mount
 //  (≪ thousands of samples even for multi-hour records) and re-sliced per

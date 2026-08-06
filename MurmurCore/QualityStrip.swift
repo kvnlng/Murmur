@@ -86,9 +86,9 @@ struct QualityStrip: View {
                 // interactive targets, only their children — but there
                 // aren't any). `.combine` merges the subtree into a
                 // single interactive element XCUI can click directly.
-                // AlarmStrip gets away with `.contain` because its
-                // visible RoundedRectangle bars are real accessibility
-                // sub-elements XCUI can target.
+                // The rule generalises: `.contain` is only safe on a
+                // subtree that has real accessibility children (visible
+                // shapes, text) for XCUI to target.
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("quality-lane-\(channel.name)")
         }
