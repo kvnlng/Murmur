@@ -2,62 +2,61 @@
 //  LowRatePartition.swift
 //  Murmur
 //
-//  Splits the low-rate (`isTrendChannel == true`) subset of a recording's
-//  channels into intent-based buckets so the bedside view can render each
-//  kind in its own strip (vital trends, alarms, quality ratios, and the
-//  ventilation-state probability pair).
+//  Picks out the low-rate (`isTrendChannel == true`) channels the bedside
+//  view actually renders: the heart-rate trend, and the quality / artifact
+//  ratios.
 //
 //  Matching is name-based and reflects what the Medallion feature store
-//  emits today; producers that want explicit control can name their
-//  channels to opt in or out (e.g. naming a channel `notes_status` would
-//  flag it as an alarm because of the `_status` suffix).
+//  emits today; producers that want explicit control can name their channels
+//  to opt in (e.g. `heart_rate_bpm` lands in `heartRate`).
+//
+//  X66 narrowed this. It used to bucket four kinds — vital trends, alarm
+//  flags, quality ratios, and the ventilation-state probability pair — one
+//  strip each. The main-window redesign keeps a single HR lane and the
+//  quality lane, so alarms, the state pair, and the non-HR vitals (SpO₂,
+//  etCO₂, tidal volume…) are no longer rendered anywhere. They still IMPORT
+//  — `WFDBImporter` reads every signal and `isTrendChannel` still classifies
+//  them — they simply have no lane. That asymmetry is deliberate: dropping
+//  them from the importer would lose data a producer supplied, while
+//  dropping them from the view is the design decision (see
+//  `Planning/design/design_handoff_murmur_main_window/DECISIONS.md` §2).
 //
 
 import Foundation
 
 struct LowRatePartition {
-    let trends: [Channel]
-    let alarms: [Channel]
+    /// The record's heart-rate trend, if it carries one. The HR lane renders
+    /// only when this is non-nil — the design's "trend channel only" caption
+    /// is literal, and HR is never derived from beats here.
+    let heartRate: Channel?
+
+    /// Continuous quality / artifact-ratio channels.
     let quality: [Channel]
-    let spontaneous: Channel?
-    let assistControl: Channel?
 
     init(channels: [Channel]) {
-        var trends: [Channel] = []
-        var alarms: [Channel] = []
+        var heartRate: Channel?
         var quality: [Channel] = []
-        var spontaneous: Channel? = nil
-        var assist: Channel? = nil
 
         for channel in channels {
-            let name = channel.name
-            if name == "prob_state_spontaneous" {
-                spontaneous = channel
-            } else if name == "prob_state_assist_control" {
-                assist = channel
-            } else if Self.looksLikeAlarmFlag(name) {
-                alarms.append(channel)
-            } else if Self.looksLikeQualityRatio(name) {
+            if heartRate == nil, Self.looksLikeHeartRate(channel.name) {
+                heartRate = channel
+            } else if Self.looksLikeQualityRatio(channel.name) {
                 quality.append(channel)
-            } else {
-                trends.append(channel)
             }
         }
 
-        self.trends = trends
-        self.alarms = alarms
+        self.heartRate = heartRate
         self.quality = quality
-        self.spontaneous = spontaneous
-        self.assistControl = assist
     }
 
-    /// Conservative — matches the Medallion-emitted alarm/status flags and
-    /// any future channel whose name carries the same suffix.
-    private static func looksLikeAlarmFlag(_ name: String) -> Bool {
+    /// Conservative — matches `HR_bpm` (what the synthetic fixture and the
+    /// Medallion tables emit) and the spelled-out form, without swallowing
+    /// other rates. Deliberately NOT unit-based: a respiratory rate is also
+    /// reported in "bpm", and labelling breaths as heart rate would be a
+    /// clinical misstatement, not a cosmetic one.
+    private static func looksLikeHeartRate(_ name: String) -> Bool {
         let lower = name.lowercased()
-        return lower.hasSuffix("_alarm")
-            || lower.hasSuffix("_status")
-            || lower.hasSuffix("_silenced")
+        return lower == "hr" || lower.hasPrefix("hr_") || lower.contains("heart_rate")
     }
 
     /// Quality / artifact-ratio channels — anything ending in `_ratio`

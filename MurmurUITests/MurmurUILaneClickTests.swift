@@ -2,12 +2,16 @@
 //  MurmurUILaneClickTests.swift
 //  MurmurUITests
 //
-//  Tap-to-jump coverage for the scrolling context lanes (density / alarm /
-//  quality / state-backdrop). Split out of MurmurUITests to keep that file
-//  under the file-length limit; each test is self-contained (launches its own
-//  app). The bottom-of-scroll strips skip on Xcode Cloud, where the runner's
-//  default window height keeps them off-screen and XCUI can't scroll them to a
-//  hittable position; they're covered on taller local windows.
+//  Tap-to-jump coverage for the scrolling context lanes (density, quality).
+//  Split out of MurmurUITests to keep that file under the file-length limit;
+//  each test is self-contained (launches its own app). The bottom-of-scroll
+//  strips skip on Xcode Cloud, where the runner's default window height keeps
+//  them off-screen and XCUI can't scroll them to a hittable position; they're
+//  covered on taller local windows.
+//
+//  X66 retired the alarm and ventilation-state lanes; their two click tests
+//  were replaced by `testRetiredLanesDoNotRender`, which asserts the absence
+//  and needs no click, so it does not skip on CI.
 //
 
 import XCTest
@@ -54,45 +58,6 @@ final class MurmurUILaneClickTests: XCTestCase {
     }
 
     @MainActor
-    func testClickingAlarmLaneJumpsViewport() throws {
-        // Guards: AlarmStrip's tap-to-jump path. The synthetic fixture's
-        // had_high_priority_alarm channel fires at frames 3 and 7, so the
-        // strip is visible (the lane hides itself if every channel is silent).
-        //
-        // Skipped on Xcode Cloud for the same reason as the quality-lane test
-        // below: it's a bottom-of-scroll strip, and on the Cloud runner's
-        // default window height XCUI can't scroll it to a hittable position
-        // (frame ends at y≈763, off-screen). It sat just above that fold until
-        // the X40 calibration controls grew the pinned stage and pushed it into
-        // the same zone. The feature works on developer machines with taller
-        // windows; covered by local runs.
-        if ProcessInfo.processInfo.environment["CI"] != nil {
-            throw XCTSkip("AlarmStrip lane-click test skipped on CI — Cloud runner's window height keeps the strip off-screen; feature is covered by local runs.")
-        }
-        let app = XCUIApplication()
-        app.launchArguments += [
-            "--ui-test-sample",
-            "--ui-test-initial-duration=2"
-        ]
-        app.launch()
-
-        let viewportState = app.descendants(matching: .any)
-            .matching(identifier: "ui-test-viewport-state").firstMatch
-        XCTAssertTrue(viewportState.waitForExistence(timeout: 5))
-        let initial = viewportState.label
-
-        let alarmLane = app.descendants(matching: .any)
-            .matching(identifier: "alarm-lane-had_high_priority_alarm").firstMatch
-        XCTAssertTrue(alarmLane.waitForExistence(timeout: 3))
-        alarmLane.click()
-
-        let predicate = NSPredicate(format: "label != %@", initial)
-        let exp = XCTNSPredicateExpectation(predicate: predicate, object: viewportState)
-        XCTAssertEqual(XCTWaiter.wait(for: [exp], timeout: 3), .completed,
-                       "Viewport state should change after an alarm-lane click (was '\(initial)')")
-    }
-
-    @MainActor
     func testClickingQualityLaneJumpsViewport() throws {
         // Guards: QualityStrip's tap-to-jump path. The synthetic fixture's
         // ecg_artifact_ratio channel has visibly-noisy frames at 5 and 8.
@@ -133,14 +98,17 @@ final class MurmurUILaneClickTests: XCTestCase {
     }
 
     @MainActor
-    func testClickingStateBackdropStripJumpsViewport() throws {
-        // Guards: StateBackdropStrip's tap-to-jump path. Click the inner
-        // cell-body lane (state-backdrop-lane) directly — same shape as
-        // the other lane-click tests.
-        // Skipped on CI — same off-screen-strip issue as the quality-lane test.
-        if ProcessInfo.processInfo.environment["CI"] != nil {
-            throw XCTSkip("StateBackdropStrip lane-click skipped on CI — strip off-screen on the Cloud runner; covered locally.")
-        }
+    func testRetiredLanesDoNotRender() throws {
+        // X66 retired the alarm and ventilation-state lanes. The synthetic
+        // fixture still EMITS those channels — `had_high_priority_alarm`,
+        // `prob_state_spontaneous`, `prob_state_assist_control` — because the
+        // importer must keep reading every signal a producer supplies. So this
+        // is the real assertion: a record that carries the channels renders no
+        // lane for them.
+        //
+        // Written as an absence test deliberately. Deleting the two old
+        // lane-click tests would have left nothing failing if a merge
+        // resurrected the strips.
         let app = XCUIApplication()
         app.launchArguments += [
             "--ui-test-sample",
@@ -148,19 +116,28 @@ final class MurmurUILaneClickTests: XCTestCase {
         ]
         app.launch()
 
-        let viewportState = app.descendants(matching: .any)
-            .matching(identifier: "ui-test-viewport-state").firstMatch
-        XCTAssertTrue(viewportState.waitForExistence(timeout: 5))
-        let initial = viewportState.label
+        // Anchor on a lane that DOES still render, so this can't pass simply
+        // because the context column failed to load.
+        //
+        // This is also what makes the two `exists` checks below non-racy
+        // despite having no wait of their own: the retired lanes rendered
+        // ABOVE the quality lane in the old order (trends, alarm, state,
+        // quality), so a tree containing the quality lane would have
+        // contained them too. Keep the anchor last-in-order if the lane
+        // order ever changes.
+        let qualityLane = app.descendants(matching: .any)
+            .matching(identifier: "quality-lane-ecg_artifact_ratio").firstMatch
+        XCTAssertTrue(qualityLane.waitForExistence(timeout: 10),
+                      "The quality lane should still render — without it this test proves nothing")
 
-        let lane = app.descendants(matching: .any)
+        let alarmLane = app.descendants(matching: .any)
+            .matching(identifier: "alarm-lane-had_high_priority_alarm").firstMatch
+        XCTAssertFalse(alarmLane.exists,
+                       "The alarm lane was retired in X66, but the fixture's alarm channel still rendered one")
+
+        let stateLane = app.descendants(matching: .any)
             .matching(identifier: "state-backdrop-lane").firstMatch
-        XCTAssertTrue(lane.waitForExistence(timeout: 3))
-        lane.click()
-
-        let predicate = NSPredicate(format: "label != %@", initial)
-        let exp = XCTNSPredicateExpectation(predicate: predicate, object: viewportState)
-        XCTAssertEqual(XCTWaiter.wait(for: [exp], timeout: 3), .completed,
-                       "Viewport state should change after a state-backdrop-lane click (was '\(initial)')")
+        XCTAssertFalse(stateLane.exists,
+                       "The ventilation-state lane was retired in X66, but the fixture's prob_state_* channels still rendered one")
     }
 }

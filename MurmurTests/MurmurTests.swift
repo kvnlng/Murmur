@@ -2719,56 +2719,47 @@ struct LowRatePartitionTests {
         )
     }
 
-    @Test("Vital trend channels route to `trends`")
-    func vitalsAreTrends() {
-        let p = LowRatePartition(channels: [
-            channel("HR_bpm"),
-            channel("SpO2_pct"),
-            channel("etco2_avg_60s")
-        ])
-        #expect(p.trends.map(\.name) == ["HR_bpm", "SpO2_pct", "etco2_avg_60s"])
-        #expect(p.alarms.isEmpty)
-        #expect(p.spontaneous == nil)
-        #expect(p.assistControl == nil)
+    @Test("The heart-rate trend is picked out by name")
+    func heartRateDetection() {
+        #expect(LowRatePartition(channels: [channel("HR_bpm")]).heartRate?.name == "HR_bpm")
+        #expect(LowRatePartition(channels: [channel("hr")]).heartRate?.name == "hr")
+        #expect(LowRatePartition(channels: [channel("heart_rate_bpm")]).heartRate?.name == "heart_rate_bpm")
     }
 
-    @Test("Channel names ending in `_alarm`, `_status`, or `_silenced` route to `alarms`")
-    func alarmSuffixDetection() {
+    @Test("Other vitals are dropped — X66 retired every lane but HR and quality")
+    func nonHeartRateVitalsAreDropped() {
+        let p = LowRatePartition(channels: [
+            channel("SpO2_pct"),
+            channel("etco2_avg_60s"),
+            channel("tidal_volume_ml")
+        ])
+        #expect(p.heartRate == nil)
+        #expect(p.quality.isEmpty)
+    }
+
+    @Test("Respiratory rate is NOT mistaken for heart rate")
+    func respiratoryRateIsNotHeartRate() {
+        // Both are reported in "bpm", which is exactly why the match is on
+        // name rather than unit — calling breaths a heart rate would be a
+        // clinical misstatement, not a cosmetic one.
+        let p = LowRatePartition(channels: [
+            channel("resp_rate_bpm"),
+            channel("rr_bpm")
+        ])
+        #expect(p.heartRate == nil)
+    }
+
+    @Test("Alarm and ventilation-state channels no longer route anywhere")
+    func retiredChannelsAreUnrouted() {
         let p = LowRatePartition(channels: [
             channel("had_high_priority_alarm"),
-            channel("had_suction_alarm"),
             channel("nebulizer_status"),
-            channel("had_alarm_silenced")
-        ])
-        #expect(p.alarms.count == 4)
-        #expect(p.trends.isEmpty)
-    }
-
-    @Test("`prob_state_spontaneous` + `prob_state_assist_control` route to state pair")
-    func stateProbabilityPair() {
-        let p = LowRatePartition(channels: [
+            channel("had_alarm_silenced"),
             channel("prob_state_spontaneous"),
             channel("prob_state_assist_control")
         ])
-        #expect(p.spontaneous?.name == "prob_state_spontaneous")
-        #expect(p.assistControl?.name == "prob_state_assist_control")
-        #expect(p.trends.isEmpty)
-        #expect(p.alarms.isEmpty)
-    }
-
-    @Test("Mixed channel set partitions cleanly across all three buckets")
-    func mixedPartition() {
-        let p = LowRatePartition(channels: [
-            channel("HR_bpm"),
-            channel("had_high_priority_alarm"),
-            channel("prob_state_spontaneous"),
-            channel("SpO2_pct"),
-            channel("nebulizer_status")
-        ])
-        #expect(p.trends.map(\.name) == ["HR_bpm", "SpO2_pct"])
-        #expect(p.alarms.map(\.name) == ["had_high_priority_alarm", "nebulizer_status"])
-        #expect(p.spontaneous?.name == "prob_state_spontaneous")
-        #expect(p.assistControl == nil)
+        #expect(p.heartRate == nil)
+        #expect(p.quality.isEmpty)
     }
 
     @Test("`_ratio` suffix or `artifact_ratio` substring routes to `quality`")
@@ -2779,8 +2770,32 @@ struct LowRatePartitionTests {
             channel("HR_bpm")
         ])
         #expect(p.quality.map(\.name) == ["ecg_artifact_ratio", "ppg_quality_ratio"])
-        #expect(p.trends.map(\.name) == ["HR_bpm"])
-        #expect(p.alarms.isEmpty)
+        #expect(p.heartRate?.name == "HR_bpm")
+    }
+
+    @Test("The full fixture channel set yields exactly one HR lane and one quality lane")
+    func fixtureSetPartitions() {
+        // The synthetic fixture's low-rate signals, verbatim. It still emits
+        // the retired channels; the point is that they now render nothing.
+        let p = LowRatePartition(channels: [
+            channel("HR_bpm"),
+            channel("SpO2_pct"),
+            channel("had_high_priority_alarm"),
+            channel("prob_state_spontaneous"),
+            channel("prob_state_assist_control"),
+            channel("ecg_artifact_ratio")
+        ])
+        #expect(p.heartRate?.name == "HR_bpm")
+        #expect(p.quality.map(\.name) == ["ecg_artifact_ratio"])
+    }
+
+    @Test("A second HR-like channel does not displace the first")
+    func firstHeartRateWins() {
+        let p = LowRatePartition(channels: [
+            channel("HR_bpm"),
+            channel("hr_derived")
+        ])
+        #expect(p.heartRate?.name == "HR_bpm")
     }
 }
 
