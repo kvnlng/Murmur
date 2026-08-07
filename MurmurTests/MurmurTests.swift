@@ -5778,6 +5778,100 @@ struct FiducialLayerToggleTests {
     }
 }
 
+/// X73. Which stretch of the recording the variability metrics describe.
+///
+/// The scope→range resolution is the whole of MurmurCore's share of this
+/// feature — the arithmetic on measurements stays in the App target — so it is
+/// where the behaviour is worth pinning.
+@Suite("Metrics scope (X73)")
+struct MetricsScopeTests {
+
+    @MainActor
+    private func context(start: Int64, end: Int64, rate: Double = 250) -> MetricsScopeContext {
+        let c = MetricsScopeContext()
+        c.set(viewportRange: start..<end, sampleRate: rate)
+        return c
+    }
+
+    @MainActor
+    @Test("Whole record needs no range at all")
+    func wholeRecordIsUnfiltered() {
+        let c = context(start: 1000, end: 3500)
+        c.scope = .wholeRecord
+        // nil means "do not filter" — distinct from an empty range, which
+        // would mean "filter to nothing".
+        #expect(c.effectiveRange(totalSamples: 1_000_000) == nil)
+    }
+
+    @MainActor
+    @Test("Window scope is exactly the viewport")
+    func windowIsTheViewport() {
+        let c = context(start: 1000, end: 3500)
+        c.scope = .visibleWindow
+        #expect(c.effectiveRange(totalSamples: 1_000_000) == 1000..<3500)
+    }
+
+    @MainActor
+    @Test("The hour is a fixed block, not a window centred on the viewport")
+    func hourIsQuantised() {
+        // 250 Hz → 900,000 samples per hour. A viewport anywhere inside the
+        // second hour must resolve to the SAME block, or "this hour's SDNN"
+        // becomes a different population on every pan and two readings taken
+        // seconds apart are not comparable.
+        let rate = 250.0
+        let hour = Int64(3600 * rate)
+        let a = context(start: hour + 10, end: hour + 2510, rate: rate)
+        a.scope = .hour
+        let b = context(start: hour + 500_000, end: hour + 502_500, rate: rate)
+        b.scope = .hour
+        #expect(a.effectiveRange(totalSamples: hour * 5) == hour..<(hour * 2))
+        #expect(a.effectiveRange(totalSamples: hour * 5) == b.effectiveRange(totalSamples: hour * 5))
+    }
+
+    @MainActor
+    @Test("The last hour is clamped to the end of the recording")
+    func lastHourClamps() {
+        let rate = 250.0
+        let hour = Int64(3600 * rate)
+        let total = hour + 1000          // an hour and four seconds
+        let c = context(start: hour + 100, end: hour + 600, rate: rate)
+        c.scope = .hour
+        #expect(c.effectiveRange(totalSamples: total) == hour..<total)
+    }
+
+    @MainActor
+    @Test("No viewport yet means no scoped range")
+    func noViewportYet() {
+        let c = MetricsScopeContext()
+        c.scope = .visibleWindow
+        // Before the first frame there is nothing to scope TO. Returning a
+        // 0..<0 range here would filter every beat away and render an empty
+        // block that looks like a bug.
+        #expect(c.effectiveRange(totalSamples: 1_000_000) == nil)
+    }
+
+    @MainActor
+    @Test("Clearing resets to the scope that does not move")
+    func clearResetsToWholeRecord() {
+        let c = context(start: 1000, end: 3500)
+        c.scope = .hour
+        c.clear()
+        #expect(c.scope == .wholeRecord)
+        #expect(c.viewportRange == nil)
+    }
+
+    @Test("Every scope names itself for the provenance line")
+    func provenanceLabels() {
+        // A 5-minute SDNN and a 25-hour SDNN are different measurements; a
+        // copied block that does not say which is unattributable.
+        for scope in MetricsScope.allCases {
+            #expect(!scope.provenanceLabel.isEmpty)
+            #expect(!scope.label.isEmpty)
+        }
+        #expect(MetricsScope.wholeRecord.provenanceLabel == "whole record")
+    }
+}
+
 /// X70. The stage's zoom ladder.
 ///
 /// At 12 leads / 250 Hz / 72 h, getting from a 10 s window to the whole record

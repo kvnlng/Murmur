@@ -407,6 +407,14 @@ struct BedsideView: View {
             // mode scrolls wholesale and would otherwise carry it off-screen.
             infoBar
         }
+        // X73: publish the viewport so the metrics block can scope to it.
+        // Published on every change and DEBOUNCED on the orchestrator side —
+        // it owns the recompute, so it should own the cost of deciding when
+        // to pay it. Publishing a value is cheap; recomputing over millions of
+        // beats is not.
+        .onChange(of: viewport.rangeSamples, initial: true) { _, range in
+            MetricsScopeContext.shared.set(viewportRange: range, sampleRate: viewport.sampleRate)
+        }
         .focusable()
         .focusEffectDisabled()
         // Keyboard navigation. Arrow keys pan by one viewport width,
