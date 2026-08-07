@@ -29,47 +29,89 @@ struct VariabilityMetricsOrchestrator: View {
     @State private var recordingContext = CurrentRecordingContext.shared
     @State private var markingsContext = IntervalMarkingsContext.shared
     @State private var metricsContext = VariabilityMetricsContext.shared
+    @State private var scopeContext = MetricsScopeContext.shared
     @State private var store = PurchaseStore.shared
 
     /// Recompute key. Beat count stands in for "the fiducial store changed" —
     /// the QTVI half reads `markingsContext.beats`, which arrives
     /// asynchronously after delineation finishes.
+    ///
+    /// X73 added the scope and the range it resolves to. The RESOLVED range is
+    /// the key, not the raw viewport: in whole-record scope the range is nil,
+    /// so panning does not re-key at all, and in hour scope it only changes
+    /// when the analyst crosses an hour boundary. Keying on the viewport
+    /// itself would recompute on every pixel of pan in every scope.
     private struct Key: Hashable {
         let recordingID: UUID?
         let owned: Bool
         let beatCount: Int
+        let scope: MetricsScope
+        let rangeStart: Int64?
+        let rangeEnd: Int64?
+    }
+
+    /// How long a scoped range must hold still before it is worth recomputing.
+    ///
+    /// Only whole-record scope is free. Window scope re-keys on every pan, and
+    /// the compute walks every normal beat in the recording — 6.4 M on a 72 h
+    /// record. `.task(id:)` cancels and restarts on each key change, so a
+    /// sleep at the top of the task IS the debounce: a drag that crosses fifty
+    /// keys pays for one compute, at the end.
+    private static let scopeDebounceNS: UInt64 = 350_000_000
+
+    private var resolvedRange: Range<Int64>? {
+        guard let recording = recordingContext.recording,
+              let total = recording.channels.first?.sampleCount else { return nil }
+        return scopeContext.effectiveRange(totalSamples: total)
     }
 
     var body: some View {
-        Color.clear
+        let range = resolvedRange
+        return Color.clear
             .frame(width: 0, height: 0)
             .allowsHitTesting(false)
             .task(id: Key(
                 recordingID: recordingContext.recording?.id,
                 owned: store.hasStudio,
-                beatCount: markingsContext.beats.count
+                beatCount: markingsContext.beats.count,
+                scope: scopeContext.scope,
+                rangeStart: range?.lowerBound,
+                rangeEnd: range?.upperBound
             )) {
-                recompute()
+                if scopeContext.scope != .wholeRecord {
+                    try? await Task.sleep(nanoseconds: Self.scopeDebounceNS)
+                    if Task.isCancelled { return }
+                }
+                recompute(range: range)
             }
     }
 
     @MainActor
-    private func recompute() {
+    private func recompute(range: Range<Int64>?) {
         guard let recording = recordingContext.recording else {
             metricsContext.clear()
             return
         }
         // A recording is open but unpaid — the one empty state that earns a
-        // seam. Everything else stays silent.
+        // seam. Everything else stays silent. X73 keeps the scope control
+        // behind the same gate: it is a way of asking the paid computation a
+        // narrower question, not a free capability.
         guard store.hasStudio else {
             metricsContext.setLocked()
             return
         }
+        var beats = recording.normalBeatSampleIndices()
+        if let range {
+            beats = beats.filter { range.contains($0) }
+        }
         guard let sampleRate = recording.channels.first?.sampleRate,
               let series = ECGMetricsExtractor.rrSeries(
-                  fromBeatSampleIndices: recording.normalBeatSampleIndices(),
+                  fromBeatSampleIndices: beats,
                   sampleRate: sampleRate
               ) else {
+            // A scoped window can legitimately hold too few beats to measure.
+            // That is silence, not a seam — there is nothing to sell someone
+            // who already owns the feature and simply zoomed in too far.
             metricsContext.clear()
             return
         }
@@ -80,7 +122,8 @@ struct VariabilityMetricsOrchestrator: View {
         metricsContext.set(summary: Self.summary(
             report: report,
             qtvi: qtviSummary(),
-            recordName: recording.device
+            recordName: recording.device,
+            scope: scopeContext.scope
         ))
     }
 
@@ -89,17 +132,23 @@ struct VariabilityMetricsOrchestrator: View {
     private static func summary(
         report: ECGMetricsReport,
         qtvi: QTVISummary?,
-        recordName: String
+        recordName: String,
+        scope: MetricsScope
     ) -> VariabilityMetricsSummary {
         var sections = [timeDomainSection(report)]
         if let fd = report.frequencyDomain {
             sections.append(frequencyDomainSection(fd))
         }
         sections.append(qtviSection(qtvi))
+        // The scope is named in the provenance, not just shown in the picker.
+        // A copied or screenshotted block has to say what it covered — a
+        // 5-minute SDNN and a 25-hour SDNN are different measurements, and
+        // without the scope in the text they are indistinguishable.
         return VariabilityMetricsSummary(
             sections: sections,
-            provenance: "\(recordName) · \(report.beatCount) beats · \(duration(report.durationSeconds))",
-            exportText: report.formattedReport()
+            provenance: "\(recordName) · \(scope.provenanceLabel) · "
+                + "\(report.beatCount) beats · \(duration(report.durationSeconds))",
+            exportText: "Scope: \(scope.provenanceLabel)\n" + report.formattedReport()
         )
     }
 

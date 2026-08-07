@@ -29,6 +29,8 @@ import SwiftUI
 public struct VariabilityMetricsStrip: View {
 
     @State private var context: VariabilityMetricsContext
+    @State private var scopeContext = MetricsScopeContext.shared
+    @State private var showingMethod = false
 
     public init() {
         _context = State(initialValue: .shared)
@@ -79,6 +81,8 @@ public struct VariabilityMetricsStrip: View {
                 .truncationMode(.tail)
                 .accessibilityIdentifier("variability-metrics-provenance")
             Spacer(minLength: 8)
+            scopePicker
+            methodButton(summary)
             Button {
                 copy(summary.exportText)
             } label: {
@@ -91,6 +95,73 @@ public struct VariabilityMetricsStrip: View {
             Text("Research use only")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
+        }
+    }
+
+    /// Whole / Window / Hour (X73).
+    ///
+    /// Writing the selection is all this does. The recompute happens in the
+    /// App target's orchestrator, which owns MurmurMetrics and the entitlement
+    /// gate; the strip continues to do no arithmetic of its own.
+    private var scopePicker: some View {
+        Picker("Scope", selection: Binding(
+            get: { scopeContext.scope },
+            set: { scopeContext.scope = $0 }
+        )) {
+            ForEach(MetricsScope.allCases, id: \.self) { scope in
+                Text(scope.label).tag(scope)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .controlSize(.mini)
+        .frame(maxWidth: 190)
+        .accessibilityLabel("Metrics scope")
+        .accessibilityIdentifier("metrics-scope-picker")
+    }
+
+    /// Method text behind an ⓘ, per the design.
+    ///
+    /// The captions carry estimator, window length, band edges and excluded
+    /// fractions — real disclosures, but four paragraphs of them under the
+    /// numbers is how the shipped block ended up mostly footnote. They move
+    /// here; they are not trimmed, which the policy on provenance forbids.
+    ///
+    /// Advisories deliberately do NOT move. "Below Task Force minimum —
+    /// interpret with caution" changes how the numbers should be read, and a
+    /// caveat that has to be discovered is a caveat that will not be.
+    @ViewBuilder
+    private func methodButton(_ summary: VariabilityMetricsSummary) -> some View {
+        // Only the captions that were actually moved out. A row-less section
+        // still shows its captions inline, so repeating them here would make
+        // the popover claim credit for text already on screen.
+        let captions = summary.sections.filter { !$0.rows.isEmpty }.flatMap(\.captions)
+        if !captions.isEmpty {
+            Button {
+                showingMethod.toggle()
+            } label: {
+                Image(systemName: "info.circle")
+                    .imageScale(.small)
+            }
+            .buttonStyle(.borderless)
+            .help("How these metrics were computed")
+            .accessibilityLabel("Method")
+            .accessibilityIdentifier("variability-metrics-method-button")
+            .popover(isPresented: $showingMethod, arrowEdge: .bottom) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Method")
+                        .font(.caption.weight(.semibold))
+                    ForEach(Array(captions.enumerated()), id: \.offset) { _, caption in
+                        Text(caption)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(12)
+                .frame(width: 380, alignment: .leading)
+                .accessibilityIdentifier("variability-metrics-method-popover")
+            }
         }
     }
 
@@ -115,11 +186,21 @@ public struct VariabilityMetricsStrip: View {
                     rowView(row)
                 }
             }
-            ForEach(Array(section.captions.enumerated()), id: \.offset) { _, caption in
-                Text(caption)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .fixedSize(horizontal: false, vertical: true)
+            // X73: captions move behind the header's ⓘ — but ONLY for a
+            // section that has rows. A section with no rows is one whose
+            // captions ARE its content ("No qualifying 5-min segments…"),
+            // and moving those out leaves a bare title explaining nothing.
+            // The three kinds of text here are not interchangeable: method
+            // goes behind the ⓘ, advisories stay because they change how the
+            // numbers read, and an explanation of ABSENCE stays because
+            // without it the absence has no explanation.
+            if section.rows.isEmpty {
+                ForEach(Array(section.captions.enumerated()), id: \.offset) { _, caption in
+                    Text(caption)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             if let advisory = section.advisory {
                 HStack(alignment: .top, spacing: 6) {
