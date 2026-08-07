@@ -124,26 +124,36 @@ final class MurmurUIVTVFTests: XCTestCase {
                        "Export should write one confirmed finding to the .mrm annotator")
     }
 
-    /// The export toolbar button is present and ENABLES once a finding is
-    /// confirmed (it's disabled with nothing to export). The click opens an
-    /// NSSavePanel — system-modal, not XCUI-drivable — so this asserts the
-    /// affordance + its enablement wiring; the write itself is covered by the
-    /// bypass test above and the export unit tests. Mirrors
-    /// `testExportReportToolbarButtonExists`.
+    /// The WFDB export is present and ENABLES once a finding is confirmed
+    /// (it's disabled with nothing to export). The click opens an NSSavePanel —
+    /// system-modal, not XCUI-drivable — so this asserts the affordance + its
+    /// enablement wiring; the write itself is covered by the bypass test above
+    /// and the export unit tests.
+    ///
+    /// X68 moved it into the toolbar's export menu. The enablement is the
+    /// point of the test and survives the move: a disabled `Button` inside a
+    /// SwiftUI `Menu` becomes a disabled `NSMenuItem`, which XCUI reads.
     @MainActor
-    func testWFDBExportButtonEnablesWithConfirmedFinding() throws {
+    func testWFDBExportEnablesWithConfirmedFinding() throws {
         let app = XCUIApplication()
         app.launchArguments += ["--ui-test-sample", "--ui-test-seed-confirmed-region"]
         app.launch()
 
-        let exportButton = app.buttons.matching(identifier: "export-wfdb").firstMatch
-        XCTAssertTrue(exportButton.waitForExistence(timeout: 5),
-                      "Toolbar should expose an 'export-wfdb' button")
+        let exportMenu = app.descendants(matching: .any)
+            .matching(identifier: "export-report").firstMatch
+        XCTAssertTrue(exportMenu.waitForExistence(timeout: 5),
+                      "Toolbar should expose the export menu")
+        exportMenu.click()
+
+        let item = app.menuItems["export-wfdb-item"]
+        XCTAssertTrue(item.waitForExistence(timeout: 3),
+                      "The export menu should carry 'Export WFDB annotations…'")
         // The seeded confirmed region flips amberFindingCount > 0 → enabled.
         let enabled = NSPredicate(format: "isEnabled == true")
-        let exp = XCTNSPredicateExpectation(predicate: enabled, object: exportButton)
+        let exp = XCTNSPredicateExpectation(predicate: enabled, object: item)
         XCTAssertEqual(XCTWaiter.wait(for: [exp], timeout: 5), .completed,
-                       "Export button should enable once a finding is confirmed")
+                       "WFDB export should enable once a finding is confirmed")
+        app.typeKey(.escape, modifierFlags: [])
     }
 
     // MARK: - Candidate group

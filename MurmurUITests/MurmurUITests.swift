@@ -35,14 +35,26 @@ final class MurmurUITests: XCTestCase {
         XCTAssertTrue(openButton.isHittable, "Empty-state Open CSV button should be hittable")
     }
 
+    /// Opening a record folder stays reachable with NOTHING open — which is
+    /// exactly when it is the only useful action in the window. X68 moved it
+    /// into the toolbar's `⋯` overflow menu, so it is a menu item now; the
+    /// standalone `toolbar-open-button` is still registered but hidden by
+    /// default, and hidden customisable items are absent from the tree.
     @MainActor
-    func testToolbarOpenButtonExists() throws {
+    func testOpenRecordFolderIsReachableFromTheOverflowMenu() throws {
         let app = XCUIApplication()
         app.launch()
 
-        let toolbarButton = app.buttons["toolbar-open-button"]
-        XCTAssertTrue(toolbarButton.waitForExistence(timeout: 3),
-                      "Toolbar Open CSV button should be present")
+        let more = app.descendants(matching: .any)
+            .matching(identifier: "toolbar-more").firstMatch
+        XCTAssertTrue(more.waitForExistence(timeout: 3),
+                      "Toolbar should expose the overflow menu even with no record open")
+        more.click()
+
+        let item = app.menuItems["toolbar-open-button-item"]
+        XCTAssertTrue(item.waitForExistence(timeout: 3),
+                      "The overflow menu should carry 'Open Record Folder…'")
+        app.typeKey(.escape, modifierFlags: [])
     }
 
     // MARK: - Tier 3: synthetic Recording fixture loaded via launch argument

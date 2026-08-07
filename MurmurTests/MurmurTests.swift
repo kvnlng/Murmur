@@ -5778,6 +5778,65 @@ struct FiducialLayerToggleTests {
     }
 }
 
+/// X68. The navigator row's metadata line.
+///
+/// X56 §3 already removed `N sig • H Hz • M min` because it is identical for
+/// every MIT-BIH record — height spent on a constant. X68 removed the same
+/// three fields from the redesigned row for the same reason plus one more: the
+/// new info bar carries signal count and sample rate for the OPEN record, so
+/// repeating them on all twenty rows says nothing twice.
+@Suite("Record navigator row (X68)")
+struct RecordListEntrySubtitleTests {
+
+    private func entry(durationSeconds: Double, comments: [String]) -> RecordListEntry {
+        let rate = 250.0
+        let header = WFDBHeader(
+            recordName: "16265",
+            signalCount: 12,
+            samplingFrequency: rate,
+            sampleCount: Int64(durationSeconds * rate),
+            startDate: nil,
+            signals: [],
+            comments: comments
+        )
+        return RecordListEntry(WFDBRecordEntry(filename: "16265.hea", header: header))
+    }
+
+    @Test("The row reads duration then the first .hea comment")
+    func subtitleIsDurationAndComment() {
+        let e = entry(durationSeconds: 72.4 * 3600, comments: ["32 M"])
+        #expect(e.subtitle == "72.4 h · 32 M")
+    }
+
+    @Test("Signal count and sample rate are NOT repeated on every row")
+    func subtitleOmitsConstants() {
+        let e = entry(durationSeconds: 72.4 * 3600, comments: ["32 M"])
+        #expect(!e.subtitle.contains("sig"))
+        #expect(!e.subtitle.contains("Hz"))
+        #expect(!e.subtitle.contains("12"))
+    }
+
+    @Test("Hours are spelled `h`, matching the info bar")
+    func durationUsesSingleLetterHours() {
+        // Two spellings of one unit in one window is the drift nobody files a
+        // bug about and everybody notices.
+        #expect(RecordListEntry.duration(72.4 * 3600) == "72.4 h")
+        #expect(!RecordListEntry.duration(72.4 * 3600).contains("hr"))
+    }
+
+    @Test("A record with no .hea comment still names its duration")
+    func subtitleSurvivesMissingComment() {
+        let e = entry(durationSeconds: 1800, comments: [])
+        #expect(e.subtitle == "30.0 min")
+    }
+
+    @Test("Blank comment lines are skipped, not shown as an empty field")
+    func subtitleSkipsBlankComments() {
+        let e = entry(durationSeconds: 3600, comments: ["   ", "20 F"])
+        #expect(e.subtitle == "1.0 h · 20 F")
+    }
+}
+
 /// X60. Kevin: "the icons at the top right … are hard to follow". The reason
 /// was mechanical — three pairs of buttons shared a glyph. Icon-only buttons
 /// carry their whole meaning in the glyph (the hover text that was supposed
