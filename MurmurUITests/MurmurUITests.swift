@@ -275,8 +275,10 @@ final class MurmurUITests: XCTestCase {
         let vfRow = app.buttons.matching(identifier: "finding-row-VF").firstMatch
         XCTAssertTrue(vfRow.waitForExistence(timeout: 5))
 
+        // X75 folded the category picker into the header's overflow menu.
+        // The category ROW ids are unchanged — only the way in moved.
         let picker = app.descendants(matching: .any)
-            .matching(identifier: "findings-category-picker").firstMatch
+            .matching(identifier: "findings-filter-menu").firstMatch
         XCTAssertTrue(picker.waitForExistence(timeout: 3))
         picker.click()
         let vtItem = app.menuItems.matching(identifier: "findings-category-filter-VT").firstMatch

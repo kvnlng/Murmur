@@ -51,6 +51,42 @@ public enum FindingSort: String, CaseIterable, Identifiable {
 
 // MARK: - Filter model
 
+/// Which review state the queue is showing (X75).
+///
+/// Not part of `FindingFilter`, deliberately. Every other dimension there is a
+/// property of the ANNOTATION — its category, its producer, its confidence —
+/// and can be answered from the annotation alone. Disposition is a property of
+/// the analyst's review of it, and lives in `DispositionStore`. Folding it into
+/// `matches(_:)` would mean either passing the store into a value type or
+/// giving that type a lookup it cannot perform.
+enum DispositionFilter: String, CaseIterable, Sendable, Equatable {
+    case toReview
+    case confirmed
+    case dismissed
+
+    var label: String {
+        switch self {
+        case .toReview: return "To review"
+        case .confirmed: return "Confirmed"
+        case .dismissed: return "Dismissed"
+        }
+    }
+
+    /// Does a finding in this review state belong in this bucket?
+    ///
+    /// ABSENCE is the unreviewed state — `DispositionStore` materialises no
+    /// row until the analyst acts, so "to review" is `nil`, not a stored value.
+    /// Reading it any other way would show an empty queue on a fresh record,
+    /// which is the one case where the queue has the most to say.
+    func admits(_ state: AnnotationDisposition.State?) -> Bool {
+        switch self {
+        case .toReview: return state == nil
+        case .confirmed: return state == .confirmed
+        case .dismissed: return state == .dismissed
+        }
+    }
+}
+
 public struct FindingFilter: Equatable {
     public var categories: Set<String> = []
     public var sources: Set<String> = []
@@ -114,6 +150,28 @@ struct FindingsPanel: View {
     /// carries an explicit extend control. Keyed by group id; absent = default.
     @State private var groupRenderBounds: [String: Int] = [:]
     @State private var candidateGroupExpanded: Bool = true
+    /// How many candidate rows are rendered. X75: the group opens collapsed to
+    /// its top 5 because 25 near-identical rows push every category off-screen,
+    /// and the categories are what the analyst is triaging by.
+    @State private var candidateRenderBound: Int = FindingsPanel.candidateCollapsedBound
+    /// Which review state the queue is showing. Defaults to the work that
+    /// remains, which is what a queue is for.
+    @State private var dispositionFilter: DispositionFilter = .toReview
+
+    /// Findings the analyst has just acted on, which stay visible until they
+    /// move to another bucket.
+    ///
+    /// Without this, confirming a finding in the "To review" bucket makes the
+    /// row vanish under the cursor — taking its own Reset button with it, so a
+    /// misclick becomes a two-step recovery through another bucket and the
+    /// analyst loses their place in a list they were working down. Acting on
+    /// something should not make it unreachable.
+    ///
+    /// Cleared when the bucket changes: the exemption is "you are still
+    /// looking at this", not a permanent pin.
+    @State private var recentlyActed: Set<UUID> = []
+
+    static let candidateCollapsedBound = 5
 
     /// Read of the shared fiducial store so per-annotation departure
     /// scoring can consult the per-patient normal template. Empty
@@ -171,21 +229,119 @@ struct FindingsPanel: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("Review queue")
                     .font(.headline)
-                Spacer()
                 Text("\(flaggedFiltered.count) of \(flaggedAnnotations.count)")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.tertiary)
+                Spacer(minLength: 4)
+                // Sort keeps a VISIBLE control (DECISIONS §7): it changes the
+                // meaning of the list order, and it carries the departure
+                // unlock seam — a purchase seam inside an overflow menu is a
+                // seam nobody finds.
+                sortMenu
+                overflowMenu
             }
-            triageTally
+            dispositionFilterBar
             ectopyBurdenLine
-            filterChips
             departureUnlockSeam
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
+    }
+
+    /// The disposition segments (X75).
+    ///
+    /// This REPLACES the passive triage tally rather than sitting beside it.
+    /// The tally already showed exactly these three counts; adding a filter
+    /// with the same numbers next to it would have put the same information on
+    /// screen twice and left the analyst to work out which one was clickable.
+    private var dispositionFilterBar: some View {
+        HStack(spacing: 6) {
+            ForEach(DispositionFilter.allCases, id: \.self) { bucket in
+                dispositionChip(bucket)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("disposition-filter")
+    }
+
+    private func dispositionChip(_ bucket: DispositionFilter) -> some View {
+        let isOn = dispositionFilter == bucket
+        let count = dispositionCount(bucket)
+        return Button {
+            dispositionFilter = bucket
+            // The just-acted exemption is "you are still looking at this".
+            // Moving to another bucket ends that.
+            recentlyActed.removeAll()
+        } label: {
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(dispositionColor(bucket))
+                    .frame(width: 6, height: 6)
+                Text(bucket.label)
+                    .font(.caption2)
+                    .foregroundStyle(isOn ? .primary : .secondary)
+                Text("\(count)")
+                    .font(.caption2.monospacedDigit().weight(.semibold))
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(isOn
+                ? Color.accentColor.opacity(0.18)
+                : Color.secondary.opacity(0.08)))
+            .overlay(Capsule().stroke(isOn
+                ? Color.accentColor
+                : Color.secondary.opacity(0.15), lineWidth: isOn ? 1 : 0.5))
+        }
+        .buttonStyle(.plain)
+        .help("Show \(bucket.label.lowercased()) findings")
+        .accessibilityLabel("\(bucket.label), \(count)\(isOn ? ", selected" : "")")
+        .accessibilityIdentifier("disposition-filter-\(bucket.rawValue)")
+    }
+
+    /// "To review" uses `.blue` — disposition state gets its own token per the
+    /// ratified 2026-07-05 amber de-confliction. Amber (`.orange`) is reserved
+    /// for analyst-marked findings; painting an unreviewed count amber would
+    /// collide with that meaning.
+    private func dispositionColor(_ bucket: DispositionFilter) -> Color {
+        switch bucket {
+        case .toReview: return .blue
+        case .confirmed: return .green
+        case .dismissed: return .secondary
+        }
+    }
+
+    private func dispositionCount(_ bucket: DispositionFilter) -> Int {
+        switch bucket {
+        case .toReview: return tally.unreviewed
+        case .confirmed: return tally.confirmed
+        case .dismissed: return tally.dismissed
+        }
+    }
+
+    /// Category and confidence filters, plus the group controls.
+    ///
+    /// The button carries an active-filter dot. Without it a narrowed queue is
+    /// indistinguishable from a quiet recording, and the control that narrowed
+    /// it is behind a menu the analyst would have to open to find out.
+    private var overflowMenu: some View {
+        Menu {
+            categoryMenuContent
+            Divider()
+            confidenceMenuContent
+        } label: {
+            Image(systemName: filter.isActive
+                  ? "line.3.horizontal.decrease.circle.fill"
+                  : "line.3.horizontal.decrease.circle")
+                .foregroundStyle(filter.isActive ? Color.accentColor : Color.secondary)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help(filter.isActive ? "Filters active — category, confidence" : "Filter by category or confidence")
+        .accessibilityLabel(filter.isActive ? "Filters, active" : "Filters")
+        .accessibilityIdentifier("findings-filter-menu")
     }
 
     /// C7/X29: ventricular-ectopy burden + run grouping over the annotation
@@ -243,45 +399,13 @@ struct FindingsPanel: View {
         dispositionStore.tally(for: flaggedAnnotations)
     }
 
-    private var triageTally: some View {
-        // "To review" uses `.blue` — disposition state gets its own
-        // token per the ratified 2026-07-05 amber de-confliction.
-        // Amber (`.orange`) is now reserved for analyst-marked
-        // findings; painting an unreviewed count amber would collide
-        // with that meaning.
-        HStack(spacing: 6) {
-            tallyChip(count: tally.unreviewed, label: "To review", color: .blue)
-            tallyChip(count: tally.confirmed, label: "Confirmed", color: .green)
-            tallyChip(count: tally.dismissed, label: "Dismissed", color: .secondary)
-        }
-    }
-
-    private func tallyChip(count: Int, label: String, color: Color) -> some View {
-        HStack(spacing: 4) {
-            Circle()
-                .fill(color)
-                .frame(width: 6, height: 6)
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            Text("\(count)")
-                .font(.caption2.monospacedDigit().weight(.semibold))
-        }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 3)
-        .background(Capsule().fill(Color.secondary.opacity(0.08)))
-        .overlay(Capsule().stroke(Color.secondary.opacity(0.15), lineWidth: 0.5))
-    }
-
-    // MARK: - Filter chip row
-
-    private var filterChips: some View {
-        HStack(spacing: 6) {
-            sortMenu
-            categoryMenu
-            confidenceMenu
-        }
-    }
+    // X75: `triageTally`, `tallyChip` and `filterChips` lived here.
+    //
+    // The tally's three counts BECAME the disposition filter — it already
+    // showed exactly those numbers, so keeping both would have put the same
+    // information on screen twice and left the analyst to work out which one
+    // was clickable. The chip row's category and confidence menus moved into
+    // the header's overflow; sort stayed visible (DECISIONS §7).
 
     private var sortMenu: some View {
         Menu {
@@ -355,8 +479,12 @@ struct FindingsPanel: View {
         }
     }
 
-    private var categoryMenu: some View {
-        Menu {
+    /// Rows only. X75 moved these into the overflow menu, so the chip label
+    /// they used to carry — and the `findings-category-picker` id on it —
+    /// no longer exist; the row ids the tests bind to are unchanged.
+    @ViewBuilder
+    private var categoryMenuContent: some View {
+        Section("Category") {
             Button {
                 filter.categories.removeAll()
             } label: {
@@ -371,16 +499,12 @@ struct FindingsPanel: View {
                 }
                 .accessibilityIdentifier("findings-category-filter-\(cat)")
             }
-        } label: {
-            chipLabel(key: "Category", value: filter.categories.isEmpty ? "all" : "\(filter.categories.count)")
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .accessibilityIdentifier("findings-category-picker")
     }
 
-    private var confidenceMenu: some View {
-        Menu {
+    @ViewBuilder
+    private var confidenceMenuContent: some View {
+        Section("Confidence") {
             ForEach([0.0, 0.5, 0.75, 0.9], id: \.self) { threshold in
                 Button {
                     filter.minConfidence = threshold
@@ -388,17 +512,9 @@ struct FindingsPanel: View {
                     let label = threshold == 0 ? "any" : "≥ \(Int(threshold * 100))%"
                     Label(label, systemImage: filter.minConfidence == threshold ? "checkmark" : "")
                 }
+                .accessibilityIdentifier("findings-confidence-filter-\(Int(threshold * 100))")
             }
-        } label: {
-            let value = filter.minConfidence == 0 ? "≥ 0%" : "≥ \(Int(filter.minConfidence * 100))%"
-            chipLabel(key: "Confidence", value: value)
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        // AX2: without an explicit id this image-bearing menu falls back to
-        // its chevron symbol name ("chevron.down") in the tree. Match its
-        // siblings findings-sort-picker / findings-category-picker.
-        .accessibilityIdentifier("findings-confidence-picker")
     }
 
     private func chipLabel(key: String, value: String, highlighted: Bool = false) -> some View {
@@ -548,7 +664,17 @@ struct FindingsPanel: View {
     // MARK: - Queue list
 
     private var filtered: [Annotation] {
-        annotations.filter(filter.matches)
+        annotations
+            .filter(filter.matches)
+            .filter { annotation in
+                // Normals are never a review task (X34) — they collapse into
+                // their own row and must not vanish when the analyst looks at
+                // "Confirmed", which would make that row's count contradict
+                // the queue around it.
+                if isNormalCategory(annotation.category) { return true }
+                if recentlyActed.contains(annotation.id) { return true }
+                return dispositionFilter.admits(dispositionStore.state(for: annotation.id))
+            }
     }
 
     @ViewBuilder
@@ -879,12 +1005,15 @@ struct FindingsPanel: View {
             Menu {
                 Button("Confirm as VT") {
                     dispositionStore.confirm(annotation.id, kind: .vt)
+                    recentlyActed.insert(annotation.id)
                 }
                 Button("Confirm as VF") {
                     dispositionStore.confirm(annotation.id, kind: .vf)
+                    recentlyActed.insert(annotation.id)
                 }
                 Button("Confirm (unsure)") {
                     dispositionStore.confirm(annotation.id, kind: nil)
+                    recentlyActed.insert(annotation.id)
                 }
             } label: {
                 Image(systemName: "checkmark.circle")
@@ -901,6 +1030,7 @@ struct FindingsPanel: View {
 
             Button {
                 dispositionStore.dismiss(annotation.id)
+                recentlyActed.insert(annotation.id)
             } label: {
                 Image(systemName: "xmark.circle")
                     .foregroundStyle(.secondary)
@@ -915,6 +1045,7 @@ struct FindingsPanel: View {
             if dispositionStore.record(for: annotation.id) != nil {
                 Button {
                     dispositionStore.reset(annotation.id)
+                    recentlyActed.insert(annotation.id)
                 } label: {
                     Image(systemName: "arrow.uturn.backward.circle")
                         .foregroundStyle(.tertiary)
@@ -1195,18 +1326,57 @@ struct FindingsPanel: View {
     // time-region store so they survive a rescan.
     // (project_vtvf_candidate_review_flow.md)
 
-    /// Candidates ranked by model score (confidence), descending.
+    /// Candidates ranked by model score (confidence), descending, in the
+    /// current disposition bucket.
+    ///
+    /// The filter reaches candidates too, even though their dispositions live
+    /// in a different store keyed on time region rather than annotation id.
+    /// A filter that silently skipped one group would make "Confirmed" show
+    /// every candidate alongside the confirmed findings — the analyst would
+    /// reasonably read that as "these candidates are confirmed". The two
+    /// stores stay separate and the two RANKINGS still never interleave; only
+    /// the review-state question is asked of both.
     private var sortedCandidates: [Annotation] {
-        candidates.sorted { ($0.confidence ?? 0) > ($1.confidence ?? 0) }
+        candidates
+            .filter { candidate in
+                if recentlyActed.contains(candidate.id) { return true }
+                let state = candidateDispositionStore?.state(
+                    forStart: candidate.sampleIndex,
+                    end: candidate.renderEndSample
+                )
+                return dispositionFilter.admits(state)
+            }
+            .sorted { ($0.confidence ?? 0) > ($1.confidence ?? 0) }
     }
 
     private var candidateGroupSection: some View {
         VStack(spacing: 0) {
             candidateGroupHeader
             if candidateGroupExpanded {
+                let shown = Array(sortedCandidates.prefix(candidateRenderBound))
+                let remaining = sortedCandidates.count - shown.count
                 VStack(spacing: 1) {
-                    ForEach(Array(sortedCandidates.enumerated()), id: \.element.id) { index, cand in
+                    ForEach(Array(shown.enumerated()), id: \.element.id) { index, cand in
                         candidateRow(rank: index, candidate: cand)
+                    }
+                    if remaining > 0 {
+                        // Phrased as a rendering choice, never as a filter that
+                        // dropped candidates — the group header keeps the full
+                        // count, same rule as `extendGroupControl`.
+                        HStack(spacing: 12) {
+                            Text("top \(shown.count) of \(sortedCandidates.count)")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                            Spacer(minLength: 4)
+                            Button("Show \(remaining) more") {
+                                candidateRenderBound = sortedCandidates.count
+                            }
+                            .buttonStyle(.plain)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(Color.accentColor)
+                            .accessibilityIdentifier("vtvf-candidate-show-more")
+                        }
+                        .padding(.top, 2)
                     }
                 }
                 .padding(.leading, 28)
@@ -1324,7 +1494,7 @@ struct FindingsPanel: View {
             .accessibilityIdentifier("vtvf-candidate-row-\(rank)")
 
             if isEditing, candidateDispositionStore != nil {
-                candidateDispositionButtons(rank: rank, start: start, end: end, hasRecord: state != nil)
+                candidateDispositionButtons(rank: rank, id: candidate.id, start: start, end: end, hasRecord: state != nil)
             }
         }
         .padding(.horizontal, 10)
@@ -1407,17 +1577,20 @@ struct FindingsPanel: View {
         )
     }
 
-    private func candidateDispositionButtons(rank: Int, start: Int64, end: Int64, hasRecord: Bool) -> some View {
+    private func candidateDispositionButtons(rank: Int, id: UUID, start: Int64, end: Int64, hasRecord: Bool) -> some View {
         HStack(spacing: 3) {
             Menu {
                 Button("Confirm as VT") {
                     confirmCandidate(start: start, end: end, kind: .vt)
+                    recentlyActed.insert(id)
                 }
                 Button("Confirm as VF") {
                     confirmCandidate(start: start, end: end, kind: .vf)
+                    recentlyActed.insert(id)
                 }
                 Button("Confirm (unsure)") {
                     confirmCandidate(start: start, end: end, kind: .unclassified)
+                    recentlyActed.insert(id)
                 }
             } label: {
                 Image(systemName: "checkmark.circle")
@@ -1431,6 +1604,7 @@ struct FindingsPanel: View {
 
             Button {
                 candidateDispositionStore?.dismiss(start: start, end: end)
+                recentlyActed.insert(id)
             } label: {
                 Image(systemName: "xmark.circle")
                     .foregroundStyle(.secondary)
@@ -1442,6 +1616,7 @@ struct FindingsPanel: View {
             if hasRecord {
                 Button {
                     candidateDispositionStore?.reset(start: start, end: end)
+                    recentlyActed.insert(id)
                 } label: {
                     Image(systemName: "arrow.uturn.backward.circle")
                         .foregroundStyle(.tertiary)
