@@ -394,7 +394,10 @@ struct BedsideView: View {
         VStack(spacing: 0) {
             LeadChipBar(
                 channels: ecgChannels,
-                layoutMode: $layoutMode
+                layoutMode: $layoutMode,
+                recordDurationSeconds: totalDurationSeconds,
+                viewportDurationSeconds: viewport.durationSeconds,
+                onSelectZoom: applyZoomLadderStep
             )
             Divider()
             bedsideContent
@@ -1212,6 +1215,21 @@ struct BedsideView: View {
         }
     }
 
+    /// Set the viewport to a ladder rung, anchored on the window centre so the
+    /// analyst keeps the thing they were looking at.
+    ///
+    /// Releases the window hold (DECISIONS §5). A ladder click IS a manual
+    /// zoom — the pin's meaning is "hold 10 s across finding jumps until I
+    /// zoom", and honouring the pin here would make the ladder silently do
+    /// nothing, which is the worst of the three options. `windowLockedTo10s`
+    /// stays a Bool, so its name, its `.mur` field and its tooltip all stay
+    /// true.
+    private func applyZoomLadderStep(seconds: Double) {
+        windowLockedTo10s = false
+        let width = Int64((seconds * max(1, viewport.sampleRate)).rounded())
+        viewport.setWidth(max(2, width), anchorFraction: 0.5)
+    }
+
     /// Animated jump to the first filtered finding strictly after the
     /// viewport centre. No-op when there are no findings ahead.
     private func jumpToNextFinding() {
@@ -1392,6 +1410,12 @@ struct BedsideView: View {
     /// while the scrolling context under it moves.
     private func pinnedStage(channel: Channel) -> some View {
         VStack(alignment: .leading, spacing: 8) {
+            // X70: the two coarser bands read ABOVE the trace, so the stage
+            // goes whole-record → hour → window top to bottom. The overview
+            // used to sit beneath the canvas, which made the analyst read the
+            // scales in the opposite order from the one they navigate in.
+            bandLadder(channel: channel)
+
             HStack(alignment: .top, spacing: 12) {
                 ChannelPanel(
                     channel: channel,
@@ -1418,15 +1442,6 @@ struct BedsideView: View {
                 dockedBeatInspector
             }
 
-            OverviewMap(
-                annotations: filteredAnnotations,
-                totalSamples: channel.sampleCount,
-                sampleRate: channel.sampleRate,
-                viewport: viewport,
-                channelName: channel.name,
-                dispositionsByID: dispositionStore.records,
-                candidates: candidatesForChannel(channel)
-            )
         }
         .padding(.horizontal, 16)
         .padding(.top, 12)
@@ -1438,6 +1453,57 @@ struct BedsideView: View {
         // and XCUI's `channel-panel-I` waits time out.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("pinned-stage")
+    }
+
+    /// The two coarser bands of the stage's three-tier ladder: the whole
+    /// record, then the enclosing hour. The trace beneath them is the third.
+    ///
+    /// Each band maps ITS OWN span across the same pixel width — they do not
+    /// share a time domain, they share a geometry. That is what lets the window
+    /// box mean the same thing in all three: *this slice of what you are
+    /// looking at*. A shared domain would make the hour band a near-invisible
+    /// sliver of the record band and answer nothing.
+    ///
+    /// The hour band renders only when the record is longer than an hour.
+    /// Below that the record band already IS the hour, and two bands showing
+    /// the same span with different boxes is a puzzle, not a ladder.
+    @ViewBuilder
+    private func bandLadder(channel: Channel) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .center, spacing: 10) {
+                bandLabel("Record", detail: RecordListEntry.duration(totalDurationSeconds))
+                OverviewMap(
+                    annotations: filteredAnnotations,
+                    totalSamples: channel.sampleCount,
+                    sampleRate: channel.sampleRate,
+                    viewport: viewport,
+                    channelName: channel.name,
+                    dispositionsByID: dispositionStore.records,
+                    candidates: candidatesForChannel(channel)
+                )
+            }
+            if totalDurationSeconds > HourBand.defaultSpanSeconds {
+                HStack(alignment: .center, spacing: 10) {
+                    bandLabel("Hour", detail: "60 min")
+                    HourBand(
+                        channel: channel,
+                        directory: recordingDirectory,
+                        viewport: viewport
+                    )
+                }
+            }
+        }
+    }
+
+    private func bandLabel(_ title: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+            Text(detail)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(width: 76, alignment: .leading)
     }
 
     /// Names the lead every number in this column was measured from.

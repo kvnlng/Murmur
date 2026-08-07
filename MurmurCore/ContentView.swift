@@ -92,6 +92,7 @@ public struct ContentView: View {
         .task {
             #if DEBUG
             loadUITestSampleIfRequested()
+            openUITestPathIfRequested()
             openUITestSessionIfRequested()
             openUITestCSVIfRequested()
             openUITestHeaderlessCSVIfRequested()
@@ -744,6 +745,28 @@ public struct ContentView: View {
     /// `.mur` and open it through the real loader, so an XCUI test can assert
     /// the full read → loadManifest → present chain (the NSOpenPanel itself is
     /// XCUI-hostile, like the folder picker).
+    /// `--ui-test-open-path=<relative>`: open a record folder staged inside the
+    /// app container, resolved against `NSHomeDirectory()`.
+    ///
+    /// Kept rather than scaffolded-and-deleted. The redesign's remaining
+    /// visual work — the stage bands (X70) and the shared-axis trend stack
+    /// (X74) — cannot be verified through the accessibility tree, because a
+    /// Metal canvas, a `Path` and a Swift Charts lane all expose nothing about
+    /// what they PAINTED. Checking those against pixels needs a real
+    /// multi-hour record, which is far too large to live in the repo, so it
+    /// has to be staged locally and opened by path. X64 removed this hook and
+    /// X70 had to write it again; the second time is the signal.
+    ///
+    /// The path is RELATIVE deliberately: the app sandbox denies an absolute
+    /// path even into its own container, which cost a debugging cycle in X64.
+    private func openUITestPathIfRequested() {
+        guard let arg = ProcessInfo.processInfo.arguments
+            .first(where: { $0.hasPrefix("--ui-test-open-path=") }) else { return }
+        let relative = String(arg.dropFirst("--ui-test-open-path=".count))
+        let url = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(relative)
+        openFolder(url)
+    }
+
     private func openUITestSessionIfRequested() {
         guard ProcessInfo.processInfo.arguments.contains("--ui-test-open-sample-session") else { return }
         do {

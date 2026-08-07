@@ -5778,6 +5778,81 @@ struct FiducialLayerToggleTests {
     }
 }
 
+/// X70. The stage's zoom ladder.
+///
+/// At 12 leads / 250 Hz / 72 h, getting from a 10 s window to the whole record
+/// by repeated zoom-out is ~14 doublings. The ladder is what makes the useful
+/// widths one click apart, so its rung selection is worth pinning.
+@Suite("Zoom ladder (X70)")
+struct ZoomLadderTests {
+
+    @Test("A 72-hour record gets the full ladder")
+    func longRecordGetsEveryRung() {
+        let steps = ZoomLadder.steps(forDurationSeconds: 72.4 * 3600)
+        let labels = steps.map(\.label)
+        #expect(labels.contains("1 h"))
+        #expect(labels.contains("5 m"))
+        #expect(labels.contains("10 s"))
+        #expect(labels.contains("2 s"))
+        // The whole-record rung is first and is the record's own length, not a
+        // fixed 72 h — a 72.4 h record's widest view is 72.4 h.
+        #expect(steps.first?.seconds == 72.4 * 3600)
+        // And there is exactly one of it. The fixed 72 h rung is 20 minutes
+        // narrower than this record, which would put two buttons both reading
+        // "72 h" side by side.
+        #expect(labels.filter { $0 == "72 h" }.count == 1)
+        #expect(Set(labels).count == labels.count)
+    }
+
+    @Test("Rungs wider than the record collapse into one whole-record rung")
+    func shortRecordDropsWiderRungs() {
+        // A 30-minute MIT-BIH record: the design's literal ladder would give
+        // `72 h` and `1 h` both meaning "all of it" — the same button twice.
+        let steps = ZoomLadder.steps(forDurationSeconds: 30 * 60)
+        let labels = steps.map(\.label)
+        #expect(!labels.contains("72 h"))
+        #expect(!labels.contains("1 h"))
+        #expect(labels.contains("5 m"))
+        #expect(labels.contains("10 s"))
+        #expect(steps.first?.seconds == 1800.0)
+        // Every rung lands somewhere different.
+        #expect(Set(steps.map(\.seconds)).count == steps.count)
+    }
+
+    @Test("The finest rung survives on a very short record")
+    func shortRecordKeepsTheFinestRung() {
+        // A ladder that loses 2 s on a short record makes the shortest
+        // recordings the hardest to inspect, which is backwards.
+        let steps = ZoomLadder.steps(forDurationSeconds: 30)
+        #expect(steps.map(\.label).contains("2 s"))
+        #expect(steps.map(\.label).contains("10 s"))
+    }
+
+    @Test("A record with no duration gets no ladder")
+    func zeroDurationGetsNothing() {
+        #expect(ZoomLadder.steps(forDurationSeconds: 0).isEmpty)
+    }
+
+    @Test("The current rung is matched with tolerance, not equality")
+    func currentStepTolerates() {
+        let steps = ZoomLadder.steps(forDurationSeconds: 72 * 3600)
+        // The viewport is stored in whole samples, so a rung rarely round-trips
+        // to an exact Double.
+        #expect(ZoomLadder.currentStep(forDurationSeconds: 10.0, in: steps)?.label == "10 s")
+        #expect(ZoomLadder.currentStep(forDurationSeconds: 10.05, in: steps)?.label == "10 s")
+        #expect(ZoomLadder.currentStep(forDurationSeconds: 9.95, in: steps)?.label == "10 s")
+    }
+
+    @Test("After a manual pinch no rung is claimed")
+    func currentStepIsNilOffLadder() {
+        // Showing a selected rung the analyst is not on is worse than showing
+        // none: it makes the ladder lie about where they are.
+        let steps = ZoomLadder.steps(forDurationSeconds: 72 * 3600)
+        #expect(ZoomLadder.currentStep(forDurationSeconds: 37.0, in: steps) == nil)
+        #expect(ZoomLadder.currentStep(forDurationSeconds: 0, in: steps) == nil)
+    }
+}
+
 /// X69. The info bar's formatters, and the LOD label the render path
 /// publishes into it.
 @Suite("Info bar (X69)")
