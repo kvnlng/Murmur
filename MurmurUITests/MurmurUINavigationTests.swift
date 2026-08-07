@@ -317,9 +317,9 @@ final class MurmurUINavigationTests: XCTestCase {
     /// of these four identifiers stops resolving under `pinned-stage`,
     /// the persistent-stage promise is broken. Focus mode is the
     /// default; the `--ui-test-sample` fixture carries no fiducial
-    /// store, so `docked-beat-inspector-empty` is the correct assertion
-    /// (the populated variant lights up once a per-patient template
-    /// exists — Phase 3).
+    /// store, so no beat card renders at all — X71 removed the empty-state
+    /// placeholder, so the assertion is on the column's calibration controls
+    /// plus the ABSENCE of a placeholder.
     @MainActor
     func testPersistentStageHousesTraceInspectorAndOverview() throws {
         let app = XCUIApplication()
@@ -334,10 +334,19 @@ final class MurmurUINavigationTests: XCTestCase {
         XCTAssertTrue(panel.waitForExistence(timeout: 3),
                       "Trace panel should render inside the pinned stage")
 
-        let inspector = app.descendants(matching: .any)
+        // X71 removed the empty-state card: with no beat focused the readout
+        // is simply absent, because the column is a fixed frame and no longer
+        // needs a placeholder to hold its width. The column itself still has
+        // to be there, so assert on what it always carries.
+        let controls = app.descendants(matching: .any)
+            .matching(identifier: "calibration-controls").firstMatch
+        XCTAssertTrue(controls.waitForExistence(timeout: 3),
+                      "The stage's right column should sit beside the trace")
+
+        let emptyCard = app.descendants(matching: .any)
             .matching(identifier: "docked-beat-inspector-empty").firstMatch
-        XCTAssertTrue(inspector.waitForExistence(timeout: 3),
-                      "Docked inspector empty state should sit beside the trace with no beat focused")
+        XCTAssertFalse(emptyCard.exists,
+                       "With no beat focused the readout should be absent, not a placeholder")
 
         let overview = app.descendants(matching: .any).matching(identifier: "overview-map").firstMatch
         XCTAssertTrue(overview.waitForExistence(timeout: 3),
