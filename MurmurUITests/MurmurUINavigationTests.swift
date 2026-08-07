@@ -230,19 +230,27 @@ final class MurmurUINavigationTests: XCTestCase {
                       "FindingsPanel header should expose a 'findings-sort-picker'")
     }
 
-    /// Toolbar button that opens the NSSavePanel for the markdown
-    /// report. Guards: the toolbar item identifier
-    /// `export-report` and its button-ness so other XCUI flows can
-    /// later open a save panel against this button.
+    /// The markdown report stays reachable. Guards the `export-report`
+    /// identifier, which X68 kept while changing what it identifies: it is now
+    /// the export MENU rather than a single button, and a SwiftUI `Menu`
+    /// surfaces as a `menuButton`, not a `button` — so `app.buttons[…]` finds
+    /// nothing even though the item is right there. Match on any type.
     @MainActor
-    func testExportReportToolbarButtonExists() throws {
+    func testExportReportIsReachableFromTheExportMenu() throws {
         let app = XCUIApplication()
         app.launchArguments += ["--ui-test-sample"]
         app.launch()
 
-        let button = app.buttons.matching(identifier: "export-report").firstMatch
-        XCTAssertTrue(button.waitForExistence(timeout: 5),
-                      "Toolbar should expose an 'export-report' button")
+        let exportMenu = app.descendants(matching: .any)
+            .matching(identifier: "export-report").firstMatch
+        XCTAssertTrue(exportMenu.waitForExistence(timeout: 5),
+                      "Toolbar should expose the export menu")
+        exportMenu.click()
+
+        let item = app.menuItems["export-report-item"]
+        XCTAssertTrue(item.waitForExistence(timeout: 3),
+                      "The export menu should carry 'Export report…'")
+        app.typeKey(.escape, modifierFlags: [])
     }
 
     /// Channel-range badge. Populated by the background min/max scan
@@ -277,18 +285,28 @@ final class MurmurUINavigationTests: XCTestCase {
                       "Lead I (focused by default) should expose a Fit-amplitude button once the scan completes")
     }
 
-    /// Toolbar button that opens the PNG-snapshot save panel. Guards
-    /// the `export-snapshot` accessibility id stays reachable so other
-    /// XCUI flows can later drive a snapshot save through this button.
+    /// The PNG-snapshot export stays reachable. X68 collapsed the three
+    /// exports into one toolbar menu, so this is now a menu item rather than a
+    /// top-level button — the standalone `export-snapshot` item is still
+    /// registered but hidden by default, and a hidden customisable item is
+    /// absent from the accessibility tree entirely (measured, not assumed).
     @MainActor
-    func testExportSnapshotToolbarButtonExists() throws {
+    func testExportSnapshotIsReachableFromTheExportMenu() throws {
         let app = XCUIApplication()
         app.launchArguments += ["--ui-test-sample"]
         app.launch()
 
-        let button = app.buttons.matching(identifier: "export-snapshot").firstMatch
-        XCTAssertTrue(button.waitForExistence(timeout: 5),
-                      "Toolbar should expose an 'export-snapshot' button")
+        // The Menu surfaces as a menuButton (type 16), not a button.
+        let exportMenu = app.descendants(matching: .any)
+            .matching(identifier: "export-report").firstMatch
+        XCTAssertTrue(exportMenu.waitForExistence(timeout: 5),
+                      "Toolbar should expose the export menu")
+        exportMenu.click()
+
+        let item = app.menuItems["export-snapshot-item"]
+        XCTAssertTrue(item.waitForExistence(timeout: 3),
+                      "The export menu should carry 'Export snapshot…'")
+        app.typeKey(.escape, modifierFlags: [])
     }
 
     // MARK: - Persistent-stage layout (Phase 0 of the viewer redesign)

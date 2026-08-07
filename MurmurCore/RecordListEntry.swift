@@ -35,7 +35,7 @@ struct RecordListEntry: Identifiable, Equatable {
     init(_ record: WFDBRecordEntry) {
         id = record.filename
         title = record.header.recordName
-        var parts = ["\(record.header.signalCount) sig", "\(Int(record.header.samplingFrequency)) Hz"]
+        var parts: [String] = []
         if record.durationSeconds > 0 {
             parts.append(Self.duration(record.durationSeconds))
         }
@@ -44,12 +44,17 @@ struct RecordListEntry: Identifiable, Equatable {
         // The first `.hea` comment is record-specific (the patient line, or a
         // rhythm note like 212's rate-related RBBB), so surface it — anything
         // record-specific beats a constant.
+        //
+        // X68 went further and dropped signal count and sample rate too. The
+        // redesign's info bar carries both for the OPEN record, and repeating
+        // them on all twenty rows is the same height-for-a-constant trade X56
+        // rejected. Duration stays because it varies on every corpus.
         if let note = record.header.comments
             .map({ $0.trimmingCharacters(in: .whitespaces) })
             .first(where: { !$0.isEmpty }) {
             parts.append(note)
         }
-        subtitle = parts.joined(separator: " • ")
+        subtitle = parts.joined(separator: " · ")
     }
 
     /// A record inside an opened `.mur` session. Built from the recording
@@ -59,12 +64,10 @@ struct RecordListEntry: Identifiable, Equatable {
         id = recording.id.uuidString
         title = recording.device
         let primary = recording.primaryECGChannel ?? recording.channels.first
-        var parts = ["\(recording.channels.count) sig"]
-        if let rate = primary?.sampleRate, rate > 0 {
-            parts.append("\(Int(rate)) Hz")
-            if let count = primary?.sampleCount, count > 0 {
-                parts.append(Self.duration(Double(count) / rate))
-            }
+        var parts: [String] = []
+        if let rate = primary?.sampleRate, rate > 0,
+           let count = primary?.sampleCount, count > 0 {
+            parts.append(Self.duration(Double(count) / rate))
         }
         // The source filename is what distinguishes two records that a session
         // may have drawn from different folders — the session equivalent of the
@@ -72,13 +75,16 @@ struct RecordListEntry: Identifiable, Equatable {
         if !recording.sourceFileName.isEmpty {
             parts.append(recording.sourceFileName)
         }
-        subtitle = parts.joined(separator: " • ")
+        subtitle = parts.joined(separator: " · ")
     }
 
+    /// `h`, not `hr` — the redesign's info bar and navigator both read
+    /// `72.4 h`, and two spellings of the same unit in one window is the kind
+    /// of drift nobody files a bug about but everybody notices.
     static func duration(_ seconds: Double) -> String {
         if seconds < 60 { return String(format: "%.0f s", seconds) }
         if seconds < 3600 { return String(format: "%.1f min", seconds / 60) }
-        return String(format: "%.1f hr", seconds / 3600)
+        return String(format: "%.1f h", seconds / 3600)
     }
 }
 

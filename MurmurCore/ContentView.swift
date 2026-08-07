@@ -107,19 +107,26 @@ public struct ContentView: View {
             )
         }
         // Finder double-click / `open` routes here (both .mur and .csv).
-        .onOpenURL { url in open(url) }
+        //
+        // Each open is deferred to the next main-runloop turn with a
+        // `@MainActor` Task. These handlers fire during SwiftUI's view update,
+        // which runs inside a CoreAnimation transaction commit; opening a
+        // sealed `.mur` presents an `NSAlert` passphrase prompt, and AppKit
+        // SUPPRESSES `runModal()` inside a commit — the prompt never shows and
+        // the open silently no-ops. Hopping off the commit lets the modal run.
+        .onOpenURL { url in Task { @MainActor in open(url) } }
         // File → Open Session… / Import CSV… bridge through the coordinator.
         .onChange(of: docCoordinator.openRequestURL) { _, url in
             guard let url else { return }
-            open(url)
             docCoordinator.openRequestURL = nil
+            Task { @MainActor in open(url) }
         }
         // File → Open Recent (X22): reuse `reopen` so the bookmark is resolved
         // and read in one scoped call.
         .onChange(of: docCoordinator.reopenRecentRequest) { _, entry in
             guard let entry else { return }
-            reopen(entry)
             docCoordinator.reopenRecentRequest = nil
+            Task { @MainActor in reopen(entry) }
         }
     }
 
@@ -314,7 +321,7 @@ public struct ContentView: View {
                 onDropFolder: { openFolder($0) }
             )
             .navigationTitle("Murmur")
-            .toolbar(id: MurmurToolbar.identifier) { openFolderToolbarItem }
+            .toolbar(id: MurmurToolbar.identifier) { overflowToolbarItems }
         }
     }
 
@@ -359,10 +366,36 @@ public struct ContentView: View {
         } detail: {
             detailPane
                 .navigationTitle(detailTitle)
-                .toolbar(id: MurmurToolbar.identifier) { openFolderToolbarItem }
+                .toolbar(id: MurmurToolbar.identifier) { overflowToolbarItems }
+                // Persistent record-list toggle. The sidebar-toggle button
+                // NavigationSplitView injects lives in the sidebar's own
+                // toolbar region, so it collapses together with the column —
+                // once hidden there is no icon left to bring the record list
+                // back. This one lives on the detail side, which stays on
+                // screen, and drives `navigatorVisibility` directly so it
+                // toggles both ways regardless of responder-chain state.
+                .toolbar { sidebarToggleToolbarItem }
         }
         .onChange(of: selection) { _, newValue in
             handleSelectionChanged(newValue, source: source)
+        }
+    }
+
+    /// A leading toolbar button that shows or hides the record navigator by
+    /// flipping the split view's column visibility. Placed on the detail pane
+    /// so it survives the sidebar collapsing.
+    @ToolbarContentBuilder
+    private var sidebarToggleToolbarItem: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            Button {
+                withAnimation {
+                    navigatorVisibility = navigatorVisibility == .detailOnly ? .all : .detailOnly
+                }
+            } label: {
+                Label("Toggle Record List", systemImage: "sidebar.leading")
+            }
+            .help("Show or hide the record list")
+            .accessibilityIdentifier("toolbar-sidebar-toggle")
         }
     }
 
@@ -370,15 +403,41 @@ public struct ContentView: View {
         NavigationStack {
             BedsideView(recording: recording, recordingDirectory: directory)
                 .navigationTitle(recording.device)
-                .toolbar(id: MurmurToolbar.identifier) { openFolderToolbarItem }
+                .toolbar(id: MurmurToolbar.identifier) { overflowToolbarItems }
         }
     }
 
     private static let openFolderHelp =
         "Open a folder of WFDB records (.hea / .dat)"
 
-    private var openFolderToolbarItem: some CustomizableToolbarContent {
-        ToolbarItem(id: "toolbar-open-button", placement: .automatic, showsByDefault: true) {
+    /// The overflow menu and the open-folder button it now contains.
+    ///
+    /// X68 moved Open Record Folder off the toolbar's top level: it is a
+    /// once-per-session action sitting among per-record ones. The standalone
+    /// item stays REGISTERED but hidden by default, for the same reason the
+    /// two collapsed exports do — the id is persisted in saved toolbar
+    /// layouts, and an analyst who wants it back as a labelled button can drag
+    /// it out of Customize Toolbar…
+    ///
+    /// Contributed by `ContentView`, not `BedsideView`, because it must be
+    /// reachable with no recording open — which is exactly when opening a
+    /// folder is the only thing left to do.
+    @ToolbarContentBuilder
+    private var overflowToolbarItems: some CustomizableToolbarContent {
+        ToolbarItem(id: "toolbar-more", placement: .automatic, showsByDefault: true) {
+            Menu {
+                Button("Open Record Folder…") { isImporterPresented = true }
+                    .accessibilityIdentifier("toolbar-open-button-item")
+                Divider()
+                Button("Customize Toolbar…") { runToolbarCustomization() }
+                    .accessibilityIdentifier("toolbar-customize-item")
+            } label: {
+                Label("More", systemImage: ToolbarGlyph.moreActions)
+            }
+            .help("Open a record folder, customise this toolbar")
+            .accessibilityIdentifier("toolbar-more")
+        }
+        ToolbarItem(id: "toolbar-open-button", placement: .automatic, showsByDefault: false) {
             Button {
                 isImporterPresented = true
             } label: {
@@ -392,6 +451,16 @@ public struct ContentView: View {
             .help(Self.openFolderHelp)
             .accessibilityIdentifier("toolbar-open-button")
         }
+    }
+
+    /// Opens AppKit's own customisation palette.
+    ///
+    /// macOS already puts this in the View menu, but the design asks for it
+    /// here too: the toolbar is where an analyst is looking when they decide
+    /// they want it different, and with `.help()` broken the customisation
+    /// sheet is also the only route to visible labels.
+    private func runToolbarCustomization() {
+        NSApp.keyWindow?.toolbar?.runCustomizationPalette(nil)
     }
 
     // MARK: - Detail pane
@@ -876,27 +945,103 @@ private struct RecordSidebar: View {
     @Binding var selection: String?
     @State private var flags = SessionFlagStore.shared
 
+    /// Search text (X68). Matches the record name and its metadata line, so
+    /// typing `72` finds the 72-hour records and `F` finds the female
+    /// subjects — the `.hea` comment is in the subtitle and is the field that
+    /// actually distinguishes one row from another.
+    @State private var searchText: String = ""
+    @State private var recordsExpanded: Bool = true
+
+    private var filtered: [RecordListEntry] {
+        let query = searchText.trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return records }
+        return records.filter {
+            $0.title.localizedCaseInsensitiveContains(query)
+                || $0.subtitle.localizedCaseInsensitiveContains(query)
+        }
+    }
+
     var body: some View {
-        List(selection: $selection) {
-            ForEach(records) { record in
-                RecordRow(
-                    record: record,
-                    importState: importStates[record.id],
-                    isFlagged: flags.isFlagged(record.id),
-                    canFlag: isImported(record.id),
-                    onToggleFlag: { flags.toggle(record.id) }
-                )
-                .tag(record.id)
-                // `.contain` keeps the row's own controls addressable. An
-                // identifier on a container otherwise collapses its subtree to
-                // one element, which is how the Save Session flag ended up
-                // clickable by hand but invisible to VoiceOver and XCUI —
-                // the same defect X51 §1 chased, and the rule
-                // feedback_swiftui_accessibility_contain exists to prevent.
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("record-row-\(record.id)")
+        VStack(spacing: 0) {
+            searchField
+            List(selection: $selection) {
+                Section(isExpanded: $recordsExpanded) {
+                    ForEach(filtered) { record in
+                        RecordRow(
+                            record: record,
+                            importState: importStates[record.id],
+                            isFlagged: flags.isFlagged(record.id),
+                            canFlag: isImported(record.id),
+                            onToggleFlag: { flags.toggle(record.id) }
+                        )
+                        .tag(record.id)
+                        // `.contain` keeps the row's own controls addressable. An
+                        // identifier on a container otherwise collapses its subtree to
+                        // one element, which is how the Save Session flag ended up
+                        // clickable by hand but invisible to VoiceOver and XCUI —
+                        // the same defect X51 §1 chased, and the rule
+                        // feedback_swiftui_accessibility_contain exists to prevent.
+                        .accessibilityElement(children: .contain)
+                        .accessibilityIdentifier("record-row-\(record.id)")
+                    }
+                } header: {
+                    sectionHeader
+                }
+            }
+            .overlay {
+                // A filtered-to-nothing list is otherwise indistinguishable
+                // from a folder that produced no records, and the analyst has
+                // no way to tell which without clearing the field.
+                if filtered.isEmpty && !records.isEmpty {
+                    ContentUnavailableView.search(text: searchText)
+                }
             }
         }
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            TextField("Search", text: $searchText)
+                .textFieldStyle(.plain)
+                .font(.callout)
+                .accessibilityIdentifier("record-search-field")
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+                .accessibilityIdentifier("record-search-clear")
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(Capsule().fill(.quaternary.opacity(0.5)))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+    }
+
+    private var sectionHeader: some View {
+        HStack {
+            Text("RECORDS")
+            Spacer()
+            // The count follows the FILTER, not the folder — a header reading
+            // 20 above 3 visible rows would be describing something the
+            // analyst cannot see.
+            Text("\(filtered.count)")
+                .monospacedDigit()
+        }
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("records-section-header")
     }
 
     /// Only an IMPORTED record can be saved — it is the import that produces

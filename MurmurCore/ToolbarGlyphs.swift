@@ -64,17 +64,43 @@ enum ToolbarGlyph {
     // MARK: Panels / scans
 
     static let scanVTVF = "waveform.badge.magnifyingglass"
-    static let findingsPanel = "stethoscope.circle"
     /// DEBUG-only producers sheet.
     static let producers = "wand.and.stars"
 
+    // MARK: Side panels (X68)
+
+    /// Shows/hides the record navigator. Was declared inline in
+    /// `ContentView` and so escaped the uniqueness test entirely — the one
+    /// glyph in the toolbar that nothing was checking.
+    static let navigatorToggle = "sidebar.leading"
+
+    /// Shows/hides the review queue. Was `stethoscope.circle`, which named a
+    /// clinical role rather than the thing the button does. The two side
+    /// panels are the same kind of action in opposite directions, so they
+    /// read as a mirrored pair — and the pairing is only legible once both
+    /// are declared here.
+    static let reviewQueue = "sidebar.trailing"
+
+    // MARK: Overflow
+
+    /// Rarely-used actions: Open Record Folder, Customize Toolbar….
+    static let moreActions = "ellipsis.circle"
+
+    /// The analyst's notes drawer (X72). Declared here now so the glyph
+    /// vocabulary is complete and the uniqueness test covers it before the
+    /// button that uses it exists.
+    static let notes = "note.text"
+
     /// Everything above. The uniqueness test walks this; a new toolbar button
-    /// belongs here, not inline at the call site.
+    /// belongs here, not inline at the call site — `navigatorToggle` spent
+    /// X63-B through X67 declared inline in `ContentView` and unchecked.
     static let all: [String] = [
         openRecordFolder, attachFindings,
         exportReport, exportSnapshot, exportWFDB,
         editModeLocked, editModeUnlocked,
         windowHeld, windowFree,
-        scanVTVF, findingsPanel, producers,
+        scanVTVF, producers,
+        navigatorToggle, reviewQueue,
+        moreActions, notes,
     ]
 }

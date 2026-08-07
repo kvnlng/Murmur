@@ -307,7 +307,7 @@ struct BedsideView: View {
         "Save a markdown report of this recording's findings and dispositions"
     private static let exportSnapshotHelp =
         "Save a PNG snapshot of the current bedside view"
-    private static let findingsHelp = "Show or hide the findings panel"
+    private static let findingsHelp = "Show or hide the review queue"
 
     private var editModeHelp: String {
         isEditing
@@ -522,8 +522,15 @@ struct BedsideView: View {
         // tooltip anywhere in this app on macOS 26 (see X60), so an icon-only
         // button has no way at all to say what it is. Customisation gives the
         // analyst a route to visible labels that does not depend on a broken
-        // API. Default stays icon-only — ten labelled items would not fit a
-        // typical window, and curating the set is the analyst's call.
+        // API.
+        //
+        // The default is Icon AND Text, seeded on fresh install by
+        // `ToolbarDisplayModeDefault`. (This comment used to claim the default
+        // was icon-only; that was true when it was written and stopped being
+        // true in the same ticket.) X68's redesign draws the cluster icon-only,
+        // and that part was declined for the reason above: with tooltips
+        // broken, removing the labels leaves nothing at all saying what a
+        // button is, and the redesign offers no replacement affordance.
         //
         // The ids are the accessibility identifiers, deliberately: one name
         // per button, already stable, and already what the XCUI suite binds
@@ -543,6 +550,8 @@ struct BedsideView: View {
                 .tint(isEditing ? Color.accentColor : nil)
                 .accessibilityIdentifier("edit-mode-toggle")
             }
+            windowLockToolbarItem
+            scanToolbarItem
             ToolbarItem(id: "attach-findings", placement: .automatic, showsByDefault: true) {
                 Button {
                     showAttachFindings = true
@@ -552,22 +561,35 @@ struct BedsideView: View {
                 .help(Self.attachHelp)
                 .accessibilityIdentifier("attach-findings")
             }
-            scanToolbarItem
+            // The three exports become one menu (X68). The other two ids stay
+            // REGISTERED but hidden by default rather than being retired: they
+            // are persisted in every analyst's saved toolbar layout, and X60
+            // made the toolbar customisable precisely so labels could be turned
+            // back on. A menu-backed action cannot be dragged out as a labelled
+            // button; a hidden-by-default item can.
             ToolbarItem(id: "export-report", placement: .automatic, showsByDefault: true) {
-                Button { exportMarkdownReport() } label: {
-                    Label("Export report…", systemImage: ToolbarGlyph.exportReport)
+                Menu {
+                    Button("Export report…") { exportMarkdownReport() }
+                        .accessibilityIdentifier("export-report-item")
+                    Button("Export snapshot…") { exportSnapshotPNG() }
+                        .accessibilityIdentifier("export-snapshot-item")
+                    Button("Export WFDB annotations…") { exportWFDBAnnotations() }
+                        .disabled(amberFindingCount == 0)
+                        .accessibilityIdentifier("export-wfdb-item")
+                } label: {
+                    Label("Export", systemImage: ToolbarGlyph.exportReport)
                 }
                 .help(Self.exportReportHelp)
                 .accessibilityIdentifier("export-report")
             }
-            ToolbarItem(id: "export-snapshot", placement: .automatic, showsByDefault: true) {
+            ToolbarItem(id: "export-snapshot", placement: .automatic, showsByDefault: false) {
                 Button { exportSnapshotPNG() } label: {
                     Label("Export snapshot…", systemImage: ToolbarGlyph.exportSnapshot)
                 }
                 .help(Self.exportSnapshotHelp)
                 .accessibilityIdentifier("export-snapshot")
             }
-            ToolbarItem(id: "export-wfdb", placement: .automatic, showsByDefault: true) {
+            ToolbarItem(id: "export-wfdb", placement: .automatic, showsByDefault: false) {
                 Button { exportWFDBAnnotations() } label: {
                     Label("Export WFDB annotations…", systemImage: ToolbarGlyph.exportWFDB)
                 }
@@ -586,14 +608,14 @@ struct BedsideView: View {
                 .accessibilityIdentifier("producers-toggle")
             }
             #endif
-            windowLockToolbarItem
             ToolbarItem(id: "findings-toggle", placement: .automatic, showsByDefault: true) {
                 Button {
                     showFindings.toggle()
                 } label: {
-                    Label("Findings", systemImage: ToolbarGlyph.findingsPanel)
+                    Label("Review queue", systemImage: ToolbarGlyph.reviewQueue)
                 }
                 .help(Self.findingsHelp)
+                .tint(showFindings ? Color.accentColor : nil)
                 .accessibilityIdentifier("findings-toggle")
             }
         }
