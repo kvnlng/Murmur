@@ -105,6 +105,15 @@ struct BedsideView: View {
     /// user-set only, never built-in clinical cutoffs. Persists to
     /// `<bundle>/interval_guides.json`.
     @State private var trendGuideStore: IntervalTrendGuideStore
+    /// What the trace is actually drawing — zoom tier, points-per-beat, and
+    /// the resolved LOD — published outward by the canvas so the info bar can
+    /// report it (X69).
+    @State private var renderState = WaveformRenderStateContext.shared
+    /// Whether the Context region is open. Per APP, not per record: an analyst
+    /// who works with notes open wants them open on the next record too, and
+    /// the design says as much.
+    @AppStorage("murmur.notesDrawerExpanded")
+    private var notesDrawerExpanded: Bool = false
 
     static let initialDurationSeconds: Double = 10
 
@@ -389,6 +398,11 @@ struct BedsideView: View {
             )
             Divider()
             bedsideContent
+            Divider()
+            // Outside `bedsideContent` deliberately: it is the WINDOW's rail,
+            // not the stage's, so it stays put in both layout modes — strips
+            // mode scrolls wholesale and would otherwise carry it off-screen.
+            infoBar
         }
         .focusable()
         .focusEffectDisabled()
@@ -1314,7 +1328,7 @@ struct BedsideView: View {
             // the pinned stage onto this branch.
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    summaryHeader
+                    contextBar
                     ForEach(ecgChannels) { channel in
                         ChannelPanel(
                             channel: channel,
@@ -1363,7 +1377,7 @@ struct BedsideView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    summaryHeader
+                    contextBar
                     contextLanes
                 }
                 .padding(16)
@@ -1962,75 +1976,194 @@ struct BedsideView: View {
     // eliminates the CI-window-height flake where the chip landed
     // below the visible fold and XCUI reported "not hittable".
 
-    private var summaryHeader: some View {
-        HStack(alignment: .top, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(recording.device)
-                    .font(.title3.weight(.semibold))
-                    .accessibilityIdentifier("bedside-summary")
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Text(summaryDetail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .truncationMode(.tail)
-                Text(navigationHint)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-            .frame(maxWidth: 320, alignment: .leading)
+    // MARK: - Context bar (X69)
 
-            if !recording.headerComments.isEmpty || recording.notesFileName != nil {
-                RecordContextPanel(
-                    headerComments: recording.headerComments,
-                    notesURL: recording.notesFileName.map {
-                        recordingDirectory.appendingPathComponent($0)
-                    },
-                    isEditing: isEditing,
-                    editorFocus: $notesEditorFocused
-                )
-                // AX2: contain the panel's children so it stops collapsing to
-                // a single element that speaks the decorative doc.text symbol
-                // name ("Plain Text Document"); this also surfaces the `.hea`
-                // demographics + notes to VoiceOver as readable content.
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("context-panel")
+    /// The collapsible Context region, replacing `summaryHeader`.
+    ///
+    /// `summaryHeader` carried three things and X69 rehomed all of them: the
+    /// record name and its metadata line moved to the info bar (which is what
+    /// the design's Region 5 exists for), the keyboard hint goes to the stage's
+    /// right column in X71, and the `RecordContextPanel` — which had no home
+    /// of its own and merely sat beside the summary — becomes this.
+    ///
+    /// Collapsed by default, matching the canonical `11a`. Expanded, it shows
+    /// the panel exactly as it shipped; X72 replaces that with the two-column
+    /// anchored-notes drawer.
+    @ViewBuilder
+    private var contextBar: some View {
+        if !recording.headerComments.isEmpty || recording.notesFileName != nil {
+            VStack(alignment: .leading, spacing: 6) {
+                Button {
+                    withAnimation(.snappy(duration: 0.18)) {
+                        notesDrawerExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: notesDrawerExpanded ? "chevron.down" : "chevron.right")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text("Context")
+                            .font(.caption.weight(.semibold))
+                        Text(contextBarDetail)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Context. \(contextBarDetail)")
+                .accessibilityIdentifier("context-bar")
+
+                if notesDrawerExpanded {
+                    RecordContextPanel(
+                        headerComments: recording.headerComments,
+                        notesURL: recording.notesFileName.map {
+                            recordingDirectory.appendingPathComponent($0)
+                        },
+                        isEditing: isEditing,
+                        editorFocus: $notesEditorFocused
+                    )
+                    // AX2: contain the panel's children so it stops collapsing to
+                    // a single element that speaks the decorative doc.text symbol
+                    // name ("Plain Text Document"); this also surfaces the `.hea`
+                    // demographics + notes to VoiceOver as readable content.
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("context-panel")
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
-    private var summaryDetail: String {
-        let channelCount = recording.channels.count
-        let duration = Self.formatDuration(seconds: totalDurationSeconds)
-        var detail = "\(channelCount) channels  •  \(duration)"
-        // X32: only show a start time when the source genuinely carried one.
-        // WFDB records without a base date/time (MIT-BIH) must not display a
-        // fabricated start — the origin is elapsed-time-only.
-        if recording.hasAbsoluteStartTime, let start = recording.channels.first?.startDate {
-            detail += "  •  starts \(start.formatted(date: .numeric, time: .standard))"
-        } else {
-            detail += "  •  no absolute start time"
+    /// What the collapsed bar says is inside.
+    ///
+    /// Deliberately NOT the design's `4 entries · last edited 2 min ago`:
+    /// entries are anchored notes, which do not exist until X72, and an edit
+    /// timestamp would mean reading `notes.md` here purely to describe it —
+    /// duplicating the I/O `RecordContextPanel` already does. It reports what
+    /// this ticket can actually know.
+    private var contextBarDetail: String {
+        var parts: [String] = []
+        if recording.notesFileName != nil { parts.append("notes.md") }
+        let comments = recording.headerComments.count
+        if comments > 0 {
+            parts.append("\(comments) line\(comments == 1 ? "" : "s") from .hea")
         }
-        if !recording.annotations.isEmpty {
-            detail += "  •  \(recording.annotations.count) annotations"
-        }
-        return detail
+        return parts.joined(separator: " · ")
     }
 
-    private var navigationHint: String {
-        "Drag or ←/→ to pan  •  Pinch or +/− to zoom  •  J/K to jump between findings  •  Unlock + C/D/X to confirm / dismiss / reset"
+    // MARK: - Info bar (X69)
+
+    /// The window's bottom rail: what this record IS on the left, what the
+    /// trace is DOING on the right.
+    ///
+    /// Region 5 describes this as replacing "the metadata that used to sit in
+    /// the title". It did not sit in the title — `navigationTitle` has been the
+    /// bare record name since X56, and the metadata was `summaryDetail`, inside
+    /// the scrolling context column where it left the screen the moment an
+    /// analyst scrolled to a lane. That is the actual defect this fixes.
+    private var infoBar: some View {
+        HStack(spacing: 10) {
+            Text(recording.device)
+                .fontWeight(.medium)
+            Text(recordFacts)
+            if let start = absoluteStartLabel {
+                Text(start)
+            }
+            Spacer(minLength: 12)
+            Text(windowRangeLabel)
+            // The tier stands alone when there is no points-per-beat reading.
+            // With no beats in the window the selector reports NaN — which is
+            // an absence, not a number — and the tier is still meaningful,
+            // because it is what the renderer is acting on either way.
+            if let tier = renderState.zoomTier {
+                Text(Self.zoomTierLabel(tier, pointsPerBeat: renderState.pointsPerBeat))
+            }
+            if let lod = renderState.lod {
+                Text("LOD \(lod.label)")
+            }
+        }
+        .font(.caption2)
+        .monospacedDigit()
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .padding(.horizontal, 14)
+        .frame(height: 28)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.bar)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("info-bar")
+    }
+
+    /// `12 leads · 250 Hz · 72.4 h · 65.1 M samples/lead`.
+    ///
+    /// Counts ECG leads, not channels: a record carrying an HR trend and a
+    /// quality ratio would otherwise claim two more leads than it has, and
+    /// "leads" is the word the analyst reads it as.
+    private var recordFacts: String {
+        let leads = ecgChannels.count
+        var parts = ["\(leads) lead\(leads == 1 ? "" : "s")"]
+        if let primary = ecgChannels.first ?? recording.channels.first {
+            if primary.sampleRate > 0 {
+                parts.append("\(Int(primary.sampleRate.rounded())) Hz")
+            }
+            parts.append(RecordListEntry.duration(totalDurationSeconds))
+            parts.append("\(Self.compactCount(primary.sampleCount)) samples/lead")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    /// The record's real start instant, or nothing.
+    ///
+    /// X32: a WFDB record without a base date/time has no start instant, and
+    /// the honest rendering is silence. The retired `summaryDetail` said "no
+    /// absolute start time" out loud, which spent a field on an absence.
+    private var absoluteStartLabel: String? {
+        guard recording.hasAbsoluteStartTime,
+              let start = recording.channels.first?.startDate else { return nil }
+        return "starts \(start.formatted(date: .numeric, time: .standard))"
+    }
+
+    /// `zoom tier inspect · 78 pt/beat`, or just `zoom tier inspect` when the
+    /// window holds no beats to measure against.
+    static func zoomTierLabel(_ tier: WaveformZoomTier, pointsPerBeat: Double?) -> String {
+        guard let ppb = pointsPerBeat, ppb.isFinite else {
+            return "zoom tier \(tier.rawValue)"
+        }
+        return "zoom tier \(tier.rawValue) · \(Int(ppb.rounded())) pt/beat"
+    }
+
+    private var windowRangeLabel: String {
+        let sr = viewport.sampleRate > 0 ? viewport.sampleRate : 250
+        let t0 = Double(viewport.startSample) / sr
+        let t1 = Double(viewport.endSample) / sr
+        return "window \(Self.preciseClock(t0))–\(Self.preciseClock(t1))"
     }
 
     private var totalDurationSeconds: Double {
         recording.channels.first?.durationSeconds ?? 0
     }
 
-    private static func formatDuration(seconds: Double) -> String {
-        if seconds < 60 { return String(format: "%.1f s", seconds) }
-        if seconds < 3600 { return String(format: "%.1f min", seconds / 60) }
-        return String(format: "%.1f hr", seconds / 3600)
+    /// `65.1 M`, `32 k`, `840`. The info bar has one line for the whole
+    /// record's facts; a raw 65,100,000 spends a third of it on digits.
+    static func compactCount(_ value: Int64) -> String {
+        let v = Double(value)
+        if v >= 1_000_000 { return String(format: "%.1f M", v / 1_000_000) }
+        if v >= 1_000 { return String(format: "%.1f k", v / 1_000) }
+        return "\(value)"
+    }
+
+    /// `21:40:19.0` — tenths, because at the 2 s zoom step a whole-second
+    /// readout would not change as the analyst pans.
+    static func preciseClock(_ seconds: Double) -> String {
+        let clamped = max(0, seconds)
+        let hours = Int(clamped) / 3600
+        let minutes = (Int(clamped) % 3600) / 60
+        let secs = clamped - Double(hours * 3600 + minutes * 60)
+        if hours > 0 {
+            return String(format: "%d:%02d:%04.1f", hours, minutes, secs)
+        }
+        return String(format: "%d:%04.1f", minutes, secs)
     }
 }

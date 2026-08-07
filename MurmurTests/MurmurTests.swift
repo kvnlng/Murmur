@@ -5778,6 +5778,100 @@ struct FiducialLayerToggleTests {
     }
 }
 
+/// X69. The info bar's formatters, and the LOD label the render path
+/// publishes into it.
+@Suite("Info bar (X69)")
+struct InfoBarFormattingTests {
+
+    @Test("Sample counts read compactly")
+    func compactCounts() {
+        // 65,100,000 spends a third of a one-line rail on digits.
+        #expect(BedsideView.compactCount(65_100_000) == "65.1 M")
+        #expect(BedsideView.compactCount(32_000) == "32.0 k")
+        #expect(BedsideView.compactCount(840) == "840")
+        #expect(BedsideView.compactCount(0) == "0")
+    }
+
+    @Test("Window times carry tenths")
+    func preciseClockKeepsTenths() {
+        // At the 2 s zoom step a whole-second readout would not change as the
+        // analyst pans, which makes the field look broken.
+        #expect(BedsideView.preciseClock(0) == "0:00.0")
+        #expect(BedsideView.preciseClock(19.04) == "0:19.0")
+        #expect(BedsideView.preciseClock(605.5) == "10:05.5")
+    }
+
+    @Test("Past an hour the clock grows an hours field")
+    func preciseClockHandlesHours() {
+        #expect(BedsideView.preciseClock(3600) == "1:00:00.0")
+        #expect(BedsideView.preciseClock(77_050.0) == "21:24:10.0")
+    }
+
+    @Test("A negative time clamps rather than rendering a negative clock")
+    func preciseClockClamps() {
+        #expect(BedsideView.preciseClock(-5) == "0:00.0")
+    }
+
+    @Test("`raw` is not reported as a pyramid level")
+    func rawLODLabel() {
+        // `L0 · 1 sample/bin` would be a small lie: the pyramid starts at L1,
+        // and raw means no pyramid read happened at all.
+        #expect(WaveformLOD.raw.label == "raw samples")
+    }
+
+    @Test("A pyramid LOD names its level and its bin size")
+    func pyramidLODLabel() {
+        #expect(WaveformLOD.pyramid(level: 1, binSamples: 10).label == "L1 · 10 samples/bin")
+        #expect(WaveformLOD.pyramid(level: 4, binSamples: 10_000).label == "L4 · 10000 samples/bin")
+    }
+
+    @Test("A window with no beats reports the tier without a pt/beat reading")
+    func zoomTierLabelHandlesNaN() {
+        // `WaveformZoomTierSelector.pointsPerBeat` returns NaN to mean "no
+        // beats in this window" — the state every record is in between mount
+        // and the first delineated frame. Formatting it as an Int traps, and
+        // did: the info bar crashed the app on launch.
+        #expect(BedsideView.zoomTierLabel(.inspect, pointsPerBeat: .nan) == "zoom tier inspect")
+        #expect(BedsideView.zoomTierLabel(.inspect, pointsPerBeat: nil) == "zoom tier inspect")
+        #expect(BedsideView.zoomTierLabel(.inspect, pointsPerBeat: .infinity) == "zoom tier inspect")
+        #expect(BedsideView.zoomTierLabel(.scan, pointsPerBeat: 78.4) == "zoom tier scan · 78 pt/beat")
+    }
+
+    @MainActor
+    @Test("A non-finite points-per-beat is stored as an absence, not a number")
+    func renderStateRejectsNonFinitePointsPerBeat() {
+        let context = WaveformRenderStateContext()
+        context.set(zoomTier: .inspect, pointsPerBeat: .nan)
+        #expect(context.zoomTier == .inspect, "The tier is still meaningful with no beats")
+        #expect(context.pointsPerBeat == nil, "NaN means no reading, not a reading of NaN")
+
+        context.set(zoomTier: .inspect, pointsPerBeat: 42)
+        #expect(context.pointsPerBeat == 42)
+    }
+
+    @MainActor
+    @Test("The render-state context starts empty and clears back to empty")
+    func renderStateClears() {
+        // `nil` before a first frame is load-bearing: the info bar omits the
+        // field rather than asserting a level nothing has drawn.
+        let context = WaveformRenderStateContext()
+        #expect(context.lod == nil)
+        #expect(context.zoomTier == nil)
+        #expect(context.pointsPerBeat == nil)
+
+        context.set(zoomTier: .scan, pointsPerBeat: 42)
+        context.set(lod: .pyramid(level: 2, binSamples: 100))
+        #expect(context.zoomTier == .scan)
+        #expect(context.lod == .pyramid(level: 2, binSamples: 100))
+
+        // Closing a record must not leave the previous one's numbers up.
+        context.clear()
+        #expect(context.lod == nil)
+        #expect(context.zoomTier == nil)
+        #expect(context.pointsPerBeat == nil)
+    }
+}
+
 /// X68. The navigator row's metadata line.
 ///
 /// X56 §3 already removed `N sig • H Hz • M min` because it is identical for

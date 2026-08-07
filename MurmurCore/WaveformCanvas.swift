@@ -177,6 +177,15 @@ struct WaveformCanvas: NSViewRepresentable {
     /// separate canvas on top of the overlaid leads.
     var drawsTrace: Bool = true
 
+    /// Whether this canvas reports its resolved LOD to
+    /// `WaveformRenderStateContext` for the info bar (X69).
+    ///
+    /// Off by default and set by exactly one canvas. A strips-mode record has
+    /// one panel per lead and an overlaid panel has three canvases; every one
+    /// of them resolves an LOD, and without this fence they would all write to
+    /// one info bar, last-write-wins.
+    var publishesRenderState: Bool = false
+
     func makeCoordinator() -> Coordinator {
         Coordinator()
     }
@@ -262,7 +271,11 @@ struct WaveformCanvas: NSViewRepresentable {
         let pixelWidth = Double(view.bounds.width)
         let sampleCount = Double(endSample - startSample)
         let samplesPerPixel = pixelWidth > 0 ? sampleCount / pixelWidth : 1
-        coordinator.selectLOD(samplesPerPixel: samplesPerPixel, renderer: renderer)
+        coordinator.selectLOD(
+            samplesPerPixel: samplesPerPixel,
+            renderer: renderer,
+            publishesRenderState: publishesRenderState
+        )
 
         // Grid ladder — a ruler over time + amplitude computed from the
         // viewport's own governing metrics (points-per-second /
@@ -325,12 +338,37 @@ struct WaveformCanvas: NSViewRepresentable {
             }
         }
 
-        func selectLOD(samplesPerPixel: Double, renderer: WaveformRenderer) {
+        /// Resolve which pyramid level (if any) to paint from.
+        ///
+        /// `publishesRenderState` is set by exactly one canvas — the
+        /// paper-owning one in the focus-sized panel. Every other canvas
+        /// resolves its LOD identically and silently; without the fence, a
+        /// strips-mode record would have one writer per lead all describing
+        /// the same info bar. See `WaveformRenderStateContext`.
+        func selectLOD(
+            samplesPerPixel: Double,
+            renderer: WaveformRenderer,
+            publishesRenderState: Bool = false
+        ) {
+            func publish(_ lod: WaveformLOD) {
+                guard publishesRenderState else { return }
+                // Deferred by one runloop turn. `selectLOD` runs from
+                // `updateNSView`, inside SwiftUI's update transaction, and the
+                // info bar READS this context — writing it here would mutate
+                // observable state that the in-flight update depends on.
+                // `set(lod:)` already ignores no-op writes, so the next pass
+                // resolves the same level and stops; the hop only moves the
+                // write out of the transaction that would be invalidated by it.
+                Task { @MainActor in
+                    WaveformRenderStateContext.shared.set(lod: lod)
+                }
+            }
             // Use raw whenever we're not painting >1 sample per pixel.
             guard samplesPerPixel > 1, !pyramidLevels.isEmpty else {
                 if renderer.useEnvelope { renderer.beginLODTransition() }
                 renderer.useEnvelope = false
                 loadedPyramidIndex = nil
+                publish(.raw)
                 return
             }
             // Pick the deepest level whose binSamples fits under our budget.
@@ -346,6 +384,7 @@ struct WaveformCanvas: NSViewRepresentable {
                 if renderer.useEnvelope { renderer.beginLODTransition() }
                 renderer.useEnvelope = false
                 loadedPyramidIndex = nil
+                publish(.raw)
                 return
             }
             // Any LOD-relevant change — flipping into envelope mode, or
@@ -366,6 +405,10 @@ struct WaveformCanvas: NSViewRepresentable {
                 loadedPyramidIndex = pickedIdx
             }
             renderer.useEnvelope = true
+            // Level number is the array position + 1. `PyramidBuilder` emits
+            // levels contiguously from L1 and stops at the first that receives
+            // no bins, so there are no gaps for the index to misreport.
+            publish(.pyramid(level: pickedIdx + 1, binSamples: pyramidLevels[pickedIdx].binSamples))
         }
     }
 }
