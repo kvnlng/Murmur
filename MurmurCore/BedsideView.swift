@@ -1534,15 +1534,36 @@ struct BedsideView: View {
     private var dockedBeatInspector: some View {
         VStack(alignment: .leading, spacing: 6) {
             primaryLeadNote
-            viewportIndicator
-            CalibrationReadout(reading: calibrationReading)
             calibrationControls
-            dockedBeatCard
+            CalibrationReadout(reading: calibrationReading)
             if !markingsContext.beats.isEmpty {
                 fiducialLayersChip
             }
+            // X71: the beat readout appears ONLY when a beat is focused. It
+            // used to be backed by a placeholder card reading "Hover the trace
+            // to focus a beat", whose job was to hold the column's width so
+            // the trace didn't reflow — but the column is a fixed frame, so
+            // nothing reflows and the placeholder was spending a permanent
+            // card on instructions the analyst reads once.
+            dockedBeatCard
+            keyboardHint
         }
-        .frame(width: 220, alignment: .topLeading)
+        .frame(width: 186, alignment: .topLeading)
+    }
+
+    /// The one-line keyboard hint, relocated from the retired `summaryHeader`
+    /// (X69 moved everything else in that block to the info bar).
+    ///
+    /// Deliberately shorter than the original. That version listed six
+    /// shortcuts across a full-width line; at 186 pt it would wrap to four
+    /// lines of tertiary text sitting under the thing an analyst actually
+    /// reads. The menu bar carries the full set with their key equivalents.
+    private var keyboardHint: some View {
+        Text("J / K next finding · ← → pan one window")
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("stage-keyboard-hint")
     }
 
     /// X33: a VISIBLE, always-present readout of the current window against
@@ -1630,41 +1651,6 @@ struct BedsideView: View {
         .accessibilityIdentifier("calibration-controls")
     }
 
-    private var viewportIndicator: some View {
-        let sr = viewport.sampleRate > 0 ? viewport.sampleRate : 250
-        // X49: one shared formatter across all three viewport renderers.
-        // X28: the two live COORDINATES follow the analyst's time-display mode;
-        // `coordinate` falls back to elapsed when there is no real time base, so
-        // no synthesised clock can reach the screen (X32).
-        let mode = timeDisplay.effectiveMode(hasAbsoluteStart: recording.hasAbsoluteStartTime)
-        let base = recordingStartUnixMillis
-        let start = ViewportTimeFormat.coordinate(Double(viewport.startSample) / sr,
-                                                  mode: mode, startUnixMillis: base)
-        let end = ViewportTimeFormat.coordinate(Double(viewport.endSample) / sr,
-                                                mode: mode, startUnixMillis: base)
-        // The TOTAL stays elapsed in both modes: it is a DURATION, not an
-        // instant. "of 30:06" is the record's length; a time of day there would
-        // be a category error.
-        let total = ViewportTimeFormat.elapsed(Double(viewport.totalSamples) / sr, tenths: false)
-        return HStack(spacing: 4) {
-            Image(systemName: "scope")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .accessibilityHidden(true)
-            Text("\(start)–\(end)")
-                .font(.caption.monospacedDigit().weight(.semibold))
-            Text("of \(total)")
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("viewport-indicator")
-    }
-
     @ViewBuilder
     private var dockedBeatCard: some View {
         if let focusIdx = markingsContext.focusedBeatSampleIndex,
@@ -1677,25 +1663,12 @@ struct BedsideView: View {
                 kind: caliperKind(for: beat)
             )
             .accessibilityIdentifier("docked-beat-inspector")
-        } else {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Focus beat")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Text("Hover the trace to focus a beat")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
-            // X51 §4: combine the two texts into ONE element so the identifier
-            // isn't shared across both static texts (which made `.firstMatch`
-            // bind arbitrarily).
-            .accessibilityElement(children: .combine)
-            .accessibilityIdentifier("docked-beat-inspector-empty")
         }
+        // X71: no empty state. The card is simply absent until a beat is
+        // focused. The placeholder existed to hold the column's layout width;
+        // the column is a fixed 186 pt frame now, so there is nothing left to
+        // hold, and what it cost was a permanently-occupied card explaining
+        // how to use the trace.
     }
 
     /// Menu chip that toggles P / QRS / T fiducial overlays. R marks
@@ -2200,11 +2173,29 @@ struct BedsideView: View {
         return "zoom tier \(tier.rawValue) · \(Int(ppb.rounded())) pt/beat"
     }
 
+    /// The current window, in whichever time base the analyst has chosen.
+    ///
+    /// X71 routed this through `ViewportTimeFormat.coordinate` rather than
+    /// formatting elapsed seconds directly. The retired `viewportIndicator`
+    /// was the only surface honouring X28's elapsed / wall-clock switch, and
+    /// folding it into the info bar without carrying that through would have
+    /// quietly removed wall-clock from the app. `coordinate` falls back to
+    /// elapsed when the record has no real time base, so no synthesised clock
+    /// can reach the screen (X32).
     private var windowRangeLabel: String {
         let sr = viewport.sampleRate > 0 ? viewport.sampleRate : 250
-        let t0 = Double(viewport.startSample) / sr
-        let t1 = Double(viewport.endSample) / sr
-        return "window \(Self.preciseClock(t0))–\(Self.preciseClock(t1))"
+        let mode = timeDisplay.effectiveMode(hasAbsoluteStart: recording.hasAbsoluteStartTime)
+        let base = recordingStartUnixMillis
+        let start = ViewportTimeFormat.coordinate(
+            Double(viewport.startSample) / sr, mode: mode, startUnixMillis: base
+        )
+        let end = ViewportTimeFormat.coordinate(
+            Double(viewport.endSample) / sr, mode: mode, startUnixMillis: base
+        )
+        // The TOTAL stays elapsed in both modes: it is a DURATION, not an
+        // instant. A time of day there would be a category error.
+        let total = ViewportTimeFormat.elapsed(Double(viewport.totalSamples) / sr, tenths: false)
+        return "window \(start)–\(end) of \(total)"
     }
 
     private var totalDurationSeconds: Double {
