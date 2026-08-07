@@ -418,10 +418,15 @@ final class MurmurUINavigationTests: XCTestCase {
         XCTAssertEqual(dismiss.label, "Dismiss finding",
                        "Dismiss control should expose an explicit accessibility label, not the SF Symbol name")
 
-        let confidencePicker = app.descendants(matching: .any)
-            .matching(identifier: "findings-confidence-picker").firstMatch
-        XCTAssertTrue(confidencePicker.waitForExistence(timeout: 3),
-                      "Findings confidence picker should carry an explicit sibling-style identifier, not 'chevron.down'")
+        // X75 folded the category and confidence pickers into one overflow
+        // menu. The AX2 guard this assertion exists for is unchanged: an
+        // image-bearing menu must carry an explicit identifier, or it falls
+        // back to its symbol name ("line.3.horizontal.decrease.circle") in
+        // the tree.
+        let filterMenu = app.descendants(matching: .any)
+            .matching(identifier: "findings-filter-menu").firstMatch
+        XCTAssertTrue(filterMenu.waitForExistence(timeout: 3),
+                      "Findings filter menu should carry an explicit identifier, not its SF Symbol name")
     }
 
     @MainActor
