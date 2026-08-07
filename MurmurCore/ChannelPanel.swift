@@ -354,7 +354,11 @@ struct ChannelPanel: View {
                         displayMin: displayRange.lowerBound,
                         displayMax: displayRange.upperBound,
                         onScroll: { handleWheelScroll($0, canvasWidth: liveSize.width) },
-                        drawsTrace: !isOverlaying
+                        drawsTrace: !isOverlaying,
+                        // The one canvas that reports its LOD to the info bar.
+                        // It owns the paper, so there is exactly one per panel;
+                        // `sizing == .focus` narrows that to one per window.
+                        publishesRenderState: sizing == .focus
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -520,6 +524,14 @@ struct ChannelPanel: View {
                 if resolvedTier != waveformZoomTier {
                     waveformZoomTier = resolvedTier
                 }
+                // X69: the info bar reports the tier and the points-per-beat
+                // that chose it. Focus panel only — see
+                // `WaveformRenderStateContext` for why the fence is needed.
+                guard sizing == .focus else { return }
+                WaveformRenderStateContext.shared.set(
+                    zoomTier: resolvedTier,
+                    pointsPerBeat: pointsPerBeat
+                )
             }
             // X61: publish what the fiducial overlay is actually drawing, so
             // the Layers chip (a level up, with no access to canvas geometry

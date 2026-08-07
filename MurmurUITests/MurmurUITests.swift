@@ -496,6 +496,25 @@ final class MurmurUITests: XCTestCase {
             .matching(identifier: "bedside-view").firstMatch
         XCTAssertTrue(bedside.waitForExistence(timeout: 5))
 
+        // X69 put the Context region behind a collapsed bar, matching the
+        // design's canonical layout, so the panel is not mounted until it is
+        // opened. Two gates now stand between launch and the editor — this one
+        // and the edit latch — and they are independent.
+        //
+        // Driven to a known state rather than blind-clicked: the expansion is
+        // `@AppStorage`, so it survives app launches. A bare click would toggle
+        // whatever the previous run left behind — passing the first time and
+        // failing the second, which is the worst shape a test can have.
+        let contextBar = app.descendants(matching: .any)
+            .matching(identifier: "context-bar").firstMatch
+        XCTAssertTrue(contextBar.waitForExistence(timeout: 5),
+                      "The scrolling context should carry a Context bar")
+        let panel = app.descendants(matching: .any)
+            .matching(identifier: "context-panel").firstMatch
+        if !panel.exists { contextBar.click() }
+        XCTAssertTrue(panel.waitForExistence(timeout: 3),
+                      "Expanding the Context bar should mount the panel")
+
         let editor = app.descendants(matching: .any)
             .matching(identifier: "context-notes-editor").firstMatch
         XCTAssertFalse(editor.exists,
