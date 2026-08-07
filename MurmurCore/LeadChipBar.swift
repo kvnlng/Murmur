@@ -16,6 +16,16 @@ struct LeadChipBar: View {
     let channels: [Channel]
     @Binding var layoutMode: BedsideLayoutMode
 
+    /// Record length, for choosing which ladder rungs apply. Zero hides the
+    /// ladder entirely — a record with no duration has nothing to zoom.
+    var recordDurationSeconds: Double = 0
+    /// Current viewport width, so the ladder can show which rung is active.
+    var viewportDurationSeconds: Double = 0
+    /// Sets the viewport width. Nil hides the ladder; supplied by the stage,
+    /// which owns both the viewport and the window-hold latch the click
+    /// releases (DECISIONS §5).
+    var onSelectZoom: ((Double) -> Void)?
+
     var body: some View {
         HStack(spacing: 10) {
             modeToggle
@@ -28,12 +38,63 @@ struct LeadChipBar: View {
                 }
                 .padding(.vertical, 2)
             }
+            if let onSelectZoom, !ladderSteps.isEmpty {
+                Divider().frame(maxHeight: 18)
+                zoomLadder(steps: ladderSteps, onSelect: onSelectZoom)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(.thinMaterial)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("lead-chip-bar")
+    }
+
+    private var ladderSteps: [ZoomLadderStep] {
+        ZoomLadder.steps(forDurationSeconds: recordDurationSeconds)
+    }
+
+    /// The zoom ladder. Trailing, so the bar reads left-to-right as
+    /// "which layout, which leads, how wide a window".
+    private func zoomLadder(steps: [ZoomLadderStep], onSelect: @escaping (Double) -> Void) -> some View {
+        let current = ZoomLadder.currentStep(
+            forDurationSeconds: viewportDurationSeconds,
+            in: steps
+        )
+        return HStack(spacing: 6) {
+            Text("Zoom")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 2) {
+                ForEach(steps) { step in
+                    let isOn = current == step
+                    Button {
+                        onSelect(step.seconds)
+                    } label: {
+                        Text(step.label)
+                            .font(.caption.monospacedDigit())
+                            .frame(minWidth: 30)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(
+                                RoundedRectangle(cornerRadius: 5)
+                                    .fill(isOn ? Color.accentColor.opacity(0.22) : Color.secondary.opacity(0.10))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 5)
+                                    .strokeBorder(isOn ? Color.accentColor : .clear, lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    // Nothing is selected after a manual pinch, and that is the
+                    // honest state — the ladder must not claim a rung the
+                    // analyst is not on.
+                    .help("Set the window to \(step.label)")
+                    .accessibilityLabel("Zoom to \(step.label)\(isOn ? ", current" : "")")
+                    .accessibilityIdentifier("zoom-ladder-\(step.label.replacingOccurrences(of: " ", with: ""))")
+                }
+            }
+        }
     }
 
     private var modeToggle: some View {
