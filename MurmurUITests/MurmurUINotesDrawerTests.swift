@@ -288,6 +288,84 @@ final class MurmurUINotesDrawerTests: XCTestCase {
         return (element.value as? String) ?? ""
     }
 
+    /// X78 (#117), the open-side half: File ▸ Open Recent with an unsaved
+    /// note warns; Cancel keeps the note, Discard and Open proceeds to a
+    /// fresh session without it. Open Recent is the one open path XCUI can
+    /// drive end-to-end — the panel-backed paths (Open Record…, Open
+    /// Session…) are NSOpenPanel-modal, but all of them funnel through the
+    /// same `runGuardingUnsavedNotes` choke point this exercises.
+    @MainActor
+    func testOpeningWithUnsavedNotesWarns() throws {
+        let app = XCUIApplication()
+        // The folder open records itself into Open Recent, which is what
+        // gives this test its second-open affordance.
+        app.launchArguments += ["--ui-test-open-folder"]
+        app.launch()
+
+        let contextBar = app.descendants(matching: .any)
+            .matching(identifier: "context-bar").firstMatch
+        XCTAssertTrue(contextBar.waitForExistence(timeout: 20))
+        let panel = app.descendants(matching: .any)
+            .matching(identifier: "context-panel").firstMatch
+        if !panel.exists { contextBar.click() }
+        XCTAssertTrue(panel.waitForExistence(timeout: 3))
+
+        let editToggle = app.descendants(matching: .any)
+            .matching(identifier: "edit-mode-toggle").firstMatch
+        XCTAssertTrue(editToggle.waitForExistence(timeout: 3))
+        editToggle.click()
+        let newNote = app.buttons.matching(identifier: "notes-drawer-new-note").firstMatch
+        XCTAssertTrue(newNote.waitForExistence(timeout: 3))
+        newNote.click()
+
+        let readout = app.descendants(matching: .any)
+            .matching(identifier: "notes-drawer-stepper-readout").firstMatch
+        XCTAssertTrue(readout.waitForExistence(timeout: 3))
+        XCTAssertEqual(spokenName(readout), "1 of 1")
+
+        // Drive File ▸ Open Recent ▸ <the folder just opened>.
+        func clickRecentEntry() {
+            let fileMenu = app.menuBarItems["File"]
+            XCTAssertTrue(fileMenu.waitForExistence(timeout: 5))
+            fileMenu.click()
+            let openRecent = app.menuItems["Open Recent"]
+            XCTAssertTrue(openRecent.waitForExistence(timeout: 3))
+            openRecent.click()
+            let entry = openRecent.menuItems.matching(NSPredicate(
+                format: "NOT (title IN {'No Recent Records', 'Clear Menu'})"
+            )).firstMatch
+            XCTAssertTrue(entry.waitForExistence(timeout: 3),
+                          "The opened folder should appear under Open Recent")
+            entry.click()
+        }
+
+        clickRecentEntry()
+        // Window-scoped: the confirmation's buttons also surface as Touch
+        // Bar elements XCUI refuses to click.
+        let discard = app.windows.firstMatch.buttons["Discard and Open"].firstMatch
+        XCTAssertTrue(discard.waitForExistence(timeout: 5),
+                      "Reopening with an unsaved note should raise the confirmation")
+        app.windows.firstMatch.buttons["Cancel"].firstMatch.click()
+
+        XCTAssertTrue(readout.waitForExistence(timeout: 3))
+        XCTAssertEqual(spokenName(readout), "1 of 1",
+                       "Cancel must keep the note intact")
+
+        clickRecentEntry()
+        XCTAssertTrue(discard.waitForExistence(timeout: 5))
+        discard.click()
+
+        // The reopen lands on a fresh session: same record, no notes.
+        let noNotes = NSPredicate(format: "label == 'no notes' OR value == 'no notes'")
+        let landed = XCTNSPredicateExpectation(
+            predicate: noNotes,
+            object: app.descendants(matching: .any)
+                .matching(identifier: "notes-drawer-stepper-readout").firstMatch
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [landed], timeout: 20), .completed,
+                       "Discard and Open should reopen with no notes")
+    }
+
     /// The guard's other half: no unsaved notes, no alert — a clean session
     /// quits without friction. Also catches a false-positive dirty check
     /// (a baseline bug that made every quit warn would fail here).

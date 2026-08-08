@@ -28,6 +28,15 @@ public struct ContentView: View {
     private struct PendingSelection {
         let target: String?
     }
+
+    /// X78 — an open intercepted by the unsaved-notes guard, parked as the
+    /// action itself (the entry paths carry different payloads — a URL, a
+    /// RecentFolder — and the dialog doesn't care which).
+    @State private var pendingGuardedOpen: PendingOpen?
+
+    private struct PendingOpen {
+        let run: () -> Void
+    }
     @State private var isImporterPresented = false
     @State private var errorMessage: String?
     @State private var currentImportTask: Task<Void, Never>?
@@ -134,19 +143,55 @@ public struct ContentView: View {
         // sealed `.mur` presents an `NSAlert` passphrase prompt, and AppKit
         // SUPPRESSES `runModal()` inside a commit — the prompt never shows and
         // the open silently no-ops. Hopping off the commit lets the modal run.
-        .onOpenURL { url in Task { @MainActor in open(url) } }
+        .onOpenURL { url in Task { @MainActor in runGuardingUnsavedNotes { open(url) } } }
         // File → Open Session… / Import CSV… bridge through the coordinator.
         .onChange(of: docCoordinator.openRequestURL) { _, url in
             guard let url else { return }
             docCoordinator.openRequestURL = nil
-            Task { @MainActor in open(url) }
+            Task { @MainActor in runGuardingUnsavedNotes { open(url) } }
         }
         // File → Open Recent (X22): reuse `reopen` so the bookmark is resolved
         // and read in one scoped call.
         .onChange(of: docCoordinator.reopenRecentRequest) { _, entry in
             guard let entry else { return }
             docCoordinator.reopenRecentRequest = nil
-            Task { @MainActor in reopen(entry) }
+            Task { @MainActor in runGuardingUnsavedNotes { reopen(entry) } }
+        }
+        // X78 — the open-side half of the unsaved-anchored-notes guard
+        // (#117). Same check and copy family as the X77 quit and
+        // record-switch guards, so the three warnings read as one behaviour.
+        .confirmationDialog(
+            "Open with unsaved anchored notes?",
+            isPresented: Binding(
+                get: { pendingGuardedOpen != nil },
+                set: { if !$0 { pendingGuardedOpen = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Discard and Open", role: .destructive) {
+                guard let pending = pendingGuardedOpen else { return }
+                pendingGuardedOpen = nil
+                // Explicit discard, same reasoning as X77: the quit guard
+                // must not later warn about notes that are already gone.
+                CurrentRecordingContext.shared.liveSessionState.anchoredNotes = nil
+                pending.run()
+            }
+            Button("Cancel", role: .cancel) { pendingGuardedOpen = nil }
+        } message: {
+            Text("Anchored notes save with the session — File ▸ Save Session (⌘S). Opening something else discards them.")
+        }
+    }
+
+    /// X78 — run `action` now, or park it behind the confirmation when the
+    /// open would tear down unsaved anchored notes. One guard at the choke
+    /// point rather than one per entry path: Finder opens, Open Record… /
+    /// Open Session… / Import CSV…, Open Recent, and the toolbar Open
+    /// button's folder pick all pass through here.
+    private func runGuardingUnsavedNotes(_ action: @escaping () -> Void) {
+        if CurrentRecordingContext.shared.hasUnsavedAnchoredNotes {
+            pendingGuardedOpen = PendingOpen(run: action)
+        } else {
+            action()
         }
     }
 
@@ -595,7 +640,9 @@ public struct ContentView: View {
     private func handleFolderPick(_ result: Result<URL, Error>) {
         switch result {
         case .success(let folderURL):
-            openFolder(folderURL)
+            // X78: the toolbar Open button reaches here with a recording
+            // (and possibly unsaved notes) still open.
+            runGuardingUnsavedNotes { openFolder(folderURL) }
         case .failure(let error):
             errorMessage = error.localizedDescription
         }
