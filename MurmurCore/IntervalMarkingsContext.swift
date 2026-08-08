@@ -148,6 +148,18 @@ public struct MarkingsBeat: Sendable, Equatable, Codable, Identifiable {
     /// false; set by the orchestrator that owns the plausibility filter.
     public let isImplausible: Bool
 
+    /// X79 — true when the delineator flagged this beat's T-OFFSET as
+    /// unreliable (X58's confidence gate), so its QT/QTc were withheld from
+    /// the bin medians, the patient-normal template, and the departure
+    /// ranking. Distinct from `isImplausible` (X53 — the whole measurement is
+    /// physically impossible): here the R-peak and QRS are fine and the beat
+    /// still contributes RR and QRS aggregates; only the repolarisation
+    /// interval is untrustworthy — measurable-looking but biased long (false
+    /// T-terminations). Set by the orchestrator from the SAME
+    /// `TOffsetReliability` call the template builder uses, so the two
+    /// consumers cannot drift. Default false (free viewer: no delineation).
+    public let isUnreliable: Bool
+
     public init(
         rPeakSampleIndex: Int64,
         rPeakConfidence: Double = 1.0,
@@ -167,7 +179,8 @@ public struct MarkingsBeat: Sendable, Equatable, Codable, Identifiable {
         tOffsetCensored: Bool = false,
         qtCalibratedHalfWidthMs: Double? = nil,
         tOffsetIsoelectricSampleIndex: Int64? = nil,
-        isImplausible: Bool = false
+        isImplausible: Bool = false,
+        isUnreliable: Bool = false
     ) {
         self.rPeakSampleIndex = rPeakSampleIndex
         self.rPeakConfidence = min(1.0, max(0.0, rPeakConfidence))
@@ -188,6 +201,7 @@ public struct MarkingsBeat: Sendable, Equatable, Codable, Identifiable {
         self.qtCalibratedHalfWidthMs = qtCalibratedHalfWidthMs
         self.tOffsetIsoelectricSampleIndex = tOffsetIsoelectricSampleIndex
         self.isImplausible = isImplausible
+        self.isUnreliable = isUnreliable
     }
 
     public var id: Int64 { rPeakSampleIndex }
@@ -518,14 +532,23 @@ public final class IntervalMarkingsContext {
     }
 
     private func deviationScore(for beat: MarkingsBeat, template t: MarkingsTemplate) -> Double? {
-        if let qtc = beat.qtcMs, let mQtc = t.medianQTcMs {
-            return abs(qtc - mQtc)
+        // X79: an unreliable T-offset must not RANK as a departure — on
+        // rec 212 it put 457 measurement errors at the top of J/K navigation,
+        // "departing" from a template that had excluded those very beats.
+        // The QRS fallback stays: the unreliability is the T-offset, and the
+        // QRS measurement is untouched by it.
+        if !beat.isUnreliable {
+            if let qtc = beat.qtcMs, let mQtc = t.medianQTcMs {
+                return abs(qtc - mQtc)
+            }
         }
         if let qrs = beat.qrsMs, let mQrs = t.medianQRSMs {
             return abs(qrs - mQrs)
         }
-        if let qt = beat.qtMs, let mQt = t.medianQTMs {
-            return abs(qt - mQt)
+        if !beat.isUnreliable {
+            if let qt = beat.qtMs, let mQt = t.medianQTMs {
+                return abs(qt - mQt)
+            }
         }
         return nil
     }

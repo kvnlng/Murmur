@@ -1084,25 +1084,53 @@ struct IntervalTrendLane: View {
         return "\(data.reproCaption) · reading \(reading) ms"
     }
 
-    /// Whole-lane statement of the beats withheld because their QT was
-    /// physically impossible (X53). Beat-weighted across bins that carry a
-    /// fraction (paid delineation only); `nil` in the free viewer or when
-    /// nothing was excluded, so a zero never reads as a computed "0% excluded"
-    /// where no filter ran.
+    /// Whole-lane statement of the beats withheld from the medians —
+    /// physically impossible QT (X53) and unreliable T-offset (X79), each
+    /// bucket named. Beat-weighted across bins that carry a fraction (paid
+    /// delineation only); `nil` in the free viewer or when nothing was
+    /// excluded, so a zero never reads as a computed "0% excluded" where no
+    /// filter ran.
     private var qtImplausibleSummaryText: String? {
-        var excluded = 0.0
+        var implausible = 0.0
+        var unreliable = 0.0
         var total = 0
         for bin in data.bins {
-            guard let fraction = bin.qtImplausibleFraction else { continue }
-            excluded += fraction * Double(bin.beatCount)
+            guard bin.qtImplausibleFraction != nil || bin.qtUnreliableFraction != nil else { continue }
+            implausible += (bin.qtImplausibleFraction ?? 0) * Double(bin.beatCount)
+            unreliable += (bin.qtUnreliableFraction ?? 0) * Double(bin.beatCount)
             total += bin.beatCount
         }
+        return Self.qtExclusionSummary(implausible: implausible, unreliable: unreliable, total: total)
+    }
+
+    /// Static so the wording is unit-testable. `implausible`/`unreliable` are
+    /// beat-weighted counts (possibly fractional), `total` the measured-beat
+    /// population they were withheld from.
+    static func qtExclusionSummary(implausible: Double, unreliable: Double, total: Int) -> String? {
+        let excluded = implausible + unreliable
         guard total > 0, excluded >= 0.5 else { return nil }
         let count = Int(excluded.rounded())
         // X56 §4: name the population — these are the beats the delineator
         // produced a QT for, distinct from the annotated-beat and template
-        // counts elsewhere on screen.
-        let base = "\(count) of \(total) measured beats excluded — QT physically impossible"
+        // counts elsewhere on screen. X79: name each REASON with its own
+        // count — on rec 212 the unreliable bucket is 30× the implausible
+        // one, and a single undifferentiated number would hide the record's
+        // real story.
+        var reasons: [String] = []
+        if implausible >= 0.5 {
+            reasons.append("QT physically impossible (\(Int(implausible.rounded())))")
+        }
+        if unreliable >= 0.5 {
+            reasons.append("unreliable T-offset (\(Int(unreliable.rounded())))")
+        }
+        var base = "\(count) of \(total) measured beats excluded — " + reasons.joined(separator: " · ")
+        // Collapse the redundant per-reason count when there is only one
+        // reason — "12 excluded — QT physically impossible (12)" says 12
+        // twice.
+        if reasons.count == 1 {
+            base = "\(count) of \(total) measured beats excluded — "
+                + (implausible >= 0.5 ? "QT physically impossible" : "unreliable T-offset")
+        }
         // X56 §2 / K9: a count that exists must not render as "(0%)". One
         // decimal, and drop the parenthetical entirely when it would still round
         // to 0.0 — the count already carries the information.

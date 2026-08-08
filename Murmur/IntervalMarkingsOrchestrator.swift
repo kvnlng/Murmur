@@ -152,7 +152,11 @@ struct IntervalMarkingsOrchestrator: View {
                     tOffsetCensored: feat.tOffsetCensored,
                     qtCalibratedHalfWidthMs: ciHalfWidth,
                     tOffsetIsoelectricSampleIndex: feat.tOffsetIsoelectricSampleIndex,
-                    isImplausible: i < implausibleMask.count ? implausibleMask[i] : false
+                    isImplausible: i < implausibleMask.count ? implausibleMask[i] : false,
+                    // X79: the SAME reliability call the template builder
+                    // applies, so what the template excluded and what the
+                    // bins/ranking withhold can never disagree.
+                    isUnreliable: !TOffsetReliability.isReliable(feat)
                 )
             }
             let coreTemplate: MarkingsTemplate? = template.sampleCount > 0

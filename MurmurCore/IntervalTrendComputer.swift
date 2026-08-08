@@ -187,6 +187,14 @@ public struct IntervalTrendBin: Sendable, Equatable, Identifiable {
     /// distinct from "not computed" (K9).
     public let qtImplausibleFraction: Double?
 
+    /// Fraction (0…1) of beats in the bin whose T-OFFSET the delineator
+    /// flagged as unreliable (X58/X79) and whose QT/QTc were therefore
+    /// withheld from this bin's median. Only the repolarisation interval is
+    /// withheld — the beat still contributes RR steadiness, and PR/QRS bins
+    /// carry `nil` here (the flag is about the T-offset, not the beat).
+    /// `nil` in the free viewer and for bins with no beats.
+    public let qtUnreliableFraction: Double?
+
     /// A bin qualifies for rate-sensitive reads (X46 percent-above, X47 QTVI)
     /// when it's eligible and its preceding-rate was stable. In the free viewer
     /// (no rate compute) `rateStable` defaults true, so every eligible bin
@@ -226,7 +234,8 @@ public struct IntervalTrendBin: Sendable, Equatable, Identifiable {
         rateStable: Bool = true,
         rateStabilityToleranceBpm: Double = 2,
         excludedBeatFraction: Double? = nil,
-        qtImplausibleFraction: Double? = nil
+        qtImplausibleFraction: Double? = nil,
+        qtUnreliableFraction: Double? = nil
     ) {
         self.startSeconds = startSeconds
         self.endSeconds = endSeconds
@@ -246,6 +255,7 @@ public struct IntervalTrendBin: Sendable, Equatable, Identifiable {
         self.rateStabilityToleranceBpm = rateStabilityToleranceBpm
         self.excludedBeatFraction = excludedBeatFraction
         self.qtImplausibleFraction = qtImplausibleFraction
+        self.qtUnreliableFraction = qtUnreliableFraction
     }
 
     public var id: Double { (startSeconds + endSeconds) / 2 }
@@ -376,6 +386,7 @@ public enum IntervalTrendComputer {
             var confidenceHits = 0
             var totalBeatsInBin = 0
             var implausibleInBin = 0
+            var unreliableInBin = 0
             var censoredHit = false
 
             while beatIdx < beats.count {
@@ -393,18 +404,28 @@ public enum IntervalTrendComputer {
                     beatIdx += 1
                     continue
                 }
-                if let value = value(for: metric, beat: beat) {
+                // X79: an unreliable T-OFFSET withholds only the QT/QTc value
+                // — biased-long false terminations must not drag the QTc
+                // median any more than they may poison the template (X58).
+                // Unlike X53's whole-beat exclusion, the beat still counts
+                // toward RR steadiness: its R-peak is sound. On rec 212 this
+                // is what makes the lane's bins agree with the template
+                // instead of drawing the ~625 ms the template had rejected.
+                let withholdsValue = metric == .qtc && beat.isUnreliable
+                if withholdsValue {
+                    unreliableInBin += 1
+                } else if let value = value(for: metric, beat: beat) {
                     values.append(value)
                 }
                 if let rr = beat.precedingRRMs, rr.isFinite, rr > 0 {
                     rrValues.append(rr)
                 }
-                if hasFragileFiducialsHighConfidence(beat: beat, metric: metric) {
+                if !withholdsValue, hasFragileFiducialsHighConfidence(beat: beat, metric: metric) {
                     confidenceHits += 1
                 }
                 // Only QTc trends against a T-offset; PR / QRS bins
                 // don't carry a censored notion.
-                if metric == .qtc, beat.tOffsetCensored {
+                if metric == .qtc, beat.tOffsetCensored, !withholdsValue {
                     censoredHit = true
                 }
                 beatIdx += 1
@@ -415,14 +436,19 @@ public enum IntervalTrendComputer {
             let qtImplausibleFraction: Double? = totalBeatsInBin > 0
                 ? Double(implausibleInBin) / Double(totalBeatsInBin)
                 : nil
+            // Meaningful only where a T-offset feeds the median; PR/QRS bins
+            // carry nil rather than an implied "0% withheld".
+            let qtUnreliableFraction: Double? = metric == .qtc && totalBeatsInBin > 0
+                ? Double(unreliableInBin) / Double(totalBeatsInBin)
+                : nil
 
             if !values.isEmpty {
                 let stats = quartiles(of: values)
                 // The confidence floor is measured over the CONTRIBUTING beats,
-                // not the bin total — an excluded (impossible) beat is not "low
-                // confidence", it is not used at all, so it must not drag the
-                // eligibility denominator.
-                let contributingBeats = totalBeatsInBin - implausibleInBin
+                // not the bin total — an excluded (impossible or unreliable)
+                // beat is not "low confidence", it is not used at all, so it
+                // must not drag the eligibility denominator.
+                let contributingBeats = totalBeatsInBin - implausibleInBin - unreliableInBin
                 let confidenceFraction = contributingBeats > 0
                     ? Double(confidenceHits) / Double(contributingBeats)
                     : 0.0
@@ -451,14 +477,16 @@ public enum IntervalTrendComputer {
                         rateDriftBpm: q?.rateDriftBpm,
                         rateStable: q?.rateStable ?? true,
                         excludedBeatFraction: q?.excludedBeatFraction,
-                        qtImplausibleFraction: qtImplausibleFraction
+                        qtImplausibleFraction: qtImplausibleFraction,
+                        qtUnreliableFraction: qtUnreliableFraction
                     )
                 )
-            } else if implausibleInBin > 0 {
-                // K9: a bin whose beats were ALL physically impossible is
-                // EXCLUDED, not "not computed" — carry it ineligible (a hatched
-                // region, no plotted point) with the fraction = 1, rather than
-                // dropping it to a gap the analyst would read as missing data.
+            } else if implausibleInBin > 0 || unreliableInBin > 0 {
+                // K9: a bin whose beats were ALL excluded (physically
+                // impossible, unreliable T-offset, or both) is EXCLUDED, not
+                // "not computed" — carry it ineligible (a hatched region, no
+                // plotted point) with the fractions set, rather than dropping
+                // it to a gap the analyst would read as missing data.
                 bins.append(
                     IntervalTrendBin(
                         startSeconds: binStart,
@@ -469,7 +497,8 @@ public enum IntervalTrendComputer {
                         isEligible: false,
                         beatCount: totalBeatsInBin,
                         perBeatValues: [],
-                        qtImplausibleFraction: qtImplausibleFraction
+                        qtImplausibleFraction: qtImplausibleFraction,
+                        qtUnreliableFraction: qtUnreliableFraction
                     )
                 )
             }

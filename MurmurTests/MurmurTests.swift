@@ -5342,7 +5342,8 @@ struct IntervalTrendComputerTests {
         qtMs: Double? = 380,
         precedingRRMs: Double? = 800,
         fragileConfidence: Double = 0.9,
-        isImplausible: Bool = false
+        isImplausible: Bool = false,
+        isUnreliable: Bool = false
     ) -> MarkingsBeat {
         MarkingsBeat(
             rPeakSampleIndex: rPeak,
@@ -5354,7 +5355,8 @@ struct IntervalTrendComputerTests {
             tOnset:    MarkingsFiducial(kind: .tOnset,    sampleIndex: rPeak + 40, confidence: fragileConfidence),
             tOffset:   MarkingsFiducial(kind: .tOffset,   sampleIndex: rPeak + 80, confidence: fragileConfidence),
             prMs: prMs, qrsMs: qrsMs, qtMs: qtMs, qtcMs: qtcMs, precedingRRMs: precedingRRMs,
-            isImplausible: isImplausible
+            isImplausible: isImplausible,
+            isUnreliable: isUnreliable
         )
     }
 
@@ -5610,6 +5612,57 @@ struct IntervalTrendComputerTests {
         #expect(!bin.isEligible)
         #expect(bin.qtImplausibleFraction == 1.0)
         #expect(bin.median.isNaN)                     // no plottable point
+        #expect(bin.beatCount == 5)
+    }
+
+    @Test("Unreliable T-offsets are withheld from QTc bins and counted (X79)")
+    func unreliableWithheldFromQTcBins() {
+        // The rec-212 shape: the false T-terminations are biased LONG, so
+        // without withholding, the bin median disagrees with the template
+        // that already excluded these beats.
+        var beats: [MarkingsBeat] = []
+        for i in 0..<5 { beats.append(beat(rPeak: Int64(500 + i * 500), qtcMs: 420)) }
+        for i in 5..<10 { beats.append(beat(rPeak: Int64(500 + i * 500), qtcMs: 620, isUnreliable: true)) }
+        let out = IntervalTrendComputer.compute(
+            beats: beats, template: template(), sampleRate: 250,
+            metric: .qtc, binSeconds: 120, templateBeatCount: 200, qtcFormulaName: "Fridericia"
+        )
+        #expect(out.bins.count == 1)
+        let bin = out.bins[0]
+        #expect(bin.median == 420, "The withheld long values must not drag the median")
+        #expect(bin.beatCount == 10)
+        #expect(bin.qtUnreliableFraction == 0.5)
+        #expect(bin.qtImplausibleFraction == 0.0)
+        #expect(bin.isEligible)
+    }
+
+    @Test("Unreliable T-offsets still contribute to PR/QRS bins — the flag is about the T-offset, not the beat")
+    func unreliableKeptForDepolarisationBins() {
+        var beats: [MarkingsBeat] = []
+        for i in 0..<4 { beats.append(beat(rPeak: Int64(500 + i * 500), qrsMs: 90)) }
+        for i in 4..<8 { beats.append(beat(rPeak: Int64(500 + i * 500), qrsMs: 94, isUnreliable: true)) }
+        let out = IntervalTrendComputer.compute(
+            beats: beats, template: template(), sampleRate: 250,
+            metric: .qrs, binSeconds: 120, templateBeatCount: 200, qtcFormulaName: "Fridericia"
+        )
+        let bin = out.bins[0]
+        #expect(bin.median == 92, "All eight QRS values contribute — median of 90×4 + 94×4")
+        #expect(bin.qtUnreliableFraction == nil,
+                "A PR/QRS bin withholds nothing, so it must not imply a computed 0%")
+    }
+
+    @Test("A bin of only unreliable T-offsets is carried excluded, not dropped (K9)")
+    func allUnreliableBinIsDistinctFromEmpty() {
+        let beats = (0..<5).map { beat(rPeak: Int64(500 + $0 * 500), qtcMs: 620, isUnreliable: true) }
+        let out = IntervalTrendComputer.compute(
+            beats: beats, template: template(), sampleRate: 250,
+            metric: .qtc, binSeconds: 120, templateBeatCount: 200, qtcFormulaName: "Fridericia"
+        )
+        #expect(out.bins.count == 1)
+        let bin = out.bins[0]
+        #expect(!bin.isEligible)
+        #expect(bin.qtUnreliableFraction == 1.0)
+        #expect(bin.median.isNaN)
         #expect(bin.beatCount == 5)
     }
 
@@ -8003,5 +8056,92 @@ struct UnsavedNotesGuardTests {
         context.sessionSavedNotes = established
         context.set(recording: a, directory: dir)
         #expect(context.sessionSavedNotes == established)
+    }
+}
+
+// MARK: - Rec-212 close-out (X79) — ranking + caption consistency
+
+@Suite("Unreliable T-offset consistency (X79)")
+@MainActor
+struct UnreliableConsistencyTests {
+
+    private func beat(
+        rPeak: Int64,
+        qtcMs: Double?,
+        qrsMs: Double? = 92,
+        isUnreliable: Bool = false
+    ) -> MarkingsBeat {
+        MarkingsBeat(
+            rPeakSampleIndex: rPeak,
+            qrsMs: qrsMs,
+            qtMs: qtcMs.map { $0 - 40 },
+            qtcMs: qtcMs,
+            precedingRRMs: 800,
+            isUnreliable: isUnreliable
+        )
+    }
+
+    private func template() -> MarkingsTemplate {
+        MarkingsTemplate(
+            sampleCount: 100,
+            medianPRMs: 150, iqrPRMs: 12,
+            medianQRSMs: 90, iqrQRSMs: 6,
+            medianQTMs: 380, iqrQTMs: 18,
+            qtcFormulaName: "Fridericia",
+            medianQTcMs: 420, iqrQTcMs: 16
+        )
+    }
+
+    @Test("Departure ranking never ranks an unreliable beat by its withheld QTc")
+    func rankingSkipsUnreliableQTc() {
+        // The rec-212 failure: 457 beats whose QTc the template REJECTED as
+        // measurement error ranked as the top departures FROM that template.
+        // The unreliable beat here carries a 620 ms QTc (departure 200 if the
+        // skip fails) but only a 2 ms QRS departure; the clean beat departs
+        // by 30 ms of QTc. Clean must outrank unreliable.
+        let context = IntervalMarkingsContext()
+        context.set(
+            beats: [
+                beat(rPeak: 1000, qtcMs: 450),                       // QTc dev 30
+                beat(rPeak: 2000, qtcMs: 620, isUnreliable: true),   // QRS dev 2 (QTc skipped)
+            ],
+            sampleRate: 250,
+            template: template()
+        )
+        let ranked = context.beatsRankedByDeviation
+        #expect(ranked.count == 2)
+        #expect(ranked.first?.rPeakSampleIndex == 1000,
+                "The unreliable beat's 620 ms QTc must not rank it above a genuine 30 ms departure")
+    }
+
+    @Test("Exclusion caption names each bucket with its count")
+    func captionNamesBothBuckets() {
+        let both = IntervalTrendLane.qtExclusionSummary(implausible: 14, unreliable: 457, total: 923)
+        #expect(both == "471 of 923 measured beats excluded — QT physically impossible (14) · unreliable T-offset (457) (51.0%)",
+                "got: \(both ?? "nil")")
+    }
+
+    @Test("Single-bucket captions keep the established wording")
+    func captionSingleBuckets() {
+        let implausibleOnly = IntervalTrendLane.qtExclusionSummary(implausible: 505, unreliable: 0, total: 100_216)
+        #expect(implausibleOnly == "505 of 100216 measured beats excluded — QT physically impossible (0.5%)",
+                "got: \(implausibleOnly ?? "nil")")
+        let unreliableOnly = IntervalTrendLane.qtExclusionSummary(implausible: 0, unreliable: 457, total: 923)
+        #expect(unreliableOnly == "457 of 923 measured beats excluded — unreliable T-offset (49.5%)",
+                "got: \(unreliableOnly ?? "nil")")
+    }
+
+    @Test("No exclusions, no caption — and a sub-half count stays silent")
+    func captionAbsentWhenNothingExcluded() {
+        #expect(IntervalTrendLane.qtExclusionSummary(implausible: 0, unreliable: 0, total: 500) == nil)
+        #expect(IntervalTrendLane.qtExclusionSummary(implausible: 0.2, unreliable: 0.1, total: 500) == nil)
+        #expect(IntervalTrendLane.qtExclusionSummary(implausible: 1, unreliable: 0, total: 0) == nil)
+    }
+
+    @Test("A tiny percent drops the parenthetical, not the count (K9)")
+    func captionTinyPercent() {
+        let text = IntervalTrendLane.qtExclusionSummary(implausible: 2, unreliable: 0, total: 100_000)
+        #expect(text == "2 of 100000 measured beats excluded — QT physically impossible",
+                "got: \(text ?? "nil")")
     }
 }

@@ -75,6 +75,8 @@ struct BeatCalipers: View {
                 excludedSubtitle
             } else if kind == .ectopic {
                 ectopicSubtitle
+            } else if beat.isUnreliable {
+                unreliableSubtitle
             }
             Divider().opacity(0.4)
             row("PR",  value: prValueForRendering, delta: prDeltaForRendering,
@@ -168,6 +170,20 @@ struct BeatCalipers: View {
             .foregroundStyle(.tertiary)
             .fixedSize(horizontal: false, vertical: true)
             .accessibilityIdentifier("beat-calipers-excluded-subtitle")
+    }
+
+    /// X79: the delineator flagged this beat's T-offset as unreliable, so its
+    /// QT/QTc were withheld from the bin medians, the template, and the
+    /// departure ranking. The values still RENDER (with their calibrated CI)
+    /// — exclude-and-count shows its work, and the analyst holding the
+    /// threshold needs to see what the gate withheld — but the statement of
+    /// withholding travels with them.
+    private var unreliableSubtitle: some View {
+        Text("T-offset unreliable — QT/QTc withheld from aggregates")
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("beat-calipers-unreliable-subtitle")
     }
 
     /// PR / QT / QTc are meaningless on either an ectopic OR a physically
