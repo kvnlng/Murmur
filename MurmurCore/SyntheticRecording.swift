@@ -31,9 +31,10 @@ enum SyntheticRecording {
     /// multi-frequency fixture so the welcome screen demo and UI tests both
     /// exercise the trend-strip path alongside the ECG canvas.
     static func makeFixture() throws -> URL {
-        let workDir = FileManager.default.temporaryDirectory
+        let parent = FileManager.default.temporaryDirectory
             .appendingPathComponent("plotting-ui-test", isDirectory: true)
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        sweepStaleFixtures(in: parent)
+        let workDir = parent.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
 
         let heaURL = try makeMultiFrequencyRecord(into: workDir)
@@ -41,6 +42,29 @@ enum SyntheticRecording {
         try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
         let summary = try WFDBImporter.importRecord(heaURL: heaURL, outputDirectory: outputDir)
         return summary.directory
+    }
+
+    /// Best-effort removal of fixture bundles left behind by earlier
+    /// launches. Nothing deletes a fixture on exit — XCUI tests terminate the
+    /// app, so there is no reliable teardown hook — which left one bundle per
+    /// `--ui-test-sample` launch accumulating in the container's tmp
+    /// (~4,000 directories / ~2 GB before this sweep existed). Only entries
+    /// older than an hour are removed so parallel test instances can never
+    /// delete each other's live fixture.
+    private static func sweepStaleFixtures(in parent: URL) {
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(
+            at: parent,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: .skipsHiddenFiles
+        ) else { return }
+        let cutoff = Date(timeIntervalSinceNow: -3600)
+        for url in entries {
+            let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate
+            guard let modified, modified < cutoff else { continue }
+            try? fm.removeItem(at: url)
+        }
     }
 
     /// Writes `synth.hea` + `synth.dat` (format 16, 8 ECG leads, 250 Hz, 10 s)
