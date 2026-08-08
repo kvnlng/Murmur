@@ -122,6 +122,11 @@ struct MurmurApp: App {
                 // (X76), published to RollingLFHFContext. Off-main compute —
                 // thousands of Lomb–Scargle windows on a long record.
                 .background(RollingLFHFOrchestrator())
+                // Arrhythmia scan (A2): runs ArrhythmiaScanService over the
+                // loaded recording (entitled only) and publishes brady/tachy/
+                // pause/AFib candidate spans to ArrhythmiaScanContext for the
+                // review queue + channel overlays.
+                .background(ArrhythmiaScanOrchestrator())
         }
         .defaultSize(width: 1320, height: 880)
         .commands {

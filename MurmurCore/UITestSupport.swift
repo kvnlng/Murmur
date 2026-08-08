@@ -262,6 +262,16 @@ enum UITestSupport {
         ProcessInfo.processInfo.arguments.contains("--ui-test-vtvf-candidates")
     }
 
+    /// True when `--ui-test-arrhythmia-candidates` is passed. Same bypass as
+    /// `injectVTVFCandidates`, for the arrhythmia scan (A2): BedsideView
+    /// publishes a fixed candidate set into `ArrhythmiaScanContext` so the
+    /// queue group and the region-keyed disposition wire-up are exercisable
+    /// without running the detectors; the App-side orchestrator skips its
+    /// recompute under this flag so it can't overwrite the injection.
+    static var injectArrhythmiaCandidates: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-arrhythmia-candidates")
+    }
+
     /// True when `--ui-test-no-entitlements` is passed. `PurchaseStore` then
     /// starts with an empty owned-set and neither walks `currentEntitlements`
     /// nor listens for transaction updates, so "the free viewer never exposes
