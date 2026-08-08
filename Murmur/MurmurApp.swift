@@ -11,8 +11,43 @@ import MurmurMetrics
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// X77 — the quit-side half of the unsaved-anchored-notes guard (#113).
+///
+/// Anchored notes are session work product: durable only after File ▸ Save
+/// Session (DECISIONS §4 made that deliberate, no autosave). The Context
+/// drawer's footer says so while the app is open; this is the last line of
+/// defence when it is closing. Uses the same dirty check the footer renders
+/// (`CurrentRecordingContext.hasUnsavedAnchoredNotes`), so the alert can
+/// never disagree with the indicator.
+final class MurmurAppDelegate: NSObject, NSApplicationDelegate {
+    @MainActor
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard CurrentRecordingContext.shared.hasUnsavedAnchoredNotes else { return .terminateNow }
+        let alert = NSAlert()
+        alert.messageText = "Quit with unsaved anchored notes?"
+        alert.informativeText = "Anchored notes save with the session — File ▸ Save Session (⌘S). "
+            + "Quitting now discards them."
+        alert.addButton(withTitle: "Save Session…")
+        alert.addButton(withTitle: "Discard and Quit")
+        alert.addButton(withTitle: "Cancel")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            // A cancelled save panel cancels the quit too — the analyst asked
+            // to save, and quitting anyway would lose exactly what they were
+            // trying to keep.
+            return saveSessionPanel() ? .terminateNow : .terminateCancel
+        case .alertSecondButtonReturn:
+            return .terminateNow
+        default:
+            return .terminateCancel
+        }
+    }
+}
+
 @main
 struct MurmurApp: App {
+
+    @NSApplicationDelegateAdaptor(MurmurAppDelegate.self) private var appDelegate
 
     /// User-facing Help menu destinations. The docs site is the public face
     /// of the app now that the source repo is private; every entry below
@@ -184,95 +219,7 @@ struct MurmurApp: App {
 
     // MARK: - Native .mur session Save / Open
 
-    private static let sessionType = UTType("com.kevinlong.murmur.session")
-
-    /// Writes the analyst's session to a `.mur` package they choose the location
-    /// of, including the live session snapshot (X59) so a reopen lands them back
-    /// where they were.
-    ///
-    /// X63-B: this writes the FLAGGED SET from the record sidebar. With nothing
-    /// flagged it writes the open record alone, so the single-record gesture is
-    /// unchanged — an analyst who never touches a flag never notices this.
-    ///
-    /// The panel states what it is about to write. An analyst must not discover
-    /// the scope of their own save afterwards.
-    @MainActor private func saveSessionPanel() {
-        let context = CurrentRecordingContext.shared
-        let payloads = sessionPayloads()
-        guard !payloads.isEmpty else {
-            presentSessionAlert(title: "No recording open",
-                                message: "Open a recording before saving a Murmur session.")
-            return
-        }
-        let panel = NSSavePanel()
-        panel.title = "Save Murmur Session"
-        panel.message = SessionSaveScope.message(recordCount: payloads.count)
-        if let type = Self.sessionType { panel.allowedContentTypes = [type] }
-        panel.canCreateDirectories = true
-        panel.nameFieldStringValue = SessionSaveScope.defaultFileName(
-            recordCount: payloads.count,
-            singleSourceFileName: payloads.first?.recording.sourceFileName
-        )
-        // X63-D: encryption is OPTIONAL PER SAVE — off by default, opted into
-        // here. SAVE stays free, encrypted or not; this is never an entitlement
-        // check.
-        let accessory = SessionPassphrasePrompt.SaveAccessory()
-        panel.accessoryView = accessory
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            try MurSessionPackage.write(
-                records: payloads,
-                // Land the reopen on whatever the analyst had open, which is
-                // rarely whichever record sorted first.
-                collectionJSON: try? JSONEncoder().encode(
-                    MurCollectionState(activeRecordingID: context.recording?.id)
-                ),
-                passphrase: accessory.passphrase,
-                to: url
-            )
-            // X72: the write succeeded, so what was live is now the saved
-            // baseline — the Context drawer's unsaved indicator reads this.
-            context.sessionSavedNotes = context.liveSessionState.anchoredNotes ?? []
-        } catch {
-            presentSessionAlert(title: "Couldn't save session", message: error.localizedDescription)
-        }
-    }
-
-    /// The records a save would write: the flagged set, or — with nothing
-    /// flagged — the open record alone.
-    ///
-    /// Only the OPEN record gets the live session snapshot and provenance:
-    /// those describe where the analyst is and what the on-screen numbers were
-    /// made of, and neither is knowable for a record that is merely flagged.
-    /// Writing the open record's viewport onto every record in the set would be
-    /// a fabricated coordinate — the X32 error class.
-    @MainActor private func sessionPayloads() -> [MurSessionPackage.RecordPayload] {
-        let context = CurrentRecordingContext.shared
-        // X59: capture the live session snapshot the bedside view publishes.
-        // Encoding failure must not cost the analyst their save — fall back to
-        // writing without it rather than throwing the whole save away.
-        let sessionJSON = try? JSONEncoder().encode(context.liveSessionState)
-        // X26: record what the analyst's numbers were MADE OF — the template's
-        // population, lead, span and formula — so the saved measurement stays
-        // auditable if the delineator or the formula default moves in a later
-        // version. Absent when there is no template; never a fabricated
-        // zero-beat one.
-        let provenanceJSON = MurProvenance.NormalTemplate(
-            IntervalMarkingsContext.shared.template
-        ).flatMap { try? JSONEncoder().encode(MurProvenance(normalTemplate: $0)) }
-
-        // The RULE lives in MurmurCore so it can be unit-tested. This command
-        // is a menu handler wrapped around an NSSavePanel — system-modal, not
-        // XCUI-drivable — so anything decided in here is untestable by
-        // construction.
-        return SessionSaveSet.payloads(
-            flagged: SessionFlagStore.shared.flaggedRecords,
-            openRecording: context.recording,
-            openDirectory: context.directory,
-            sessionJSON: sessionJSON,
-            provenanceJSON: provenanceJSON
-        )
-    }
+    fileprivate static let sessionType = UTType("com.kevinlong.murmur.session")
 
     /// Opens a folder of WFDB records — the primary open action, previously
     /// reachable only from the toolbar (AX7). Routes the picked directory
@@ -316,13 +263,115 @@ struct MurmurApp: App {
         SessionDocumentCoordinator.shared.requestOpen(url)
     }
 
-    @MainActor private func presentSessionAlert(title: String, message: String) {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = message
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
+}
+
+// MARK: - Session save flow
+
+// File-scope (X77) so both the File-menu commands and the app delegate's
+// quit guard reach one implementation. Previously methods on `MurmurApp`,
+// which an `NSApplicationDelegate` cannot call.
+
+/// Writes the analyst's session to a `.mur` package they choose the location
+/// of, including the live session snapshot (X59) so a reopen lands them back
+/// where they were. Returns whether a package was actually written — the
+/// quit guard aborts termination on a cancelled or failed save.
+///
+/// X63-B: this writes the FLAGGED SET from the record sidebar. With nothing
+/// flagged it writes the open record alone, so the single-record gesture is
+/// unchanged — an analyst who never touches a flag never notices this.
+///
+/// The panel states what it is about to write. An analyst must not discover
+/// the scope of their own save afterwards.
+@MainActor
+@discardableResult
+func saveSessionPanel() -> Bool {
+    let context = CurrentRecordingContext.shared
+    let payloads = sessionPayloads()
+    guard !payloads.isEmpty else {
+        presentSessionAlert(title: "No recording open",
+                            message: "Open a recording before saving a Murmur session.")
+        return false
     }
+    let panel = NSSavePanel()
+    panel.title = "Save Murmur Session"
+    panel.message = SessionSaveScope.message(recordCount: payloads.count)
+    if let type = MurmurApp.sessionType { panel.allowedContentTypes = [type] }
+    panel.canCreateDirectories = true
+    panel.nameFieldStringValue = SessionSaveScope.defaultFileName(
+        recordCount: payloads.count,
+        singleSourceFileName: payloads.first?.recording.sourceFileName
+    )
+    // X63-D: encryption is OPTIONAL PER SAVE — off by default, opted into
+    // here. SAVE stays free, encrypted or not; this is never an entitlement
+    // check.
+    let accessory = SessionPassphrasePrompt.SaveAccessory()
+    panel.accessoryView = accessory
+    guard panel.runModal() == .OK, let url = panel.url else { return false }
+    do {
+        try MurSessionPackage.write(
+            records: payloads,
+            // Land the reopen on whatever the analyst had open, which is
+            // rarely whichever record sorted first.
+            collectionJSON: try? JSONEncoder().encode(
+                MurCollectionState(activeRecordingID: context.recording?.id)
+            ),
+            passphrase: accessory.passphrase,
+            to: url
+        )
+        // X72: the write succeeded, so what was live is now the saved
+        // baseline — the Context drawer's unsaved indicator reads this.
+        context.sessionSavedNotes = context.liveSessionState.anchoredNotes ?? []
+        return true
+    } catch {
+        presentSessionAlert(title: "Couldn't save session", message: error.localizedDescription)
+        return false
+    }
+}
+
+/// The records a save would write: the flagged set, or — with nothing
+/// flagged — the open record alone.
+///
+/// Only the OPEN record gets the live session snapshot and provenance:
+/// those describe where the analyst is and what the on-screen numbers were
+/// made of, and neither is knowable for a record that is merely flagged.
+/// Writing the open record's viewport onto every record in the set would be
+/// a fabricated coordinate — the X32 error class.
+@MainActor
+private func sessionPayloads() -> [MurSessionPackage.RecordPayload] {
+    let context = CurrentRecordingContext.shared
+    // X59: capture the live session snapshot the bedside view publishes.
+    // Encoding failure must not cost the analyst their save — fall back to
+    // writing without it rather than throwing the whole save away.
+    let sessionJSON = try? JSONEncoder().encode(context.liveSessionState)
+    // X26: record what the analyst's numbers were MADE OF — the template's
+    // population, lead, span and formula — so the saved measurement stays
+    // auditable if the delineator or the formula default moves in a later
+    // version. Absent when there is no template; never a fabricated
+    // zero-beat one.
+    let provenanceJSON = MurProvenance.NormalTemplate(
+        IntervalMarkingsContext.shared.template
+    ).flatMap { try? JSONEncoder().encode(MurProvenance(normalTemplate: $0)) }
+
+    // The RULE lives in MurmurCore so it can be unit-tested. This command
+    // is a menu handler wrapped around an NSSavePanel — system-modal, not
+    // XCUI-drivable — so anything decided in here is untestable by
+    // construction.
+    return SessionSaveSet.payloads(
+        flagged: SessionFlagStore.shared.flaggedRecords,
+        openRecording: context.recording,
+        openDirectory: context.directory,
+        sessionJSON: sessionJSON,
+        provenanceJSON: provenanceJSON
+    )
+}
+
+@MainActor
+private func presentSessionAlert(title: String, message: String) {
+    let alert = NSAlert()
+    alert.messageText = title
+    alert.informativeText = message
+    alert.addButton(withTitle: "OK")
+    alert.runModal()
 }
 
 /// The "Navigate" menu (X22). Reads the bedside actions BedsideView publishes

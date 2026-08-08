@@ -7925,3 +7925,83 @@ struct MarkdownReportNotesTests {
         #expect(report.contains("0:01.00–0:02.00"))
     }
 }
+
+// MARK: - Unsaved anchored-notes guard (X77)
+
+@Suite("Unsaved anchored-notes guard (X77)")
+@MainActor
+struct UnsavedNotesGuardTests {
+
+    private func note(_ start: Int64, text: String = "run") -> AnchoredNote {
+        AnchoredNote(
+            startSample: start,
+            endSample: start + 250,
+            text: text,
+            createdAt: Date(timeIntervalSince1970: 1_750_000_000),
+            modifiedAt: Date(timeIntervalSince1970: 1_750_000_000)
+        )
+    }
+
+    @Test("A never-saved session with no notes is clean")
+    func neverSavedNoNotes() {
+        let context = CurrentRecordingContext()
+        #expect(!context.hasUnsavedAnchoredNotes)
+    }
+
+    @Test("A never-saved session with any note is dirty — nil baseline reads as empty")
+    func neverSavedWithNote() {
+        let context = CurrentRecordingContext()
+        context.liveSessionState.anchoredNotes = [note(100)]
+        #expect(context.hasUnsavedAnchoredNotes)
+    }
+
+    @Test("Notes matching the saved baseline are clean; an edit dirties them")
+    func baselineComparison() {
+        let context = CurrentRecordingContext()
+        let saved = [note(100), note(500)]
+        context.liveSessionState.anchoredNotes = saved
+        context.sessionSavedNotes = saved
+        #expect(!context.hasUnsavedAnchoredNotes)
+
+        context.liveSessionState.anchoredNotes?[0].text = "edited"
+        #expect(context.hasUnsavedAnchoredNotes, "Editing a note's body must dirty the session")
+
+        context.liveSessionState.anchoredNotes = saved
+        context.liveSessionState.anchoredNotes?.removeLast()
+        #expect(context.hasUnsavedAnchoredNotes, "Deleting a note must dirty the session")
+    }
+
+    @Test("Deleting every note from a saved session is still a change")
+    func deletionFromSavedBaseline() {
+        // nil live + non-empty baseline: the analyst deleted saved notes and
+        // hasn't saved the deletion. `nil` and `[]` both read as empty on the
+        // live side, but the baseline they're compared against is not.
+        let context = CurrentRecordingContext()
+        context.sessionSavedNotes = [note(100)]
+        context.liveSessionState.anchoredNotes = nil
+        #expect(context.hasUnsavedAnchoredNotes)
+    }
+
+    @Test("Switching to a DIFFERENT record resets the baseline to never-saved")
+    func baselineResetsOnRecordSwitch() {
+        let context = CurrentRecordingContext()
+        context.sessionSavedNotes = [note(100)]
+
+        let dir = URL(fileURLWithPath: "/tmp/x77")
+        let a = Recording(
+            version: Recording.currentVersion, id: UUID(), device: "a",
+            createdAt: Date(timeIntervalSince1970: 0), sourceFileName: "a.hea",
+            channels: [], annotations: []
+        )
+        context.set(recording: a, directory: dir)
+        #expect(context.sessionSavedNotes == nil,
+                "A new record must not inherit the previous record's baseline")
+
+        // Re-publishing the SAME record (the guard's revert path does this
+        // indirectly) must keep whatever baseline that record established.
+        let established = [note(200)]   // ids are per-instance; compare the same array
+        context.sessionSavedNotes = established
+        context.set(recording: a, directory: dir)
+        #expect(context.sessionSavedNotes == established)
+    }
+}

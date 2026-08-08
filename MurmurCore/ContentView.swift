@@ -9,6 +9,25 @@ public struct ContentView: View {
     @State private var state: AppState = .empty
     @State private var importStates: [String: RecordImportState] = [:]
     @State private var selection: String?
+    /// X77 — a sidebar selection intercepted by the unsaved-notes guard,
+    /// waiting on the confirmation dialog. Wrapped so `target: nil`
+    /// (deselection) is still a parked intent, distinguishable from "none".
+    @State private var pendingGuardedSelection: PendingSelection?
+    /// Lets the guard's own selection writes pass through `onChange` without
+    /// re-entering the guard. The two writes need different treatment: the
+    /// REVERT must not re-run `handleSelectionChanged` (the record on screen
+    /// never changed, and re-running would re-stage a `.mur` session restore
+    /// for it), while the APPROVED switch is a real change and must.
+    @State private var suppressUnsavedNotesGuard: UnsavedNotesGuardBypass?
+
+    private enum UnsavedNotesGuardBypass {
+        case revert
+        case approvedSwitch
+    }
+
+    private struct PendingSelection {
+        let target: String?
+    }
     @State private var isImporterPresented = false
     @State private var errorMessage: String?
     @State private var currentImportTask: Task<Void, Never>?
@@ -377,8 +396,49 @@ public struct ContentView: View {
                 // toggles both ways regardless of responder-chain state.
                 .toolbar { sidebarToggleToolbarItem }
         }
-        .onChange(of: selection) { _, newValue in
+        .onChange(of: selection) { oldValue, newValue in
+            // X77 — the record-switch half of the unsaved-anchored-notes
+            // guard (#113). Switching tears down BedsideView's @State, which
+            // is where unsaved notes live; the quit guard alone would let a
+            // sidebar click lose silently what ⌘Q warns about.
+            if let bypass = suppressUnsavedNotesGuard {
+                suppressUnsavedNotesGuard = nil
+                if bypass == .approvedSwitch {
+                    handleSelectionChanged(newValue, source: source)
+                }
+                return
+            }
+            if oldValue != nil, oldValue != newValue,
+               CurrentRecordingContext.shared.hasUnsavedAnchoredNotes {
+                // Park the intent and put the selection back; the dialog
+                // decides. The flag keeps the revert from re-entering here.
+                pendingGuardedSelection = PendingSelection(target: newValue)
+                suppressUnsavedNotesGuard = .revert
+                selection = oldValue
+                return
+            }
             handleSelectionChanged(newValue, source: source)
+        }
+        .confirmationDialog(
+            "Switch records with unsaved anchored notes?",
+            isPresented: Binding(
+                get: { pendingGuardedSelection != nil },
+                set: { if !$0 { pendingGuardedSelection = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Discard and Switch", role: .destructive) {
+                guard let pending = pendingGuardedSelection else { return }
+                pendingGuardedSelection = nil
+                // The discard is explicit: clear the live notes so the quit
+                // guard can't later warn about notes that are already gone.
+                CurrentRecordingContext.shared.liveSessionState.anchoredNotes = nil
+                suppressUnsavedNotesGuard = .approvedSwitch
+                selection = pending.target
+            }
+            Button("Cancel", role: .cancel) { pendingGuardedSelection = nil }
+        } message: {
+            Text("Anchored notes save with the session — File ▸ Save Session (⌘S). Switching records discards them.")
         }
     }
 
@@ -728,7 +788,7 @@ public struct ContentView: View {
             seedRecentForTesting()
             return
         }
-        if args.contains("--ui-test-open-folder") {
+        if args.contains(where: { $0.hasPrefix("--ui-test-open-folder") }) {
             openSyntheticFolderForTesting()
             return
         }
@@ -827,6 +887,12 @@ public struct ContentView: View {
     /// `NSOpenPanel` modal (XCUI-hostile) while still exercising the full
     /// scanFolder → import → bedside pipeline.
     private func openSyntheticFolderForTesting() {
+        // `--ui-test-open-folder` materialises one record; `=N` materialises
+        // N (named synth, synth2, …). Two is what the X77 record-switch guard
+        // test needs — a folder with a second row to click.
+        let count = ProcessInfo.processInfo.arguments
+            .first { $0.hasPrefix("--ui-test-open-folder=") }
+            .flatMap { Int($0.dropFirst("--ui-test-open-folder=".count)) } ?? 1
         let workDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("murmur-ui-test-open", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -836,6 +902,13 @@ public struct ContentView: View {
         )) != nil,
               (try? SyntheticRecording.makeMultiFrequencyRecord(into: workDir)) != nil else {
             return
+        }
+        if count >= 2 {
+            for extra in 2...count {
+                _ = try? SyntheticRecording.makeMultiFrequencyRecord(
+                    into: workDir, recordName: "synth\(extra)"
+                )
+            }
         }
         openFolder(workDir)
     }
