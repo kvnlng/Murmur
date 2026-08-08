@@ -344,6 +344,30 @@ enum UITestSupport {
         return n
     }
 
+    /// True when `--ui-test-grant-studio` is passed. Grants the Studio
+    /// entitlement in `PurchaseStore.init` and skips the entitlement walk —
+    /// the counterpart of `--ui-test-no-entitlements`, for driving REAL paid
+    /// computations (not injections) against a staged record. Added for
+    /// X76's pixel pass, where the rolling LF/HF series had to be computed
+    /// for real on a multi-hour record without dragging the QTc injection's
+    /// synthetic fiducial store into the picture.
+    static var grantStudio: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-grant-studio")
+    }
+
+    /// True when `--ui-test-inject-lfhf-lane` is passed (X76). It (a) grants
+    /// Studio in `PurchaseStore.init` (the X52 §5 pattern — a StoreKit-test
+    /// machine can't clobber the grant on the async refresh), (b) has
+    /// `BedsideView` seed `RollingLFHFContext` with a deterministic series
+    /// whose every window reads exactly 1.50, and (c) has
+    /// `RollingLFHFOrchestrator` skip its recompute so the real computation
+    /// doesn't overwrite the injection. The wire-up test asserts the lane's
+    /// RENDERED value equals the injected one — catching a binding slip
+    /// between the context and the screen that a green unit suite would miss.
+    static var injectLFHFLane: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-inject-lfhf-lane")
+    }
+
     /// If `--ui-test-seed-notes=N` is set, returns N. BedsideView seeds N
     /// anchored notes at deterministic, evenly-spaced positions on appear
     /// (X72), so the drawn surfaces notes feed — the record band's note-tick

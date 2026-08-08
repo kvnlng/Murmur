@@ -122,6 +122,17 @@ public final class PurchaseStore {
             ownedProductIDs = [.studio]
             return
         }
+        // X76: same pattern for the LF/HF-lane wire-up test.
+        if UITestSupport.injectLFHFLane {
+            ownedProductIDs = [.studio]
+            return
+        }
+        // X76: real-compute counterpart — grant without injecting anything,
+        // so a staged record exercises the actual paid computations.
+        if UITestSupport.grantStudio {
+            ownedProductIDs = [.studio]
+            return
+        }
         #endif
         // Listen for transactions forever. Must be started before any
         // purchase begins so we don't miss the resolution of in-flight

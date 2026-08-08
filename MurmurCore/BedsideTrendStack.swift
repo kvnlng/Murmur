@@ -24,11 +24,14 @@ struct BedsideTrendStack: View {
     let visibleLanes: Set<String>
     var onSeek: ((Double) -> Void)?
 
-    /// The other two lanes are supplied by the caller, because they carry
-    /// their own contexts and control chips that belong to the lane rather
-    /// than to the stack.
+    /// These lanes are supplied by the caller, because they carry their own
+    /// contexts (and, for RMSSD and the interval trend, control chips) that
+    /// belong to the lane rather than to the stack.
     let rmssdLane: TrendStackLane?
     let intervalLane: TrendStackLane?
+    /// X76 — rolling LF/HF. Sits between the interval trend and quality,
+    /// per the wireframe's lane order.
+    let lfhfLane: TrendStackLane?
 
     @State private var heartRate: [Float] = []
     @State private var heartRateRate: Double = 0
@@ -36,6 +39,7 @@ struct BedsideTrendStack: View {
     @State private var qualityRate: Double = 0
 
     static let hrLaneID = "hr"
+    static let lfhfLaneID = "lfhf"
     static let qualityLaneID = "quality"
 
     var body: some View {
@@ -90,6 +94,7 @@ struct BedsideTrendStack: View {
         }
         if let rmssdLane, visibleLanes.contains(rmssdLane.id) { out.append(rmssdLane) }
         if let intervalLane, visibleLanes.contains(intervalLane.id) { out.append(intervalLane) }
+        if let lfhfLane, visibleLanes.contains(lfhfLane.id) { out.append(lfhfLane) }
         if !quality.isEmpty, visibleLanes.contains(Self.qualityLaneID) {
             out.append(TrendStackLane(
                 id: Self.qualityLaneID,
@@ -116,12 +121,14 @@ struct BedsideTrendStack: View {
         heartRate: Channel?,
         quality: [Channel],
         rmssd: Bool,
-        interval: Bool
+        interval: Bool,
+        lfhf: Bool
     ) -> [(id: String, label: String)] {
         var out: [(String, String)] = []
         if heartRate != nil { out.append((hrLaneID, "Trends · HR")) }
         if rmssd { out.append(("rmssd", "RMSSD")) }
         if interval { out.append(("interval-trend", "Interval trend")) }
+        if lfhf { out.append((lfhfLaneID, "LF / HF")) }
         if !quality.isEmpty { out.append((qualityLaneID, "Quality")) }
         return out
     }

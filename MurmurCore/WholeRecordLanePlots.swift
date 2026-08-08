@@ -115,6 +115,58 @@ struct QualityLanePlot: View {
     }
 }
 
+/// Rolling LF/HF across the whole recording (X76), as a single line with
+/// gaps.
+///
+/// The samples arrive already computed (App-target orchestrator; MurmurCore
+/// does no arithmetic on measurements) and already sparse: a window the
+/// analyzer declined is ABSENT, and the line breaks there rather than
+/// bridging it — a bridge would draw a ratio where the method said there
+/// isn't one.
+struct LFHFLanePlot: View {
+    /// Rolling windows, `windowStartSeconds…windowEndSeconds` in recording
+    /// seconds, `value` = LF/HF ratio.
+    let samples: [VariabilityLaneSample]
+    let recordingRange: ClosedRange<Double>
+    /// Windows are contiguous at `stepSeconds` spacing; a hole wider than
+    /// this many steps breaks the line.
+    let stepSeconds: Double
+
+    var body: some View {
+        Canvas { ctx, size in
+            let span = recordingRange.upperBound - recordingRange.lowerBound
+            guard span > 0, !samples.isEmpty else { return }
+            let eligible = samples.filter(\.isEligible)
+            guard let lo = eligible.map(\.value).min(),
+                  let hi = eligible.map(\.value).max() else { return }
+            // Pad the autoscale so a flat series doesn't hug an edge.
+            let pad = Swift.max((hi - lo) * 0.1, 0.05)
+            let yLo = lo - pad, yHi = hi + pad
+            func x(_ seconds: Double) -> CGFloat {
+                CGFloat((seconds - recordingRange.lowerBound) / span) * size.width
+            }
+            func y(_ v: Double) -> CGFloat {
+                size.height - CGFloat((v - yLo) / (yHi - yLo)) * size.height
+            }
+            var line = Path()
+            var previousCenter: Double?
+            for sample in eligible {
+                let center = sample.windowCenterSeconds
+                let point = CGPoint(x: x(center), y: y(sample.value))
+                // Break the line across holes — absent windows are absences.
+                if let prev = previousCenter, center - prev <= stepSeconds * 1.5 {
+                    line.addLine(to: point)
+                } else {
+                    line.move(to: point)
+                }
+                previousCenter = center
+            }
+            ctx.stroke(line, with: .color(.accentColor.opacity(0.85)), lineWidth: 1)
+        }
+        .accessibilityHidden(true)
+    }
+}
+
 /// Shared column reduction for the whole-record lane plots.
 enum LaneBinning {
 
