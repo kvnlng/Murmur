@@ -69,6 +69,17 @@ struct MurmurApp: App {
         // then on. See ToolbarDisplayModeDefault.
         ToolbarDisplayModeDefault.seedIfNeeded()
 
+        // Reap per-operation scratch (csv-import-*, mur-session-*, ui-test-*)
+        // left in the container tmp by earlier launches — nothing deletes it
+        // when the operation ends because it backs the viewing session that
+        // follows. Launch is the one moment this process provably has no
+        // session open; the sweep's age cutoff protects parallel UI-test
+        // instances, and makes running it off-main safe (anything the analyst
+        // opens after launch is younger than the cutoff). See TempScratchSweeper.
+        Task.detached(priority: .utility) {
+            TempScratchSweeper.sweepAtLaunch()
+        }
+
         // Register the baseline producers that ship with the free viewer.
         // The MurmurCore bootstrap encapsulates the DEBUG vs RELEASE
         // policy — in DEBUG it registers the synthetic producer so the
