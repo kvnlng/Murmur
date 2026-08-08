@@ -142,6 +142,24 @@ struct FindingsPanel: View {
     /// nil so snapshot/other callers stay unaffected.
     var candidateProvenance: VTVFScanContext.ModelProvenance? = nil
 
+    /// Arrhythmia-scan candidates (A2) for the current recording, as range
+    /// annotations (source `ArrhythmiaCandidateSource.id`). Rendered as their
+    /// OWN provenance-tagged group in TIME order — these are algorithmic
+    /// detector spans, not model scores, so they never interleave with the
+    /// VT/VF score ranking or the departure ranking. Empty when no scan ran.
+    var arrhythmiaCandidates: [Annotation] = []
+    /// Region-keyed dispositions for the arrhythmia candidates. A separate
+    /// store (own sidecar) from the VT/VF one — the two detectors' spans
+    /// overlap freely and must never inherit each other's review calls.
+    var arrhythmiaDispositionStore: VTVFCandidateDispositionStore? = nil
+    /// Operating points + per-recording quality read for the arrhythmia
+    /// scan — the group's subtitle, per "provenance is not decoration".
+    var arrhythmiaParametersCaption: String? = nil
+    /// RUO notice for the arrhythmia group's badge. Kept separate from the
+    /// VT/VF `regulatoryNotice`, which the orchestrator may source from
+    /// model metadata — this detector has no model to speak for it.
+    var arrhythmiaRegulatoryNotice: String = "RESEARCH USE ONLY — not for diagnosis"
+
     @State private var sort: FindingSort = .structural
     @State private var expandedGroups: Set<String> = []
     @State private var showNormals: Bool = false
@@ -154,6 +172,9 @@ struct FindingsPanel: View {
     /// its top 5 because 25 near-identical rows push every category off-screen,
     /// and the categories are what the analyst is triaging by.
     @State private var candidateRenderBound: Int = FindingsPanel.candidateCollapsedBound
+    @State private var arrhythmiaGroupExpanded: Bool = true
+    /// Same X75 render bound rationale as the VT/VF group.
+    @State private var arrhythmiaRenderBound: Int = FindingsPanel.candidateCollapsedBound
     /// Which review state the queue is showing. Defaults to the work that
     /// remains, which is what a queue is for.
     @State private var dispositionFilter: DispositionFilter = .toReview
@@ -679,7 +700,7 @@ struct FindingsPanel: View {
 
     @ViewBuilder
     private var queueList: some View {
-        if filtered.isEmpty && sortedCandidates.isEmpty {
+        if filtered.isEmpty && sortedCandidates.isEmpty && sortedArrhythmiaCandidates.isEmpty {
             ContentUnavailableView(
                 "No findings",
                 systemImage: "magnifyingglass",
@@ -696,6 +717,12 @@ struct FindingsPanel: View {
                     // departure ranking below, so it never interleaves.
                     if !sortedCandidates.isEmpty {
                         candidateGroupSection
+                    }
+                    // Arrhythmia detector candidates — their own group, in
+                    // time order (not a score ranking), same non-interleave
+                    // rule as the VT/VF group.
+                    if !sortedArrhythmiaCandidates.isEmpty {
+                        arrhythmiaGroupSection
                     }
                     ForEach(deviationRankedGroups) { group in
                         groupRow(group)
@@ -1417,7 +1444,7 @@ struct FindingsPanel: View {
                         Text("Candidate VT/VF episodes")
                             .font(.callout.weight(.semibold))
                             .foregroundStyle(.primary)
-                        ruoBadge
+                        ruoBadge(regulatoryNotice)
                     }
                     Text(candidateSubtitle)
                         .font(.caption2)
@@ -1441,10 +1468,12 @@ struct FindingsPanel: View {
         .accessibilityIdentifier("vtvf-candidate-group-header")
     }
 
-    /// The RUO badge — one of the two allowed surfaces (the scan dialog
-    /// header is the other). Keeping it to exactly these two is what keeps
-    /// it credible (feedback_research_use_only_framing.md).
-    private var ruoBadge: some View {
+    /// The RUO badge — the findings-queue surface is one of the two allowed
+    /// RUO surfaces (the VT/VF scan-dialog header is the other). Both
+    /// candidate groups' badges are THIS one surface; keeping it to exactly
+    /// these two is what keeps it credible
+    /// (feedback_research_use_only_framing.md).
+    private func ruoBadge(_ notice: String) -> some View {
         Text("RUO")
             .font(.caption2.weight(.bold))
             .padding(.horizontal, 5)
@@ -1452,7 +1481,7 @@ struct FindingsPanel: View {
             .background(Capsule().fill(Color.secondary.opacity(0.15)))
             .overlay(Capsule().stroke(Color.secondary.opacity(0.35), lineWidth: 0.5))
             .foregroundStyle(.secondary)
-            .help(regulatoryNotice)
+            .help(notice)
             .accessibilityLabel("Research use only")
     }
 
@@ -1624,6 +1653,237 @@ struct FindingsPanel: View {
                 .buttonStyle(.plain)
                 .help("Mark as unreviewed")
                 .accessibilityIdentifier("vtvf-candidate-reset-\(rank)")
+            }
+        }
+        .font(.caption)
+    }
+
+    // MARK: - Arrhythmia candidate group (A2)
+    //
+    // Same shape as the VT/VF group: candidates enter the EXISTING queue as
+    // ONE provenance-tagged group; rows state facts (kind, span, "median 50
+    // bpm"), never conclusions; all output is NEUTRAL ink; dispositions
+    // route to a region-keyed store so they survive a rescan. The one
+    // deliberate difference: rows are in TIME order. These spans come from
+    // algorithmic detectors whose `confidence` is measurement reliability —
+    // ranking by it would present reliability as a severity score.
+
+    /// Arrhythmia candidates in time order, in the current disposition
+    /// bucket. Same reasoning as `sortedCandidates` for why the disposition
+    /// filter reaches them.
+    private var sortedArrhythmiaCandidates: [Annotation] {
+        arrhythmiaCandidates
+            .filter { candidate in
+                if recentlyActed.contains(candidate.id) { return true }
+                let state = arrhythmiaDispositionStore?.state(
+                    forStart: candidate.sampleIndex,
+                    end: candidate.renderEndSample
+                )
+                return dispositionFilter.admits(state)
+            }
+            .sorted { $0.sampleIndex < $1.sampleIndex }
+    }
+
+    private var arrhythmiaGroupSection: some View {
+        VStack(spacing: 0) {
+            arrhythmiaGroupHeader
+            if arrhythmiaGroupExpanded {
+                let shown = Array(sortedArrhythmiaCandidates.prefix(arrhythmiaRenderBound))
+                let remaining = sortedArrhythmiaCandidates.count - shown.count
+                VStack(spacing: 1) {
+                    ForEach(Array(shown.enumerated()), id: \.element.id) { index, cand in
+                        arrhythmiaCandidateRow(rank: index, candidate: cand)
+                    }
+                    if remaining > 0 {
+                        HStack(spacing: 12) {
+                            Text("first \(shown.count) of \(sortedArrhythmiaCandidates.count)")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                            Spacer(minLength: 4)
+                            Button("Show \(remaining) more") {
+                                arrhythmiaRenderBound = sortedArrhythmiaCandidates.count
+                            }
+                            .buttonStyle(.plain)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(Color.accentColor)
+                            .accessibilityIdentifier("arrhythmia-candidate-show-more")
+                        }
+                        .padding(.top, 2)
+                    }
+                }
+                .padding(.leading, 28)
+                .padding(.trailing, 4)
+                .padding(.bottom, 4)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("arrhythmia-candidate-group")
+        // Addressable count leaf — same pattern as `vtvf-candidate-count`.
+        .overlay(alignment: .topLeading) {
+            Color.clear
+                .frame(width: 1, height: 1)
+                .accessibilityIdentifier("arrhythmia-candidate-count")
+                .accessibilityLabel("\(sortedArrhythmiaCandidates.count)")
+                .allowsHitTesting(false)
+        }
+    }
+
+    private var arrhythmiaGroupHeader: some View {
+        Button {
+            arrhythmiaGroupExpanded.toggle()
+        } label: {
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: arrhythmiaGroupExpanded ? "chevron.down" : "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 9)
+                // Neutral slate dot — detector output is never painted in a
+                // caution hue (RUO).
+                Circle()
+                    .fill(Color.secondary)
+                    .frame(width: 9, height: 9)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text("Candidate arrhythmia events")
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(.primary)
+                        ruoBadge(arrhythmiaRegulatoryNotice)
+                    }
+                    Text(arrhythmiaSubtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 4)
+                Text("\(sortedArrhythmiaCandidates.count)")
+                    .font(.callout.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(
+            RoundedRectangle(cornerRadius: 7)
+                .fill(arrhythmiaGroupExpanded ? Color.secondary.opacity(0.05) : Color.clear)
+        )
+        .accessibilityIdentifier("arrhythmia-candidate-group-header")
+    }
+
+    private var arrhythmiaSubtitle: String {
+        var parts = ["In time order — detector spans, not a ranking"]
+        if let caption = arrhythmiaParametersCaption, !caption.isEmpty {
+            parts.append(caption)
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func arrhythmiaCandidateRow(rank: Int, candidate: Annotation) -> some View {
+        let start = candidate.sampleIndex
+        let end = candidate.renderEndSample
+        let state = arrhythmiaDispositionStore?.state(forStart: start, end: end)
+        return HStack(alignment: .center, spacing: 8) {
+            Button {
+                jump(to: candidate, preserveZoom: true)
+            } label: {
+                HStack(alignment: .center, spacing: 8) {
+                    candidateStateGlyph(state)
+                    VStack(alignment: .leading, spacing: 1) {
+                        // Kind + the service's factual detail — coordinates
+                        // and measurements, never a conclusion.
+                        HStack(spacing: 6) {
+                            Text(candidate.displayLabel)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            if let note = candidate.note, !note.isEmpty {
+                                Text(note)
+                                    .font(.caption2.monospaced())
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                        HStack(spacing: 6) {
+                            Text("\(formatTime(start))–\(formatTime(end))")
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.secondary)
+                            Text(candidateDurationLabel(start: start, end: end))
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.tertiary)
+                            if let conf = candidate.confidence {
+                                Text(String(format: "conf %.2f", conf))
+                                    .font(.caption2.monospaced())
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+                    Spacer(minLength: 4)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("arrhythmia-candidate-row-\(rank)")
+
+            if isEditing, arrhythmiaDispositionStore != nil {
+                arrhythmiaDispositionButtons(rank: rank, id: candidate.id, start: start, end: end, hasRecord: state != nil)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .opacity(state == .dismissed ? 0.5 : 1.0)
+        // Addressable disposition state for XCUI wire-up assertions — same
+        // hidden-leaf pattern as the VT/VF rows.
+        .overlay(alignment: .topLeading) {
+            Color.clear
+                .frame(width: 1, height: 1)
+                .accessibilityIdentifier("arrhythmia-candidate-state-\(rank)")
+                .accessibilityLabel(candidateStateLabel(state))
+                .allowsHitTesting(false)
+        }
+    }
+
+    /// Confirm is a plain action (no kind menu): the row already states the
+    /// candidate's factual kind, and confirming adjudicates THAT observation
+    /// — the analyst isn't reclassifying it into a different arrhythmia.
+    private func arrhythmiaDispositionButtons(rank: Int, id: UUID, start: Int64, end: Int64, hasRecord: Bool) -> some View {
+        HStack(spacing: 3) {
+            Button {
+                arrhythmiaDispositionStore?.confirm(start: start, end: end, kind: nil)
+                recentlyActed.insert(id)
+            } label: {
+                Image(systemName: "checkmark.circle")
+                    .foregroundStyle(.green)
+            }
+            .buttonStyle(.plain)
+            .help("Confirm this candidate as an analyst finding")
+            .accessibilityLabel("Confirm candidate")
+            .accessibilityIdentifier("arrhythmia-candidate-confirm-\(rank)")
+
+            Button {
+                arrhythmiaDispositionStore?.dismiss(start: start, end: end)
+                recentlyActed.insert(id)
+            } label: {
+                Image(systemName: "xmark.circle")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Dismiss this candidate as a false positive")
+            .accessibilityLabel("Dismiss candidate")
+            .accessibilityIdentifier("arrhythmia-candidate-dismiss-\(rank)")
+
+            if hasRecord {
+                Button {
+                    arrhythmiaDispositionStore?.reset(start: start, end: end)
+                    recentlyActed.insert(id)
+                } label: {
+                    Image(systemName: "arrow.uturn.backward.circle")
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Mark as unreviewed")
+                .accessibilityLabel("Reset candidate review state")
+                .accessibilityIdentifier("arrhythmia-candidate-reset-\(rank)")
             }
         }
         .font(.caption)

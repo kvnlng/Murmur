@@ -25,15 +25,24 @@ import Observation
 @Observable
 final class VTVFCandidateDispositionStore {
     private let bundleDirectory: URL
+    /// Sidecar file this store owns. Defaults to the VT/VF sidecar; the
+    /// arrhythmia-scan store passes its own so the two detectors' region
+    /// dispositions never cross-inherit (their spans overlap freely).
+    private let fileName: String
     public let defaultReviewerName: String
 
     /// All stored region dispositions for this recording.
     public private(set) var records: [RegionDisposition] = []
 
-    public init(bundleDirectory: URL, defaultReviewerName: String = ProcessInfo.processInfo.userName) {
+    public init(
+        bundleDirectory: URL,
+        fileName: String = RegionDispositionFile.bundleFileName,
+        defaultReviewerName: String = ProcessInfo.processInfo.userName
+    ) {
         self.bundleDirectory = bundleDirectory
+        self.fileName = fileName
         self.defaultReviewerName = defaultReviewerName
-        self.records = Self.loadFromDisk(at: Self.fileURL(in: bundleDirectory))
+        self.records = Self.loadFromDisk(at: bundleDirectory.appendingPathComponent(fileName))
     }
 
     // MARK: - Read
@@ -133,8 +142,8 @@ final class VTVFCandidateDispositionStore {
 
     // MARK: - Persistence
 
-    private static func fileURL(in bundleDirectory: URL) -> URL {
-        bundleDirectory.appendingPathComponent(RegionDispositionFile.bundleFileName)
+    private var fileURL: URL {
+        bundleDirectory.appendingPathComponent(fileName)
     }
 
     private static func loadFromDisk(at url: URL) -> [RegionDisposition] {
@@ -156,9 +165,8 @@ final class VTVFCandidateDispositionStore {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
-        let url = Self.fileURL(in: bundleDirectory)
         guard let data = try? encoder.encode(file) else { return }
-        try? data.write(to: url, options: .atomic)
+        try? data.write(to: fileURL, options: .atomic)
     }
 }
 

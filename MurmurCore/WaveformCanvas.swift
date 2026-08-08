@@ -557,7 +557,7 @@ struct VTVFCandidateBandOverlay: View {
                     let x0 = CGFloat(Double(s - startSample) / Double(span)) * w
                     let x1 = CGFloat(Double(e - startSample) / Double(span)) * w
                     let bandWidth = max(2, x1 - x0)
-                    band(width: bandWidth, height: h)
+                    band(width: bandWidth, height: h, label: candidate.displayLabel)
                         .position(x: x0 + bandWidth / 2, y: h / 2)
                 }
             }
@@ -565,7 +565,10 @@ struct VTVFCandidateBandOverlay: View {
         .allowsHitTesting(false)
     }
 
-    private func band(width: CGFloat, height: CGFloat) -> some View {
+    // The band names its own candidate (A2 feeds arrhythmia spans through
+    // this overlay too, so a hardcoded "VT/VF candidate" would mislabel
+    // them). The annotation's label is the neutral "<kind> candidate".
+    private func band(width: CGFloat, height: CGFloat, label: String) -> some View {
         ZStack(alignment: .topLeading) {
             Rectangle()
                 .fill(Color.secondary.opacity(0.12))
@@ -576,7 +579,7 @@ struct VTVFCandidateBandOverlay: View {
                 Spacer(minLength: 0)
                 Rectangle().fill(Color.secondary.opacity(0.55)).frame(width: 1.5)
             }
-            Text("VT/VF candidate")
+            Text(label)
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)

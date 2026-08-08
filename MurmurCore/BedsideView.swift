@@ -64,6 +64,14 @@ struct BedsideView: View {
     /// committed candidates + drives the "Scan for VT/VF candidates"
     /// toolbar affordance. The model + entitlement live on the App side.
     @State private var scanContext = VTVFScanContext.shared
+    /// Bridge to the App-target arrhythmia scan orchestrator (A2): exposes
+    /// the detector's brady/tachy/pause/AFib candidate spans. The compute +
+    /// entitlement gate live on the App side.
+    @State private var arrhythmiaContext = ArrhythmiaScanContext.shared
+    /// Region-keyed review state for the arrhythmia candidates — own
+    /// sidecar, never shared with the VT/VF store (overlapping spans must
+    /// not inherit each other's calls).
+    @State private var arrhythmiaDispositionStore: VTVFCandidateDispositionStore
     /// Findings the analyst attached after import (via the "Attach
     /// findings…" toolbar action). Merged with `recording.annotations`
     /// for display. In-memory only for now; a future pass persists them
@@ -175,6 +183,10 @@ struct BedsideView: View {
         #endif
         _dispositionStore = State(initialValue: DispositionStore(bundleDirectory: recordingDirectory))
         _candidateDispositionStore = State(initialValue: VTVFCandidateDispositionStore(bundleDirectory: recordingDirectory))
+        _arrhythmiaDispositionStore = State(initialValue: VTVFCandidateDispositionStore(
+            bundleDirectory: recordingDirectory,
+            fileName: ArrhythmiaCandidateSource.dispositionFileName
+        ))
         _trendGuideStore = State(initialValue: IntervalTrendGuideStore(bundleDirectory: recordingDirectory))
     }
 
@@ -220,7 +232,8 @@ struct BedsideView: View {
     /// lead-matching rule as annotations; lead-less candidates show on
     /// every channel.
     private func candidatesForChannel(_ channel: Channel) -> [Annotation] {
-        scanContext.candidates.filter { $0.matchesChannel(channel.name) }
+        (scanContext.candidates + arrhythmiaContext.candidates)
+            .filter { $0.matchesChannel(channel.name) }
     }
 
     /// The lead everything per-channel follows: the trace on the stage, the
@@ -404,7 +417,11 @@ struct BedsideView: View {
             candidateDispositionStore: candidateDispositionStore,
             regulatoryNotice: scanContext.regulatoryNotice,
             parametersCaption: scanContext.parametersCaption,
-            candidateProvenance: scanContext.candidateProvenance
+            candidateProvenance: scanContext.candidateProvenance,
+            arrhythmiaCandidates: arrhythmiaContext.candidates,
+            arrhythmiaDispositionStore: arrhythmiaDispositionStore,
+            arrhythmiaParametersCaption: arrhythmiaContext.parametersCaption,
+            arrhythmiaRegulatoryNotice: arrhythmiaContext.regulatoryNotice
         )
         .inspectorColumnWidth(min: 260, ideal: 340, max: 500)
     }
@@ -878,6 +895,37 @@ struct BedsideView: View {
         scanContext.isScanAvailable = true
     }
 
+    /// Publishes a fixed set of arrhythmia candidates (A2) — the same state
+    /// a completed scan produces — so XCUI can exercise the queue group +
+    /// region-keyed disposition wire-up without running the detectors.
+    /// Coordinates sit inside the 10 s synthetic fixture; kinds cover a
+    /// span detector (brady) and the two point-like ones (pause, AFib).
+    @MainActor
+    private func injectSyntheticArrhythmiaCandidates() {
+        let sr = ecgChannels.first?.sampleRate ?? 250
+        let candidates = [
+            ArrhythmiaCandidateSource.makeAnnotation(
+                kind: .bradycardia,
+                startSample: Int64(1 * sr), endSample: Int64(3 * sr),
+                detail: "median 48 bpm", confidence: 0.97
+            ),
+            ArrhythmiaCandidateSource.makeAnnotation(
+                kind: .pause,
+                startSample: Int64(5 * sr), endSample: Int64(7 * sr),
+                detail: "2.40 s gap", confidence: 1.0
+            ),
+            ArrhythmiaCandidateSource.makeAnnotation(
+                kind: .atrialFibrillation,
+                startSample: Int64(7 * sr), endSample: Int64(9 * sr),
+                detail: "irregularly irregular RR", confidence: 0.92
+            ),
+        ]
+        arrhythmiaContext.setCandidates(
+            candidates,
+            parametersCaption: "lead II · 12 beats detected · RR artifact 0.0%"
+        )
+    }
+
     /// X52 §5: publish a deterministic fiducial store whose every beat carries
     /// the SAME known QTc, so the paid trend lane's computed bin median is a
     /// value the wire-up test knows in advance and can assert the RENDERED
@@ -932,6 +980,9 @@ struct BedsideView: View {
             try? await Task.sleep(nanoseconds: 1_000_000)
             if UITestSupport.injectVTVFCandidates {
                 injectSyntheticVTVFCandidates()
+            }
+            if UITestSupport.injectArrhythmiaCandidates {
+                injectSyntheticArrhythmiaCandidates()
             }
             if let qtc = UITestSupport.injectQTcLaneValue {
                 injectSyntheticQTcLane(qtcMs: qtc)
