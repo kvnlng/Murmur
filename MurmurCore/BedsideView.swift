@@ -105,6 +105,13 @@ struct BedsideView: View {
     /// user-set only, never built-in clinical cutoffs. Persists to
     /// `<bundle>/interval_guides.json`.
     @State private var trendGuideStore: IntervalTrendGuideStore
+    /// Which trend lanes are switched on (X74). Every lane the record can
+    /// produce starts visible — the menu is for turning things OFF, and a
+    /// stack that opened empty would make the analyst discover the menu
+    /// before seeing anything.
+    @State private var visibleTrendLanes: Set<String> = [
+        BedsideTrendStack.hrLaneID, "rmssd", "interval-trend", BedsideTrendStack.qualityLaneID,
+    ]
     /// What the trace is actually drawing — zoom tier, points-per-beat, and
     /// the resolved LOD — published outward by the canvas so the info bar can
     /// report it (X69).
@@ -172,14 +179,8 @@ struct BedsideView: View {
         LowRatePartition(channels: recording.channels.filter(\.isTrendChannel))
     }
 
-    /// The heart-rate trend, as the single-element list `ChannelTrendStrip`
-    /// takes. Empty when the record carries no HR channel, which is what
-    /// hides the lane — HR is never derived from the beat series here.
-    private var heartRateTrendChannels: [Channel] {
-        lowRatePartition.heartRate.map { [$0] } ?? []
-    }
-
-    /// Continuous quality / artifact-ratio channels rendered in `QualityStrip`.
+    /// Continuous quality / artifact-ratio channels, rendered as the trend
+    /// stack's quality lane (X74).
     private var qualityChannels: [Channel] { lowRatePartition.quality }
 
     /// Union of the producer's findings and anything the analyst has
@@ -1385,10 +1386,95 @@ struct BedsideView: View {
     @ViewBuilder
     private var contextLanes: some View {
         VariabilityMetricsStrip()
-        variabilityLaneStrip
-        intervalTrendLaneStrip
-        trendStrip
-        qualityStrip
+        trendStackHeader
+        BedsideTrendStack(
+            heartRateChannel: lowRatePartition.heartRate,
+            qualityChannels: qualityChannels,
+            directory: recordingDirectory,
+            recordingRange: recordingTimeRange,
+            viewportRange: viewportTimeRange,
+            visibleLanes: visibleTrendLanes,
+            onSeek: { seconds in
+                viewport.center(onSample: Int64(seconds * max(1, viewport.sampleRate)))
+            },
+            rmssdLane: rmssdLane,
+            intervalLane: intervalLane
+        )
+    }
+
+    /// The RMSSD lane as a stack row. The lane view keeps its own control
+    /// chips and live-value caption — those belong to the lane, not to the
+    /// container — so it supplies the whole plot cell rather than a bare plot.
+    private var rmssdLane: TrendStackLane? {
+        guard !laneContext.samples.isEmpty else { return nil }
+        return TrendStackLane(
+            id: "rmssd",
+            title: laneContext.metricLabel,
+            // The caption is the lane's own provenance (window length, step);
+            // absent, name the unit rather than leaving the row unlabelled.
+            subtitle: laneContext.windowCaption ?? laneContext.unit,
+            value: laneContext.samples.last.map { String(format: "%.1f", $0.value) },
+            height: 54
+        ) {
+            variabilityLaneStrip
+        }
+    }
+
+    private var intervalLane: TrendStackLane? {
+        guard !markingsContext.beats.isEmpty else { return nil }
+        return TrendStackLane(
+            id: "interval-trend",
+            title: "Interval trend",
+            subtitle: "\(trendLaneContext.metric.displayName) · \(Int(trendLaneContext.binSeconds / 60)) min bins",
+            value: nil,
+            height: 66
+        ) {
+            intervalTrendLaneStrip
+        }
+    }
+
+    /// The `Lanes` menu (X74). Sits above the stack rather than inside it,
+    /// because it governs which rows exist and a control that can remove the
+    /// container it lives in is a control that can hide itself.
+    @ViewBuilder
+    private var trendStackHeader: some View {
+        let available = BedsideTrendStack.availableLanes(
+            heartRate: lowRatePartition.heartRate,
+            quality: qualityChannels,
+            rmssd: !laneContext.samples.isEmpty,
+            interval: !markingsContext.beats.isEmpty
+        )
+        if !available.isEmpty {
+            HStack(spacing: 8) {
+                Text("Trend stack")
+                    .font(.subheadline.weight(.semibold))
+                Text("one axis · click the HR or quality lane to move the trace")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                Menu {
+                    ForEach(available, id: \.id) { lane in
+                        Button {
+                            if visibleTrendLanes.contains(lane.id) {
+                                visibleTrendLanes.remove(lane.id)
+                            } else {
+                                visibleTrendLanes.insert(lane.id)
+                            }
+                        } label: {
+                            Label(lane.label,
+                                  systemImage: visibleTrendLanes.contains(lane.id) ? "checkmark" : "")
+                        }
+                        .accessibilityIdentifier("trend-lane-toggle-\(lane.id)")
+                    }
+                } label: {
+                    Text("Lanes")
+                        .font(.caption)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .accessibilityIdentifier("trend-lanes-menu")
+            }
+        }
     }
 
     /// Persistent-stage focus-mode layout — the ECG trace + docked
@@ -1769,7 +1855,11 @@ struct BedsideView: View {
         if !laneContext.samples.isEmpty {
             VariabilityLane(
                 samples: laneContext.samples,
-                timeRangeSeconds: viewportTimeRange,
+                // X74: the shared RECORD axis, not the viewport. This lane was
+                // viewport-scoped, so it and the interval trend below it were
+                // two different x-axes stacked vertically — alignment that
+                // looked real and was not.
+                timeRangeSeconds: recordingTimeRange,
                 metricLabel: laneContext.metricLabel,
                 unit: laneContext.unit,
                 windowCaption: laneContext.windowCaption,
@@ -1988,33 +2078,9 @@ struct BedsideView: View {
         return start...max(start + 0.001, end)
     }
 
-    /// Sparkline panel for the heart-rate trend. Hidden when the record
-    /// carries no HR channel (the legacy single-rate case stays unchanged).
-    @ViewBuilder
-    private var trendStrip: some View {
-        if !heartRateTrendChannels.isEmpty {
-            ChannelTrendStrip(
-                channels: heartRateTrendChannels,
-                recordingDirectory: recordingDirectory,
-                viewport: viewport
-            )
-        }
-    }
-
-    /// Heat-band strip for `ecg_artifact_ratio` and other 0-to-1 quality
-    /// metrics. Hidden when the recording carries none.
-    @ViewBuilder
-    private var qualityStrip: some View {
-        if !qualityChannels.isEmpty, let primary = ecgChannels.first {
-            QualityStrip(
-                channels: qualityChannels,
-                recordingDirectory: recordingDirectory,
-                totalSamplesPrimary: primary.sampleCount,
-                primarySampleRate: primary.sampleRate,
-                viewport: viewport
-            )
-        }
-    }
+    // trendStrip / qualityStrip retired with X74: both viewport-scoped
+    // strips were replaced by the shared-axis whole-record lanes in
+    // `BedsideTrendStack` (see `contextLanes`).
 
     // findingsOverview retired 2026-07-05: category-filter + tally
     // functionality is now consolidated in the review-queue rail's

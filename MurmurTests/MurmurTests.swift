@@ -5778,6 +5778,91 @@ struct FiducialLayerToggleTests {
     }
 }
 
+/// X74. Column reduction for the shared-axis trend stack.
+///
+/// The lanes it feeds were viewport-scoped before X74 and drew one element per
+/// sample; on the whole-record axis that is thousands of elements across a few
+/// hundred points. The reduction is where the behaviour that matters lives.
+@Suite("Trend stack binning (X74)")
+struct LaneBinningTests {
+
+    @Test("Samples reduce to the requested number of columns")
+    func columnCount() {
+        let samples = (0..<1000).map { Float($0) }
+        let columns = LaneBinning.bin(samples: samples, sampleRate: 1, range: 0...999, targetColumns: 100)
+        #expect(columns.count == 100)
+    }
+
+    @Test("A column reports the min, max and mean it covers")
+    func columnAggregates() {
+        // Two columns over four samples: [10, 30] and [50, 70].
+        let columns = LaneBinning.bin(samples: [10, 30, 50, 70], sampleRate: 1, range: 0...3, targetColumns: 2)
+        #expect(columns.count == 2)
+        #expect(columns[0]?.min == 10)
+        #expect(columns[0]?.max == 30)
+        #expect(columns[0]?.mean == 20)
+        #expect(columns[1]?.min == 50)
+        #expect(columns[1]?.max == 70)
+    }
+
+    @Test("An empty column is an absence, not a zero")
+    func gapsAreNil() {
+        // A gap drawn as a value would put a heart rate of 0 on the lane,
+        // which reads as asystole rather than as "the sensor was off".
+        let columns = LaneBinning.bin(samples: [60, .nan, .nan, 62], sampleRate: 1, range: 0...3, targetColumns: 4)
+        #expect(columns[0] != nil)
+        #expect(columns[1] == nil)
+        #expect(columns[2] == nil)
+        #expect(columns[3] != nil)
+    }
+
+    @Test("Samples outside the range are excluded")
+    func rangeIsHonoured() {
+        let samples: [Float] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        let columns = LaneBinning.bin(samples: samples, sampleRate: 1, range: 4...6, targetColumns: 1)
+        // Seconds 4, 5 and 6 → samples 5, 6, 7.
+        #expect(columns[0]?.min == 5)
+        #expect(columns[0]?.max == 7)
+    }
+
+    @Test("Column count is capped so a huge canvas cannot allocate unbounded")
+    func columnCountIsCapped() {
+        let samples = (0..<100).map { Float($0) }
+        let columns = LaneBinning.bin(samples: samples, sampleRate: 1, range: 0...99, targetColumns: 1_000_000)
+        #expect(columns.count <= 2000)
+    }
+
+    @Test("Degenerate inputs produce no columns rather than trapping")
+    func degenerateInputs() {
+        #expect(LaneBinning.bin(samples: [], sampleRate: 1, range: 0...10, targetColumns: 10).isEmpty)
+        #expect(LaneBinning.bin(samples: [1, 2], sampleRate: 0, range: 0...10, targetColumns: 10).isEmpty)
+        #expect(LaneBinning.bin(samples: [1, 2], sampleRate: 1, range: 5...5, targetColumns: 10).isEmpty)
+    }
+
+    @Test("Low-quality stretches are contiguous spans above the threshold")
+    func lowQualitySpansAreContiguous() {
+        // 0.02 baseline with two bad stretches.
+        let samples: [Float] = [0.02, 0.02, 0.6, 0.7, 0.02, 0.02, 0.85, 0.02]
+        let spans = LaneBinning.lowQualitySpans(samples: samples, sampleRate: 1, threshold: 0.1)
+        #expect(spans.count == 2)
+        #expect(spans[0] == 2.0...4.0)
+        #expect(spans[1] == 6.0...7.0)
+    }
+
+    @Test("A stretch running to the end of the record is closed at the end")
+    func trailingSpanIsClosed() {
+        let samples: [Float] = [0.02, 0.6, 0.7]
+        let spans = LaneBinning.lowQualitySpans(samples: samples, sampleRate: 1, threshold: 0.1)
+        #expect(spans.count == 1)
+        #expect(spans[0] == 1.0...3.0)
+    }
+
+    @Test("A clean record has no low-quality stretches")
+    func cleanRecordHasNoSpans() {
+        #expect(LaneBinning.lowQualitySpans(samples: [0.01, 0.02, 0.03], sampleRate: 1, threshold: 0.1).isEmpty)
+    }
+}
+
 /// X73. Which stretch of the recording the variability metrics describe.
 ///
 /// The scope→range resolution is the whole of MurmurCore's share of this

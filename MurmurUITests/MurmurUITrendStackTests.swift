@@ -1,0 +1,107 @@
+//
+//  MurmurUITrendStackTests.swift
+//  MurmurUITests
+//
+//  X74 — the shared-axis trend stack.
+//
+//  What XCUI can reach: that the lanes exist, that the caption names its
+//  populations, and that the Lanes menu removes a row. What it cannot reach is
+//  the thing the ticket is actually about — whether every lane maps the same
+//  instant to the same x — because a Swift Charts lane and a `Canvas` expose
+//  nothing about what they painted. That was verified against pixels on the
+//  synthetic fixture (HR + quality on one axis) and on NSRDB 16265 at 25.5 h.
+//
+//  So the assertion that earns its place here is the ABSENCE test: the stack
+//  renders nothing at all if its loading task never runs, and that failure
+//  looks exactly like "this record has no lanes".
+//
+
+import XCTest
+
+final class MurmurUITrendStackTests: XCTestCase {
+
+    override func setUpWithError() throws {
+        continueAfterFailure = false
+    }
+
+    @MainActor
+    private func spokenName(_ element: XCUIElement) -> String {
+        if !element.label.isEmpty { return element.label }
+        return (element.value as? String) ?? ""
+    }
+
+    /// The fixture carries `HR_bpm` and `ecg_artifact_ratio`, so both
+    /// whole-record lanes must appear. This is the regression guard for the
+    /// deadlock found during X74's pixel pass: the load task hung off a view
+    /// that only existed once loading had succeeded, so no samples ever
+    /// loaded, so the stack rendered empty — and every existence assertion
+    /// simply found nothing, which reads as "no lanes in this record".
+    @MainActor
+    func testStackRendersItsWholeRecordLanes() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-sample"]
+        app.launch()
+
+        let stack = app.descendants(matching: .any)
+            .matching(identifier: "trend-stack").firstMatch
+        XCTAssertTrue(stack.waitForExistence(timeout: 20),
+                      "A record with trend and quality channels should carry a trend stack")
+
+        for lane in ["hr", "quality"] {
+            let row = app.descendants(matching: .any)
+                .matching(identifier: "trend-lane-\(lane)").firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 5),
+                          "The \(lane) lane should render — an empty stack is how the load deadlock presents")
+        }
+    }
+
+    /// Provenance travels with the numbers. The lanes come from different
+    /// channels at different rates, and a stack that looks like one chart
+    /// invites the assumption that it is one.
+    @MainActor
+    func testCaptionNamesEachLanesSource() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-sample"]
+        app.launch()
+
+        let caption = app.descendants(matching: .any)
+            .matching(identifier: "trend-stack-caption").firstMatch
+        XCTAssertTrue(caption.waitForExistence(timeout: 20),
+                      "The stack should carry a provenance caption")
+
+        let spoken = spokenName(caption)
+        XCTAssertTrue(spoken.contains("HR_bpm"),
+                      "Caption should name the HR channel, got '\(spoken)'")
+        XCTAssertTrue(spoken.contains("ecg_artifact_ratio"),
+                      "Caption should name the quality channel, got '\(spoken)'")
+        XCTAssertTrue(spoken.contains("one axis"),
+                      "Caption should state the shared span, got '\(spoken)'")
+    }
+
+    /// The Lanes menu removes a row. Asserted by disappearance rather than by
+    /// the menu's checkmark: a menu that toggles its own state while the stack
+    /// ignores it would pass any check on the menu alone.
+    @MainActor
+    func testLanesMenuRemovesALane() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-sample"]
+        app.launch()
+
+        let hrLane = app.descendants(matching: .any)
+            .matching(identifier: "trend-lane-hr").firstMatch
+        XCTAssertTrue(hrLane.waitForExistence(timeout: 20))
+
+        let menu = app.descendants(matching: .any)
+            .matching(identifier: "trend-lanes-menu").firstMatch
+        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        menu.click()
+
+        let toggle = app.menuItems["trend-lane-toggle-hr"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5),
+                      "The Lanes menu should offer the HR lane")
+        toggle.click()
+
+        XCTAssertTrue(MurmurUITests.waitForElementToDisappear(hrLane, timeout: 5),
+                      "Switching a lane off should remove its row from the stack")
+    }
+}
