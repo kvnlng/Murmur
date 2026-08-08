@@ -110,8 +110,12 @@ struct BedsideView: View {
     /// stack that opened empty would make the analyst discover the menu
     /// before seeing anything.
     @State private var visibleTrendLanes: Set<String> = [
-        BedsideTrendStack.hrLaneID, "rmssd", "interval-trend", BedsideTrendStack.qualityLaneID,
+        BedsideTrendStack.hrLaneID, "rmssd", "interval-trend",
+        BedsideTrendStack.lfhfLaneID, BedsideTrendStack.qualityLaneID,
     ]
+    /// Rolling LF/HF series (X76) — computed by the App-target orchestrator
+    /// behind the entitlement gate, rendered here. Empty means no lane.
+    @State private var lfhfContext = RollingLFHFContext.shared
     /// What the trace is actually drawing — zoom tier, points-per-beat, and
     /// the resolved LOD — published outward by the canvas so the info bar can
     /// report it (X69).
@@ -969,6 +973,26 @@ struct BedsideView: View {
                 handleAttachFindings(.success(url))
                 UITestSupport.attachFindingsURL = nil
             }
+            if UITestSupport.injectLFHFLane {
+                // X76 wire-up: a deterministic series whose every window reads
+                // exactly 1.50, so the UI test can assert the RENDERED value.
+                // Windows tile the whole record at the shipping 5-min/1-min
+                // geometry scaled down to the 10 s fixture (2 s window, 1 s
+                // step) — the lane's geometry doesn't care, only the values do.
+                let total = Double(viewport.totalSamples) / max(1, viewport.sampleRate)
+                let injected = stride(from: 0.0, through: max(0, total - 2), by: 1.0).map {
+                    VariabilityLaneSample(
+                        windowStartSeconds: $0,
+                        windowEndSeconds: $0 + 2,
+                        value: 1.50,
+                        isEligible: true
+                    )
+                }
+                RollingLFHFContext.shared.set(
+                    samples: injected,
+                    caption: "Lomb–Scargle · 5-min window · 1 min step"
+                )
+            }
             if let count = UITestSupport.seedNotesCount {
                 // X72: seed N anchored notes, evenly spaced, each one second
                 // long — deterministic positions so the record band's note
@@ -1459,8 +1483,42 @@ struct BedsideView: View {
                 viewport.center(onSample: Int64(seconds * max(1, viewport.sampleRate)))
             },
             rmssdLane: rmssdLane,
-            intervalLane: intervalLane
+            intervalLane: intervalLane,
+            lfhfLane: lfhfLane
         )
+    }
+
+    /// The rolling LF/HF lane (X76). Nil — no row at all — when the series is
+    /// empty: not entitled, no recording, or a record shorter than one window.
+    /// The free viewer never sees the surface of a measurement it doesn't own.
+    private var lfhfLane: TrendStackLane? {
+        guard !lfhfContext.samples.isEmpty else { return nil }
+        return TrendStackLane(
+            id: BedsideTrendStack.lfhfLaneID,
+            title: "LF / HF",
+            // Provenance travels with the number — estimator, window, step.
+            subtitle: lfhfContext.caption ?? "rolling 5 min",
+            value: lfhfValueAtViewportStart,
+            height: 46,
+            seekable: true
+        ) {
+            LFHFLanePlot(
+                samples: lfhfContext.samples,
+                recordingRange: recordingTimeRange,
+                stepSeconds: 60
+            )
+        }
+    }
+
+    /// The reading at the viewport's start — same "what is it HERE" contract
+    /// as the HR and quality value columns.
+    private var lfhfValueAtViewportStart: String? {
+        guard viewport.sampleRate > 0 else { return nil }
+        let t = Double(viewport.startSample) / viewport.sampleRate
+        let sample = lfhfContext.samples.first {
+            t >= $0.windowStartSeconds && t <= $0.windowEndSeconds
+        }
+        return sample.map { String(format: "%.2f", $0.value) }
     }
 
     /// The RMSSD lane as a stack row. The lane view keeps its own control
@@ -1475,7 +1533,10 @@ struct BedsideView: View {
             // absent, name the unit rather than leaving the row unlabelled.
             subtitle: laneContext.windowCaption ?? laneContext.unit,
             value: laneContext.samples.last.map { String(format: "%.1f", $0.value) },
-            height: 54
+            // Natural height: the cell carries the lane's own header, chips
+            // and captions — a fixed row overflowed through the lanes beneath
+            // the moment an entitled record populated it (X76 finding).
+            height: nil
         ) {
             variabilityLaneStrip
         }
@@ -1488,7 +1549,7 @@ struct BedsideView: View {
             title: "Interval trend",
             subtitle: "\(trendLaneContext.metric.displayName) · \(Int(trendLaneContext.binSeconds / 60)) min bins",
             value: nil,
-            height: 66
+            height: nil   // natural — the cell carries chips, chart, captions
         ) {
             intervalTrendLaneStrip
         }
@@ -1503,7 +1564,8 @@ struct BedsideView: View {
             heartRate: lowRatePartition.heartRate,
             quality: qualityChannels,
             rmssd: !laneContext.samples.isEmpty,
-            interval: !markingsContext.beats.isEmpty
+            interval: !markingsContext.beats.isEmpty,
+            lfhf: !lfhfContext.samples.isEmpty
         )
         if !available.isEmpty {
             HStack(spacing: 8) {

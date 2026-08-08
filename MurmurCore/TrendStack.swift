@@ -42,7 +42,13 @@ struct TrendStackLane: Identifiable {
     /// layout bug rather than as "no reading here".
     let value: String?
     /// Row height. Lanes differ: a heat band needs far less than an envelope.
-    let height: CGFloat
+    /// `nil` sizes the row to its content — for the caller-supplied lanes
+    /// (RMSSD, interval trend) whose cells carry their own headers, chips and
+    /// captions. X74 gave those fixed 54/66 pt rows, which LOOKED right on
+    /// the unentitled fixture where both lanes are absent — on an entitled
+    /// record the cells are several times taller and overflowed straight
+    /// through the lanes beneath (found in X76's real-record pass).
+    let height: CGFloat?
     /// Whether a click on this lane's plot should seek the viewport. Only
     /// lanes whose plots are inert opt in — the RMSSD and interval lanes
     /// carry their own hover, chips, and bin-click drilldown, and a stack
@@ -57,7 +63,7 @@ struct TrendStackLane: Identifiable {
         title: String,
         subtitle: String,
         value: String? = nil,
-        height: CGFloat = 54,
+        height: CGFloat? = nil,
         seekable: Bool = false,
         @ViewBuilder plot: () -> some View
     ) {
@@ -138,8 +144,21 @@ struct TrendStack: View {
         .accessibilityIdentifier("trend-stack")
     }
 
+    @ViewBuilder
     private func laneRow(_ lane: TrendStackLane) -> some View {
-        HStack(spacing: 0) {
+        // Fixed-height lanes pin the row; natural lanes size to their cell,
+        // whose content (headers, chips, captions) defines the height.
+        if let height = lane.height {
+            laneRowContent(lane)
+                .frame(height: height)
+        } else {
+            laneRowContent(lane)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func laneRowContent(_ lane: TrendStackLane) -> some View {
+        HStack(alignment: .top, spacing: 0) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(lane.title)
                     .font(.caption.weight(.semibold))
@@ -154,7 +173,7 @@ struct TrendStack: View {
             .padding(.leading, 10)
 
             lane.plot
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(maxWidth: .infinity, maxHeight: lane.height == nil ? nil : .infinity)
                 .overlay {
                     // The seek surface lives on the lane's plot cell, not on
                     // the cross-lane overlay: the cell's own geometry IS the
@@ -183,7 +202,6 @@ struct TrendStack: View {
                 .frame(width: Self.valueWidth, alignment: .trailing)
                 .padding(.trailing, 10)
         }
-        .frame(height: lane.height)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("trend-lane-\(lane.id)")
     }

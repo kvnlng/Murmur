@@ -7622,7 +7622,164 @@ struct BeatDelineatorPVCTests {
     }
 }
 
+// MARK: - Rolling LF/HF (X76)
+
+// Two layers, tested where each lives. The SLICER (`RollingWindows`) is
+// MurmurCore and needs no metrics import. The per-window SPECTRUM is
+// `FrequencyDomainHRVAnalyzer` (public package API, fair game per the note
+// at the top of this section); the composition test drives the analyzer over
+// placed windows exactly as `RollingLFHFOrchestrator.computeSeries` does —
+// the orchestrator itself is App-target code MurmurTests cannot link.
+
+/// RR tachogram whose intervals oscillate at `modulationHz` — spectral power
+/// concentrates there, so a window over this series has a KNOWN dominant
+/// band. Mean 800 ms, ±50 ms swing.
+private func modulatedRRSeries(
+    seconds: Double,
+    modulationHz: Double
+) -> (intervalsMs: [Double], endTimesSeconds: [Double]) {
+    var intervals: [Double] = []
+    var times: [Double] = []
+    var t = 0.0
+    while t < seconds {
+        let rr = 800.0 + 50.0 * sin(2 * .pi * modulationHz * t)
+        t += rr / 1000.0
+        intervals.append(rr)
+        times.append(t)
+    }
+    return (intervals, times)
+}
+
+@Suite("Rolling LF/HF per-window spectrum (X76)")
+struct RollingLFHFSpectrumTests {
+
+    private func slice(
+        _ series: (intervalsMs: [Double], endTimesSeconds: [Double]),
+        _ window: RollingWindows.Window
+    ) -> RRSeries {
+        RRSeries(
+            intervalsMs: Array(series.intervalsMs[window.indices]),
+            endTimesSeconds: Array(series.endTimesSeconds[window.indices])
+        )
+    }
+
+    @Test("LF-modulated windows read high, HF-modulated windows read low")
+    func windowsUseOnlyTheirOwnBeats() {
+        // First half oscillates at 0.10 Hz (mid-LF), second half at 0.25 Hz
+        // (mid-HF). A slicing bug that leaked beats across the boundary would
+        // blur the two populations together.
+        let lfHalf = modulatedRRSeries(seconds: 600, modulationHz: 0.10)
+        let hfTail = modulatedRRSeries(seconds: 600, modulationHz: 0.25)
+        let offset = lfHalf.endTimesSeconds.last ?? 0
+        let series = (
+            intervalsMs: lfHalf.intervalsMs + hfTail.intervalsMs,
+            endTimesSeconds: lfHalf.endTimesSeconds + hfTail.endTimesSeconds.map { $0 + offset }
+        )
+        let windows = RollingWindows.place(
+            timesSeconds: series.endTimesSeconds, windowSeconds: 300, stepSeconds: 60
+        )
+        var lfRatios: [Double] = []
+        var hfRatios: [Double] = []
+        for window in windows {
+            guard let ratio = FrequencyDomainHRVAnalyzer
+                .analyze(rr: slice(series, window))?.lfhfRatio else { continue }
+            // Straddlers are legitimately mixed; excluded from the assertion.
+            if window.endSeconds <= offset { lfRatios.append(ratio) }
+            if window.startSeconds >= offset { hfRatios.append(ratio) }
+        }
+        #expect(!lfRatios.isEmpty && !hfRatios.isEmpty)
+        for r in lfRatios {
+            #expect(r > 1, "An LF-modulated window should read LF-dominant, got \(r)")
+        }
+        for r in hfRatios {
+            #expect(r < 1, "An HF-modulated window should read HF-dominant, got \(r)")
+        }
+    }
+
+    @Test("Constant RR — zero variance — yields no ratio, not zero")
+    func constantRRDeclines() {
+        var intervals: [Double] = []
+        var times: [Double] = []
+        var t = 0.0
+        while t < 600 { t += 0.8; intervals.append(800); times.append(t) }
+        let windows = RollingWindows.place(
+            timesSeconds: times, windowSeconds: 300, stepSeconds: 60
+        )
+        #expect(!windows.isEmpty)
+        for window in windows {
+            let fd = FrequencyDomainHRVAnalyzer.analyze(rr: RRSeries(
+                intervalsMs: Array(intervals[window.indices]),
+                endTimesSeconds: Array(times[window.indices])
+            ))
+            #expect(fd == nil,
+                    "The analyzer declines zero-variance windows; the lane must show absence, not zero")
+        }
+    }
+}
+
 #endif // canImport(MurmurMetrics)
+
+// MARK: - Rolling-window slicer (X76)
+
+@Suite("Rolling window placement (X76)")
+struct RollingWindowsTests {
+
+    /// Uniform 0.8 s ticks over `seconds`.
+    private func ticks(_ seconds: Double) -> [Double] {
+        var times: [Double] = []
+        var t = 0.0
+        while t < seconds { t += 0.8; times.append(t) }
+        return times
+    }
+
+    @Test("Windows tile the series at the step, spanning the window length")
+    func placement() {
+        let times = ticks(1200)
+        let windows = RollingWindows.place(timesSeconds: times, windowSeconds: 300, stepSeconds: 60)
+        // (1200 - 300) / 60 + 1 = 16 positions; the last tick may fall just
+        // short of 1200 s, so allow one fewer.
+        #expect(windows.count >= 15 && windows.count <= 16,
+                "Expected ~16 rolling windows, got \(windows.count)")
+        for (i, window) in windows.enumerated() {
+            #expect(abs((window.endSeconds - window.startSeconds) - 300) < 1e-9)
+            if i > 0 {
+                #expect(abs((window.startSeconds - windows[i - 1].startSeconds) - 60) < 1e-9,
+                        "Window starts should advance by exactly the step")
+            }
+        }
+    }
+
+    @Test("Every window's indices cover exactly the elements inside its span")
+    func indicesMatchSpan() {
+        let times = ticks(900)
+        let windows = RollingWindows.place(timesSeconds: times, windowSeconds: 300, stepSeconds: 60)
+        for window in windows {
+            for i in window.indices {
+                #expect(times[i] >= window.startSeconds && times[i] <= window.endSeconds)
+            }
+            if window.indices.lowerBound > 0 {
+                #expect(times[window.indices.lowerBound - 1] < window.startSeconds,
+                        "The element before the window must lie before its span")
+            }
+            if window.indices.upperBound < times.count {
+                #expect(times[window.indices.upperBound] > window.endSeconds,
+                        "The element after the window must lie after its span")
+            }
+        }
+    }
+
+    @Test("A series shorter than one window places nothing")
+    func shortSeries() {
+        #expect(RollingWindows.place(timesSeconds: ticks(200), windowSeconds: 300, stepSeconds: 60).isEmpty)
+    }
+
+    @Test("Degenerate inputs place nothing rather than trapping")
+    func degenerateInputs() {
+        #expect(RollingWindows.place(timesSeconds: [], windowSeconds: 300, stepSeconds: 60).isEmpty)
+        #expect(RollingWindows.place(timesSeconds: ticks(600), windowSeconds: 0, stepSeconds: 60).isEmpty)
+        #expect(RollingWindows.place(timesSeconds: ticks(600), windowSeconds: 300, stepSeconds: 0).isEmpty)
+    }
+}
 
 // MARK: - Anchored notes (X72)
 

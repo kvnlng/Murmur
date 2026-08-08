@@ -72,6 +72,10 @@ struct MurmurApp: App {
                 // variability lane. Formerly the content of a detached
                 // "ECG Metrics" window; see VariabilityMetricsStrip.
                 .background(VariabilityMetricsOrchestrator())
+                // Rolling LF/HF series for the trend stack's LF/HF lane
+                // (X76), published to RollingLFHFContext. Off-main compute —
+                // thousands of Lomb–Scargle windows on a long record.
+                .background(RollingLFHFOrchestrator())
         }
         .defaultSize(width: 1320, height: 880)
         .commands {

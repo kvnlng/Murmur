@@ -30,6 +30,24 @@ final class MurmurUITrendStackTests: XCTestCase {
         return (element.value as? String) ?? ""
     }
 
+    /// The Context drawer's expansion is `@AppStorage`, so whatever the last
+    /// run (or a developer's manual session) left behind is what this test
+    /// inherits — and an expanded drawer pushes the Lanes menu below the
+    /// fold, where XCUI reports it "not hittable". Tests that CLICK stack
+    /// chrome collapse the drawer first; existence-only tests don't care.
+    @MainActor
+    private func collapseContextDrawer(_ app: XCUIApplication) {
+        let panel = app.descendants(matching: .any)
+            .matching(identifier: "context-panel").firstMatch
+        guard panel.exists else { return }
+        let contextBar = app.descendants(matching: .any)
+            .matching(identifier: "context-bar").firstMatch
+        XCTAssertTrue(contextBar.waitForExistence(timeout: 5))
+        contextBar.click()
+        XCTAssertTrue(MurmurUITests.waitForElementToDisappear(panel, timeout: 3),
+                      "Collapsing the Context bar should unmount the drawer")
+    }
+
     /// The fixture carries `HR_bpm` and `ecg_artifact_ratio`, so both
     /// whole-record lanes must appear. This is the regression guard for the
     /// deadlock found during X74's pixel pass: the load task hung off a view
@@ -90,6 +108,7 @@ final class MurmurUITrendStackTests: XCTestCase {
         let hrLane = app.descendants(matching: .any)
             .matching(identifier: "trend-lane-hr").firstMatch
         XCTAssertTrue(hrLane.waitForExistence(timeout: 20))
+        collapseContextDrawer(app)
 
         let menu = app.descendants(matching: .any)
             .matching(identifier: "trend-lanes-menu").firstMatch
@@ -103,5 +122,57 @@ final class MurmurUITrendStackTests: XCTestCase {
 
         XCTAssertTrue(MurmurUITests.waitForElementToDisappear(hrLane, timeout: 5),
                       "Switching a lane off should remove its row from the stack")
+    }
+
+    /// X76 wire-up: the injected series carries the exact value 1.50 in every
+    /// window, so this asserts the RENDERED value column equals it — catching
+    /// a binding slip between `RollingLFHFContext` and the screen that a
+    /// green unit suite would miss (the X52 §5 pattern).
+    @MainActor
+    func testLFHFLaneRendersInjectedSeries() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-sample", "--ui-test-inject-lfhf-lane"]
+        app.launch()
+
+        let lane = app.descendants(matching: .any)
+            .matching(identifier: "trend-lane-lfhf").firstMatch
+        XCTAssertTrue(lane.waitForExistence(timeout: 20),
+                      "The injected LF/HF series should render its lane")
+
+        let value = lane.descendants(matching: .staticText)
+            .matching(NSPredicate(format: "label == '1.50' OR value == '1.50'"))
+            .firstMatch
+        XCTAssertTrue(value.waitForExistence(timeout: 5),
+                      "The lane's value column should render the injected 1.50")
+
+        // The Lanes menu offers the lane once the series exists.
+        collapseContextDrawer(app)
+        let menu = app.descendants(matching: .any)
+            .matching(identifier: "trend-lanes-menu").firstMatch
+        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        menu.click()
+        XCTAssertTrue(app.menuItems["trend-lane-toggle-lfhf"].waitForExistence(timeout: 5),
+                      "The Lanes menu should offer LF / HF when the series exists")
+        app.typeKey(.escape, modifierFlags: [])
+    }
+
+    /// The paid gate, from the free side: with no entitlements the series is
+    /// never computed, so the lane must be absent. Anchored on the quality
+    /// lane so this can't pass simply because the stack failed to load.
+    @MainActor
+    func testFreeViewerNeverShowsLFHFLane() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-sample", "--ui-test-no-entitlements"]
+        app.launch()
+
+        let qualityLane = app.descendants(matching: .any)
+            .matching(identifier: "trend-lane-quality").firstMatch
+        XCTAssertTrue(qualityLane.waitForExistence(timeout: 20),
+                      "The quality lane should render — without it this test proves nothing")
+
+        let lfhfLane = app.descendants(matching: .any)
+            .matching(identifier: "trend-lane-lfhf").firstMatch
+        XCTAssertFalse(lfhfLane.exists,
+                       "The free viewer must never render the LF/HF measurement lane")
     }
 }
