@@ -95,9 +95,9 @@ enum SyntheticRecording {
     /// while ECG signals get `spf = 250` for their 250-Hz effective rate.
     static func makeMultiFrequencyRecord(
         into directory: URL,
-        durationSeconds: Double = 10.0
+        durationSeconds: Double = 10.0,
+        recordName: String = "synth"
     ) throws -> URL {
-        let recordName = "synth"
         let ecgLabels: [String] = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2"]
         let ecgRate = 250.0
         let baseFrameRate = 1.0

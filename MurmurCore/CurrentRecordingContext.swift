@@ -79,10 +79,25 @@ public final class CurrentRecordingContext {
     /// when it applies a restore; never mutated by note editing itself.
     public var sessionSavedNotes: [AnchoredNote]?
 
+    /// X77 — the drawer's dirty check, hoisted so the quit guard and the
+    /// record-switch guard ask the same question the footer answers. `nil`
+    /// baseline reads as empty: a session never saved has nothing durable,
+    /// so any note at all is unsaved.
+    public var hasUnsavedAnchoredNotes: Bool {
+        (liveSessionState.anchoredNotes ?? []) != (sessionSavedNotes ?? [])
+    }
+
     public init() {}
 
     /// Publish that `recording` is now current, loaded from `directory`.
     public func set(recording: Recording, directory: URL) {
+        // X77: a different record means a different notes baseline. Reset to
+        // "never saved" so the previous record's baseline can't make the new
+        // record's drawer read saved (or unsaved) by coincidence; a `.mur`
+        // activation re-seeds it when the bedside view applies the restore.
+        if self.recording?.id != recording.id {
+            sessionSavedNotes = nil
+        }
         self.recording = recording
         self.directory = directory
     }

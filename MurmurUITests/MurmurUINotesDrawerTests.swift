@@ -177,6 +177,134 @@ final class MurmurUINotesDrawerTests: XCTestCase {
         )
     }
 
+    /// X77 (#113): quitting with an unsaved anchored note warns instead of
+    /// silently discarding, Cancel keeps the app alive, and Discard and Quit
+    /// actually terminates.
+    @MainActor
+    func testQuitWithUnsavedNotesWarnsAndHonorsBothChoices() throws {
+        let app = launchWithDrawerOpen()
+
+        let editToggle = app.descendants(matching: .any)
+            .matching(identifier: "edit-mode-toggle").firstMatch
+        XCTAssertTrue(editToggle.waitForExistence(timeout: 3))
+        editToggle.click()
+        let newNote = app.buttons.matching(identifier: "notes-drawer-new-note").firstMatch
+        XCTAssertTrue(newNote.waitForExistence(timeout: 3))
+        newNote.click()
+
+        app.typeKey("q", modifierFlags: .command)
+        // NSAlert buttons; scoped to the whole app because the alert is
+        // app-modal, not a window sheet.
+        let cancel = app.buttons["Cancel"].firstMatch
+        XCTAssertTrue(cancel.waitForExistence(timeout: 5),
+                      "⌘Q with an unsaved note should raise the warning alert")
+        cancel.click()
+
+        let contextBar = app.descendants(matching: .any)
+            .matching(identifier: "context-bar").firstMatch
+        XCTAssertTrue(contextBar.waitForExistence(timeout: 3),
+                      "Cancel should abort the quit — the app must still be running")
+
+        app.typeKey("q", modifierFlags: .command)
+        let discard = app.buttons["Discard and Quit"].firstMatch
+        XCTAssertTrue(discard.waitForExistence(timeout: 5))
+        discard.click()
+        XCTAssertTrue(app.wait(for: .notRunning, timeout: 10),
+                      "Discard and Quit should terminate the app")
+    }
+
+    /// X77 (#113), the record-switch half: clicking another sidebar record
+    /// with an unsaved note warns; Cancel stays on the record with the note
+    /// intact, Discard and Switch lands on the other record without it.
+    @MainActor
+    func testSwitchingRecordsWithUnsavedNotesWarns() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-open-folder=2"]
+        app.launch()
+
+        // The first record auto-selects and imports; drive the drawer open.
+        let contextBar = app.descendants(matching: .any)
+            .matching(identifier: "context-bar").firstMatch
+        XCTAssertTrue(contextBar.waitForExistence(timeout: 20),
+                      "The first record should import and present its bedside")
+        let panel = app.descendants(matching: .any)
+            .matching(identifier: "context-panel").firstMatch
+        if !panel.exists { contextBar.click() }
+        XCTAssertTrue(panel.waitForExistence(timeout: 3))
+
+        let editToggle = app.descendants(matching: .any)
+            .matching(identifier: "edit-mode-toggle").firstMatch
+        XCTAssertTrue(editToggle.waitForExistence(timeout: 3))
+        editToggle.click()
+        let newNote = app.buttons.matching(identifier: "notes-drawer-new-note").firstMatch
+        XCTAssertTrue(newNote.waitForExistence(timeout: 3))
+        newNote.click()
+
+        let readout = app.descendants(matching: .any)
+            .matching(identifier: "notes-drawer-stepper-readout").firstMatch
+        XCTAssertTrue(readout.waitForExistence(timeout: 3))
+        XCTAssertEqual(spokenName(readout), "1 of 1")
+
+        // Click the second record — the guard must intercept.
+        let row2 = app.descendants(matching: .any)
+            .matching(NSPredicate(
+                format: "identifier BEGINSWITH 'record-row-' AND identifier CONTAINS 'synth2'"
+            )).firstMatch
+        XCTAssertTrue(row2.waitForExistence(timeout: 10),
+                      "The folder fixture should list a second record")
+        row2.click()
+
+        // Scoped to the window: the confirmation's buttons also surface as
+        // Touch Bar elements, which XCUI refuses to click.
+        let discard = app.windows.firstMatch.buttons["Discard and Switch"].firstMatch
+        XCTAssertTrue(discard.waitForExistence(timeout: 5),
+                      "Switching with an unsaved note should raise the confirmation")
+        app.windows.firstMatch.buttons["Cancel"].firstMatch.click()
+
+        // Cancel keeps the record AND the note.
+        XCTAssertTrue(readout.waitForExistence(timeout: 3))
+        XCTAssertEqual(spokenName(readout), "1 of 1",
+                       "Cancel must keep the analyst on the record with their note intact")
+
+        // Same click, approved this time.
+        row2.click()
+        XCTAssertTrue(discard.waitForExistence(timeout: 5))
+        discard.click()
+
+        // The switch lands on the second record: fresh bedside, no notes.
+        let noNotes = NSPredicate(format: "label == 'no notes' OR value == 'no notes'")
+        let landed = XCTNSPredicateExpectation(
+            predicate: noNotes,
+            object: app.descendants(matching: .any)
+                .matching(identifier: "notes-drawer-stepper-readout").firstMatch
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [landed], timeout: 20), .completed,
+                       "Discard and Switch should land on the second record with no notes")
+    }
+
+    @MainActor
+    private func spokenName(_ element: XCUIElement) -> String {
+        if !element.label.isEmpty { return element.label }
+        return (element.value as? String) ?? ""
+    }
+
+    /// The guard's other half: no unsaved notes, no alert — a clean session
+    /// quits without friction. Also catches a false-positive dirty check
+    /// (a baseline bug that made every quit warn would fail here).
+    @MainActor
+    func testQuitWithoutNotesJustQuits() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-sample"]
+        app.launch()
+        let bedside = app.descendants(matching: .any)
+            .matching(identifier: "bedside-view").firstMatch
+        XCTAssertTrue(bedside.waitForExistence(timeout: 10))
+
+        app.typeKey("q", modifierFlags: .command)
+        XCTAssertTrue(app.wait(for: .notRunning, timeout: 10),
+                      "A session with no unsaved notes should quit without a warning")
+    }
+
     /// ⌘⇧N toggles the drawer from anywhere — it dispatches through the menu,
     /// not a focus-dependent key handler (the X35/P13 lesson).
     @MainActor
