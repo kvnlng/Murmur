@@ -71,6 +71,14 @@ public final class CurrentRecordingContext {
     /// provenance.
     public var restoredProvenance: MurProvenance?
 
+    /// X72 — the anchored notes as they stood at the last session save (or
+    /// restore), so the Context drawer can say whether the analyst's notes
+    /// are durable yet. `nil` means "never saved this session", which for the
+    /// unsaved-state check reads the same as an empty baseline. Set by
+    /// `saveSessionPanel()` after a successful write and by the bedside view
+    /// when it applies a restore; never mutated by note editing itself.
+    public var sessionSavedNotes: [AnchoredNote]?
+
     public init() {}
 
     /// Publish that `recording` is now current, loaded from `directory`.
@@ -88,5 +96,6 @@ public final class CurrentRecordingContext {
         liveSessionState = MurSessionState()
         pendingSessionRestore = nil
         restoredProvenance = nil
+        sessionSavedNotes = nil
     }
 }

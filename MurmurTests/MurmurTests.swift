@@ -7623,3 +7623,148 @@ struct BeatDelineatorPVCTests {
 }
 
 #endif // canImport(MurmurMetrics)
+
+// MARK: - Anchored notes (X72)
+
+@Suite("Anchored notes (X72)")
+struct AnchoredNotesTests {
+
+    private func note(_ start: Int64, _ end: Int64, text: String = "wide complex run") -> AnchoredNote {
+        AnchoredNote(
+            startSample: start,
+            endSample: end,
+            leadName: "II",
+            text: text,
+            createdAt: Date(timeIntervalSince1970: 1_750_000_000),
+            modifiedAt: Date(timeIntervalSince1970: 1_750_000_100)
+        )
+    }
+
+    @Test("Session state round-trips its notes")
+    func roundTrip() throws {
+        let state = MurSessionState(anchoredNotes: [note(100, 200), note(300, 400, text: "second")])
+        let decoded = try JSONDecoder().decode(
+            MurSessionState.self,
+            from: try JSONEncoder().encode(state)
+        )
+        #expect(decoded == state)
+    }
+
+    @Test("A session saved before notes existed decodes with none")
+    func oldSessionDecodes() throws {
+        // Absent must stay absent — a fabricated [] would let a restore
+        // overwrite notes taken since open (the X32 error class).
+        let json = #"{"viewportStartSample":0,"viewportEndSample":2500}"#
+        let decoded = try JSONDecoder().decode(MurSessionState.self, from: Data(json.utf8))
+        #expect(decoded.anchoredNotes == nil)
+    }
+
+    @Test("replacingViewState carries the notes and keeps the scan dials")
+    func mergeCarriesNotes() {
+        // DECISIONS §4's named failure: the bedside view republishes its
+        // snapshot on every viewport change, and a merge that dropped this
+        // field would wipe the analyst's notes on the first pan (X11).
+        var base = MurSessionState()
+        base.tau = 0.87                    // owned by the scan sheet, not the view
+        var snapshot = MurSessionState(anchoredNotes: [note(100, 200)])
+        snapshot.viewportStartSample = 500
+        let merged = base.replacingViewState(with: snapshot)
+        #expect(merged.tau == 0.87, "The merge must not clobber scan-sheet state")
+        #expect(merged.anchoredNotes == snapshot.anchoredNotes, "The merge must carry the view-owned notes")
+        #expect(merged.viewportStartSample == 500)
+    }
+
+    @Test("Stepping wraps both directions and enters the list sensibly")
+    func stepping() {
+        let notes = [note(100, 200), note(300, 400), note(500, 600)]
+        // Unselected: forward starts at the first note, backward at the last.
+        #expect(ContextDrawer.stepped(notes: notes, selection: nil, by: 1)?.startSample == 100)
+        #expect(ContextDrawer.stepped(notes: notes, selection: nil, by: -1)?.startSample == 500)
+        // A non-note selection (the .hea or document row) behaves the same.
+        #expect(ContextDrawer.stepped(notes: notes, selection: .document, by: 1)?.startSample == 100)
+        // From the middle, both neighbours; off either end, wrap.
+        let mid = ContextDrawerSelection.note(notes[1].id)
+        #expect(ContextDrawer.stepped(notes: notes, selection: mid, by: 1)?.startSample == 500)
+        #expect(ContextDrawer.stepped(notes: notes, selection: mid, by: -1)?.startSample == 100)
+        #expect(ContextDrawer.stepped(notes: notes, selection: .note(notes[2].id), by: 1)?.startSample == 100)
+        #expect(ContextDrawer.stepped(notes: [], selection: nil, by: 1) == nil)
+    }
+}
+
+// MARK: - Markdown report — analyst notes section (X72)
+
+@Suite("Markdown report analyst notes (X72)")
+struct MarkdownReportNotesTests {
+
+    private func channel() -> Channel {
+        Channel(
+            id: UUID(),
+            name: "II",
+            unit: "mV",
+            sampleRate: 250,
+            startTimeUnixMS: 0,
+            sampleCount: 2500,
+            storageFileName: "ii.bin",
+            pyramid: []
+        )
+    }
+
+    private func recording() -> Recording {
+        Recording(
+            version: Recording.currentVersion,
+            id: UUID(),
+            device: "test-device",
+            createdAt: Date(timeIntervalSince1970: 0),
+            sourceFileName: "synth.hea",
+            channels: [channel()],
+            annotations: []
+        )
+    }
+
+    private func note(_ start: Int64, _ end: Int64, text: String) -> AnchoredNote {
+        AnchoredNote(
+            startSample: start,
+            endSample: end,
+            leadName: "II",
+            text: text,
+            createdAt: Date(timeIntervalSince1970: 0),
+            modifiedAt: Date(timeIntervalSince1970: 0)
+        )
+    }
+
+    private let now = Date(timeIntervalSince1970: 1_750_000_000)
+
+    @Test("No notes given, no section — an empty heading would imply notes exist")
+    func absentWhenEmpty() {
+        let report = MarkdownReport.generate(
+            recording: recording(),
+            annotations: [],
+            dispositions: [:],
+            tally: .init(confirmed: 0, dismissed: 0, unreviewed: 0),
+            now: now
+        )
+        #expect(!report.contains("## Analyst notes"))
+    }
+
+    @Test("Notes render in anchor order with time range, lead, and body")
+    func rendersGivenNotes() {
+        let report = MarkdownReport.generate(
+            recording: recording(),
+            annotations: [],
+            dispositions: [:],
+            tally: .init(confirmed: 0, dismissed: 0, unreviewed: 0),
+            notes: [
+                note(1500, 2000, text: "later note"),
+                note(250, 500, text: "earlier note"),
+            ],
+            now: now
+        )
+        #expect(report.contains("## Analyst notes (2)"))
+        #expect(report.contains("lead II"))
+        let earlier = report.range(of: "earlier note")!.lowerBound
+        let later = report.range(of: "later note")!.lowerBound
+        #expect(earlier < later, "Notes should render in anchor order, not input order")
+        // 250 samples at 250 Hz = 1 s; formatTime renders "%d:%05.2f".
+        #expect(report.contains("0:01.00–0:02.00"))
+    }
+}

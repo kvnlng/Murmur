@@ -42,6 +42,11 @@ struct OverviewMap: View {
     /// long recording. Drawn in NEUTRAL ink (RUO) — the strip locates, the
     /// queue triages. Empty when no scan has been applied.
     var candidates: [Annotation] = []
+    /// X72 — anchored-note anchors, drawn as accent ticks along the strip's
+    /// bottom edge (the design's second tick layer). Purely a locator: the
+    /// strip's existing scrub gesture already moves the trace there, and the
+    /// drawer's list is where a note is *selected*.
+    var noteAnchors: [ClosedRange<Int64>] = []
 
     @State private var isExpanded: Bool = false
 
@@ -98,6 +103,7 @@ struct OverviewMap: View {
                     .fill(Color.secondary.opacity(0.10))
                 densityTicks(width: geo.size.width, height: geo.size.height)
                 candidateBands(width: geo.size.width, height: geo.size.height)
+                noteTicks(width: geo.size.width, height: geo.size.height)
                 viewportIndicator(width: geo.size.width, height: geo.size.height)
             }
             .contentShape(Rectangle())
@@ -157,6 +163,34 @@ struct OverviewMap: View {
                     ctx.fill(Path(band), with: .color(Color.secondary.opacity(0.28)))
                     let topEdge = CGRect(x: x0, y: 0, width: widthPx, height: 3)
                     ctx.fill(Path(topEdge), with: .color(Color.secondary.opacity(0.9)))
+                }
+            }
+            .frame(width: width, height: height)
+            .allowsHitTesting(false)
+        )
+    }
+
+    /// X72 — note ticks on the bottom edge, in accent ink so they read as
+    /// the analyst's own marks against the neutral candidate bands and the
+    /// category-coloured density above.
+    private func noteTicks(width: CGFloat, height: CGFloat) -> some View {
+        let total = Double(totalSamples)
+        guard total > 0, !noteAnchors.isEmpty else {
+            return AnyView(EmptyView())
+        }
+        let tickHeight: CGFloat = 4
+        return AnyView(
+            Canvas { ctx, size in
+                for anchor in noteAnchors {
+                    let x0 = CGFloat(max(0.0, min(1.0, Double(anchor.lowerBound) / total))) * size.width
+                    let x1 = CGFloat(max(0.0, min(1.0, Double(anchor.upperBound) / total))) * size.width
+                    let rect = CGRect(
+                        x: x0,
+                        y: size.height - tickHeight,
+                        width: max(Self.minTickPx, x1 - x0),
+                        height: tickHeight
+                    )
+                    ctx.fill(Path(rect), with: .color(Color.accentColor.opacity(0.9)))
                 }
             }
             .frame(width: width, height: height)

@@ -226,6 +226,9 @@ struct MurmurApp: App {
                 passphrase: accessory.passphrase,
                 to: url
             )
+            // X72: the write succeeded, so what was live is now the saved
+            // baseline — the Context drawer's unsaved indicator reads this.
+            context.sessionSavedNotes = context.liveSessionState.anchoredNotes ?? []
         } catch {
             presentSessionAlert(title: "Couldn't save session", message: error.localizedDescription)
         }
@@ -383,7 +386,28 @@ struct BedsideCommandMenu: Commands {
             Button(timeDisplayTitle) { commands?.toggleTimeDisplay() }
                 .keyboardShortcut("t", modifiers: [.command, .shift])
                 .disabled(commands?.timeDisplayAvailable != true)
+
+            Divider()
+
+            // X72 — the Context drawer. The toggle is ⌘-modified so it stays
+            // safe during note entry; the steps share the navigation gate
+            // (⌥J while typing must insert "∆", not jump) and additionally
+            // show DISABLED when the record carries no anchored notes.
+            Button(notesDrawerTitle) { commands?.toggleNotesDrawer() }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
+                .disabled(commands == nil)
+            Button("Next Note") { commands?.nextNote() }
+                .keyboardShortcut("j", modifiers: .option)
+                .disabled(navigationDisabled || commands?.notesAvailable != true)
+            Button("Previous Note") { commands?.previousNote() }
+                .keyboardShortcut("k", modifiers: .option)
+                .disabled(navigationDisabled || commands?.notesAvailable != true)
         }
+    }
+
+    /// Like `timeDisplayTitle`: the title names what the command WILL do.
+    private var notesDrawerTitle: String {
+        commands?.notesDrawerVisible == true ? "Hide Context Drawer" : "Show Context Drawer"
     }
 
     /// X28 menu title — a checkmark would be ambiguous on a two-state toggle,
