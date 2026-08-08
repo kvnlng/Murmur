@@ -121,6 +121,13 @@ struct BedsideView: View {
     /// the design says as much.
     @AppStorage("murmur.notesDrawerExpanded")
     private var notesDrawerExpanded: Bool = false
+    /// X72 — the analyst's time-anchored notes. Session work product: they
+    /// travel in `sessionSnapshot` → `MurSessionState` and are written by
+    /// File ▸ Save Session, never autosaved (DECISIONS §4).
+    @State private var anchoredNotes: [AnchoredNote] = []
+    /// Which drawer row is open. Defaults to the notes.md document — the
+    /// record-level surface that predates anchored notes.
+    @State private var drawerSelection: ContextDrawerSelection? = .document
 
     static let initialDurationSeconds: Double = 10
 
@@ -284,6 +291,13 @@ struct BedsideView: View {
             },
             timeDisplayAvailable: recording.hasAbsoluteStartTime,
             timeDisplayIsWallClock: TimeDisplayContext.shared.mode == .wallClock,
+            toggleNotesDrawer: {
+                withAnimation(.snappy(duration: 0.18)) { notesDrawerExpanded.toggle() }
+            },
+            nextNote: { stepNote(by: 1) },
+            previousNote: { stepNote(by: -1) },
+            notesAvailable: !anchoredNotes.isEmpty,
+            notesDrawerVisible: notesDrawerExpanded,
             textEntryActive: notesEditorFocused,
             isEditing: isEditing
         )
@@ -563,6 +577,18 @@ struct BedsideView: View {
         // to. They are persisted in the customisation, so DO NOT rename one
         // without accepting that an analyst's saved layout loses that item.
         .toolbar(id: MurmurToolbar.identifier) {
+            // X72 — the Context drawer toggle, leading the trailing cluster
+            // per the wireframe's ordering. Same action as ⌘⇧N.
+            ToolbarItem(id: "notes-toggle", placement: .automatic, showsByDefault: true) {
+                Button {
+                    withAnimation(.snappy(duration: 0.18)) { notesDrawerExpanded.toggle() }
+                } label: {
+                    Label("Notes", systemImage: ToolbarGlyph.notes)
+                }
+                .help("Show or hide the Context drawer (⌘⇧N)")
+                .tint(notesDrawerExpanded ? Color.accentColor : nil)
+                .accessibilityIdentifier("notes-toggle")
+            }
             ToolbarItem(id: "edit-mode-toggle", placement: .automatic, showsByDefault: true) {
                 Button {
                     isEditing.toggle()
@@ -742,7 +768,11 @@ struct BedsideView: View {
             // X50(b): the analyst's paper. Still `nil` before the open snap
             // resolves a gain, which is exactly right — a package saved in that
             // state carries no paper and reopens at Standard View.
-            gainMillimetersPerMillivolt: calibration.gainMillimetersPerMillivolt
+            gainMillimetersPerMillivolt: calibration.gainMillimetersPerMillivolt,
+            // X72: nil-when-empty so a session with no notes is byte-identical
+            // to one saved before notes existed. Carried through
+            // `replacingViewState` — omitting it there is the X11 wipe.
+            anchoredNotes: anchoredNotes.isEmpty ? nil : anchoredNotes
         )
     }
 
@@ -805,6 +835,15 @@ struct BedsideView: View {
             // not here.
             layoutMode = .focus(only: channel.id)
         }
+        // X72: anchored notes ride the same restore. Absent stays absent —
+        // a package saved before notes existed restores none, never a
+        // fabricated empty list overwriting notes taken since open.
+        if let notes = restore.anchoredNotes {
+            anchoredNotes = notes
+        }
+        // What was just restored IS the saved state — seed the drawer's
+        // unsaved-indicator baseline with it.
+        context.sessionSavedNotes = restore.anchoredNotes ?? []
     }
 
     #if DEBUG
@@ -930,6 +969,25 @@ struct BedsideView: View {
                 handleAttachFindings(.success(url))
                 UITestSupport.attachFindingsURL = nil
             }
+            if let count = UITestSupport.seedNotesCount {
+                // X72: seed N anchored notes, evenly spaced, each one second
+                // long — deterministic positions so the record band's note
+                // ticks land where a pixel check expects them.
+                let total = viewport.totalSamples
+                let sr = Int64(max(1, viewport.sampleRate))
+                let now = Date(timeIntervalSince1970: 1_750_000_000)
+                anchoredNotes = (0..<count).map { i in
+                    let start = total * Int64(i * 2 + 1) / Int64(count * 2 + 1)
+                    return AnchoredNote(
+                        startSample: start,
+                        endSample: min(total, start + sr),
+                        leadName: focusedChannel?.name,
+                        text: "seeded note \(i + 1)",
+                        createdAt: now,
+                        modifiedAt: now
+                    )
+                }
+            }
             if let count = UITestSupport.panBurstTickCount {
                 // Idle long enough that MTKView's display link auto-suspends,
                 // then drip N viewport mutations at drag-tick cadence. The
@@ -1028,6 +1086,9 @@ struct BedsideView: View {
             annotations: allAnnotations,
             dispositions: dispositionStore.records,
             tally: dispositionStore.tally(for: allAnnotations),
+            // X72: inclusion is the analyst's per-note checkbox, decided here
+            // at the call site — the report renders what it is given.
+            notes: anchoredNotes.filter { $0.includeInReport == true },
             now: Date()
         )
         do {
@@ -1573,7 +1634,10 @@ struct BedsideView: View {
                     viewport: viewport,
                     channelName: channel.name,
                     dispositionsByID: dispositionStore.records,
-                    candidates: candidatesForChannel(channel)
+                    candidates: candidatesForChannel(channel),
+                    noteAnchors: anchoredNotes.map {
+                        $0.startSample...max($0.startSample, $0.endSample)
+                    }
                 )
             }
             if totalDurationSeconds > HourBand.defaultSpanSeconds {
@@ -2099,9 +2163,9 @@ struct BedsideView: View {
     /// right column in X71, and the `RecordContextPanel` — which had no home
     /// of its own and merely sat beside the summary — becomes this.
     ///
-    /// Collapsed by default, matching the canonical `11a`. Expanded, it shows
-    /// the panel exactly as it shipped; X72 replaces that with the two-column
-    /// anchored-notes drawer.
+    /// Collapsed by default, matching the canonical `11a`. Expanded, it
+    /// mounts the two-column `ContextDrawer` (X72) — which absorbed the old
+    /// `RecordContextPanel`'s notes.md editing wholesale.
     @ViewBuilder
     private var contextBar: some View {
         if !recording.headerComments.isEmpty || recording.notesFileName != nil {
@@ -2129,17 +2193,25 @@ struct BedsideView: View {
                 .accessibilityIdentifier("context-bar")
 
                 if notesDrawerExpanded {
-                    RecordContextPanel(
+                    ContextDrawer(
                         headerComments: recording.headerComments,
                         notesURL: recording.notesFileName.map {
                             recordingDirectory.appendingPathComponent($0)
                         },
+                        notes: $anchoredNotes,
+                        selection: $drawerSelection,
                         isEditing: isEditing,
-                        editorFocus: $notesEditorFocused
+                        editorFocus: $notesEditorFocused,
+                        sampleRate: viewport.sampleRate,
+                        hasAbsoluteStartTime: recording.hasAbsoluteStartTime,
+                        startUnixMillis: recordingStartUnixMillis,
+                        currentWindow: viewport.startSample...max(viewport.startSample, viewport.endSample),
+                        currentLeadName: focusedChannel?.name,
+                        savedNotes: CurrentRecordingContext.shared.sessionSavedNotes,
+                        onJump: { note in jumpToNoteAnchor(note) }
                     )
-                    // AX2: contain the panel's children so it stops collapsing to
-                    // a single element that speaks the decorative doc.text symbol
-                    // name ("Plain Text Document"); this also surfaces the `.hea`
+                    // AX2: contain the drawer's children so it stops collapsing
+                    // to a single element; this also surfaces the `.hea`
                     // demographics + notes to VoiceOver as readable content.
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("context-panel")
@@ -2151,19 +2223,47 @@ struct BedsideView: View {
 
     /// What the collapsed bar says is inside.
     ///
-    /// Deliberately NOT the design's `4 entries · last edited 2 min ago`:
-    /// entries are anchored notes, which do not exist until X72, and an edit
-    /// timestamp would mean reading `notes.md` here purely to describe it —
-    /// duplicating the I/O `RecordContextPanel` already does. It reports what
-    /// this ticket can actually know.
+    /// Deliberately NOT the design's `last edited 2 min ago`: an edit
+    /// timestamp for notes.md would mean reading the file here purely to
+    /// describe it, duplicating the drawer's own I/O. The bar reports what
+    /// this view actually knows: the document's existence, the anchored-note
+    /// count, and the `.hea` lines.
     private var contextBarDetail: String {
         var parts: [String] = []
         if recording.notesFileName != nil { parts.append("notes.md") }
+        if !anchoredNotes.isEmpty {
+            parts.append("\(anchoredNotes.count) entr\(anchoredNotes.count == 1 ? "y" : "ies")")
+        }
         let comments = recording.headerComments.count
         if comments > 0 {
             parts.append("\(comments) line\(comments == 1 ? "" : "s") from .hea")
         }
         return parts.joined(separator: " · ")
+    }
+
+    // MARK: - Anchored notes (X72)
+
+    /// Move the trace to a note's anchor. Honours the 10 s pin the same way
+    /// finding jumps do: pinned, the window stays 10 s and centres on the
+    /// anchor; unpinned, the viewport becomes the anchor range itself.
+    private func jumpToNoteAnchor(_ note: AnchoredNote) {
+        if windowLockedTo10s {
+            viewport.center(onSample: (note.startSample + note.endSample) / 2)
+        } else {
+            let width = max(note.endSample - note.startSample, Int64(viewport.sampleRate))
+            viewport.setWidth(width, anchorFraction: 0)
+            viewport.setStart(note.startSample)
+        }
+    }
+
+    /// ⌥J/⌥K — step through the notes in anchor order, opening the drawer so
+    /// the analyst can see which note they landed on.
+    private func stepNote(by delta: Int) {
+        let ordered = anchoredNotes.sorted { $0.startSample < $1.startSample }
+        guard let next = ContextDrawer.stepped(notes: ordered, selection: drawerSelection, by: delta) else { return }
+        drawerSelection = .note(next.id)
+        notesDrawerExpanded = true
+        jumpToNoteAnchor(next)
     }
 
     // MARK: - Info bar (X69)
@@ -2195,6 +2295,9 @@ struct BedsideView: View {
             }
             if let lod = renderState.lod {
                 Text("LOD \(lod.label)")
+            }
+            if !anchoredNotes.isEmpty {
+                Text("\(anchoredNotes.count) note\(anchoredNotes.count == 1 ? "" : "s")")
             }
         }
         .font(.caption2)

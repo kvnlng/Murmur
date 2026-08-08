@@ -48,6 +48,18 @@ public struct BedsideCommands {
     /// Drives the menu item's checkmark.
     public var timeDisplayIsWallClock: Bool
 
+    /// X72 — the Context drawer. Toggle is ⌘⇧N (safe during text entry, so
+    /// never gated on `textEntryActive`); the note steps are ⌥J/⌥K and follow
+    /// the same text-entry gate as the other bare-ish keys.
+    public var toggleNotesDrawer: () -> Void
+    public var nextNote: () -> Void
+    public var previousNote: () -> Void
+    /// False when the record carries no anchored notes — the step items show
+    /// DISABLED rather than silently doing nothing.
+    public var notesAvailable: Bool
+    /// Drives the toggle item's title (Show vs Hide).
+    public var notesDrawerVisible: Bool
+
     /// True while a text field (the notes editor) is the first responder. The
     /// App disables the bedside key commands then so typing isn't intercepted.
     public var textEntryActive: Bool
@@ -72,6 +84,11 @@ public struct BedsideCommands {
         toggleTimeDisplay: @escaping () -> Void = {},
         timeDisplayAvailable: Bool = false,
         timeDisplayIsWallClock: Bool = false,
+        toggleNotesDrawer: @escaping () -> Void = {},
+        nextNote: @escaping () -> Void = {},
+        previousNote: @escaping () -> Void = {},
+        notesAvailable: Bool = false,
+        notesDrawerVisible: Bool = false,
         textEntryActive: Bool,
         isEditing: Bool
     ) {
@@ -90,6 +107,11 @@ public struct BedsideCommands {
         self.toggleTimeDisplay = toggleTimeDisplay
         self.timeDisplayAvailable = timeDisplayAvailable
         self.timeDisplayIsWallClock = timeDisplayIsWallClock
+        self.toggleNotesDrawer = toggleNotesDrawer
+        self.nextNote = nextNote
+        self.previousNote = previousNote
+        self.notesAvailable = notesAvailable
+        self.notesDrawerVisible = notesDrawerVisible
         self.textEntryActive = textEntryActive
         self.isEditing = isEditing
     }

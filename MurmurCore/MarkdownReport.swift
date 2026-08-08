@@ -29,6 +29,7 @@ enum MarkdownReport {
         annotations: [Annotation],
         dispositions: [UUID: AnnotationDisposition],
         tally: DispositionStore.Tally,
+        notes: [AnchoredNote] = [],
         now: Date
     ) -> String {
         var lines: [String] = []
@@ -77,6 +78,25 @@ enum MarkdownReport {
             }
         }
         lines.append("")
+
+        // -- Analyst notes (X72). The CALLER filters to the notes the analyst
+        // flagged "Include in exported report" — this function renders what
+        // it is given and never decides inclusion itself. Section absent when
+        // nothing was flagged: an empty heading would imply notes exist.
+        if !notes.isEmpty {
+            lines.append("## Analyst notes (\(notes.count))")
+            lines.append("")
+            for note in notes.sorted(by: { $0.startSample < $1.startSample }) {
+                let start = formatTime(seconds: Double(note.startSample) / sampleRate)
+                let end = formatTime(seconds: Double(note.endSample) / sampleRate)
+                let lead = note.leadName.map { " · lead \($0)" } ?? ""
+                lines.append("- **\(start)–\(end)**\(lead)")
+                for textLine in note.text.components(separatedBy: .newlines) {
+                    lines.append("  \(textLine)")
+                }
+            }
+            lines.append("")
+        }
 
         // -- Footer
         lines.append("---")

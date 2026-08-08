@@ -344,6 +344,18 @@ enum UITestSupport {
         return n
     }
 
+    /// If `--ui-test-seed-notes=N` is set, returns N. BedsideView seeds N
+    /// anchored notes at deterministic, evenly-spaced positions on appear
+    /// (X72), so the drawn surfaces notes feed — the record band's note-tick
+    /// layer, the drawer list, the info-bar count — render without XCUI
+    /// having to drive the create flow first. The creation flow itself keeps
+    /// its own unseeded test.
+    static var seedNotesCount: Int? {
+        guard let raw = value(forFlag: "ui-test-seed-notes"),
+              let n = Int(raw), n > 0 else { return nil }
+        return n
+    }
+
     /// Filled by `ContentView` when `--ui-test-attach-findings` is set.
     /// `BedsideView` checks this on appear and, if non-nil, routes the URL
     /// through its `handleAttachFindings` path — the same one the toolbar

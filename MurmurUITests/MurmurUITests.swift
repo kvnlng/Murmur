@@ -484,9 +484,11 @@ final class MurmurUITests: XCTestCase {
 
     @MainActor
     func testContextNotesEditorAppearsInEditMode() throws {
-        // Guards: RecordContextPanel's render path + the edit-mode latch
-        // gate on the notes editor. The synthetic fixture's importer
-        // reserves a "notes.md" filename so the panel always renders;
+        // Guards: the Context drawer's notes.md editor + the edit-mode latch
+        // gate on it (X72 rehomed the old RecordContextPanel's document
+        // editing into the drawer; the identifiers carried over). The
+        // synthetic fixture's importer reserves a "notes.md" filename so the
+        // document row always renders and is the drawer's default selection;
         // the TextEditor itself is only mounted when isEditing is true.
         let app = XCUIApplication()
         app.launchArguments += ["--ui-test-sample"]

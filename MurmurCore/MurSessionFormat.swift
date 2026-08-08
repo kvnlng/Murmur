@@ -129,6 +129,51 @@ public struct MurSessionManifest: Codable, Equatable, Sendable {
     }
 }
 
+/// X72 — a time-anchored analyst note.
+///
+/// SESSION work product, not a durable record annotation (DECISIONS §4):
+/// lives in `MurSessionState` → `.mur/records/<id>/session.json`, written by
+/// File ▸ Save Session and never autosaved to the bundle. No new bundle-local
+/// file — `notes.md` stays exactly what it was, the record-level document
+/// with its own debounced bundle-local autosave.
+public struct AnchoredNote: Codable, Equatable, Sendable, Identifiable {
+    public var id: UUID
+    /// The anchor, in samples of the primary ECG channel — the same
+    /// coordinate the viewport speaks, so a jump back is exact rather than
+    /// re-derived through a seconds conversion.
+    public var startSample: Int64
+    public var endSample: Int64
+    /// The lead focused when the note was taken. Provenance, not a filter —
+    /// "anchored to a 10 s range in lead II" is part of what the note means.
+    public var leadName: String?
+    public var text: String
+    public var createdAt: Date
+    public var modifiedAt: Date
+    /// "Include in exported report". Optional so notes saved before the field
+    /// existed decode; absent reads as false.
+    public var includeInReport: Bool?
+
+    public init(
+        id: UUID = UUID(),
+        startSample: Int64,
+        endSample: Int64,
+        leadName: String? = nil,
+        text: String = "",
+        createdAt: Date,
+        modifiedAt: Date,
+        includeInReport: Bool? = nil
+    ) {
+        self.id = id
+        self.startSample = startSample
+        self.endSample = endSample
+        self.leadName = leadName
+        self.text = text
+        self.createdAt = createdAt
+        self.modifiedAt = modifiedAt
+        self.includeInReport = includeInReport
+    }
+}
+
 /// The `session.json` schema — UI/session state so a reopen lands the analyst
 /// back where they were. Plain snapshot; all optional so partial/older sessions
 /// decode. The app composes/consumes it (X14-D); this is the shape it round-trips.
@@ -150,6 +195,10 @@ public struct MurSessionState: Codable, Equatable, Sendable {
     public var minDurationSeconds: Double?
     public var mergeGapSeconds: Double?
     public var scanScopeWholeRecording: Bool?
+    /// X72 — the analyst's time-anchored notes. `nil` (not `[]`) when there
+    /// are none, so a session saved before notes existed and one saved with
+    /// zero notes are byte-identical.
+    public var anchoredNotes: [AnchoredNote]?
 
     public init(
         viewportStartSample: Int64? = nil,
@@ -162,7 +211,8 @@ public struct MurSessionState: Codable, Equatable, Sendable {
         tau: Double? = nil,
         minDurationSeconds: Double? = nil,
         mergeGapSeconds: Double? = nil,
-        scanScopeWholeRecording: Bool? = nil
+        scanScopeWholeRecording: Bool? = nil,
+        anchoredNotes: [AnchoredNote]? = nil
     ) {
         self.viewportStartSample = viewportStartSample
         self.viewportEndSample = viewportEndSample
@@ -175,6 +225,7 @@ public struct MurSessionState: Codable, Equatable, Sendable {
         self.minDurationSeconds = minDurationSeconds
         self.mergeGapSeconds = mergeGapSeconds
         self.scanScopeWholeRecording = scanScopeWholeRecording
+        self.anchoredNotes = anchoredNotes
     }
 
     /// X59/X11 — replace only the fields the bedside view owns, preserving the
@@ -191,6 +242,12 @@ public struct MurSessionState: Codable, Equatable, Sendable {
         copy.focusedChannelName = other.focusedChannelName
         copy.windowLockedTo10s = other.windowLockedTo10s
         copy.gainMillimetersPerMillivolt = other.gainMillimetersPerMillivolt
+        // X72: anchored notes are drawn and edited in the bedside view, so
+        // they are view-owned. Omitting this line is exactly the X11 failure
+        // mode DECISIONS §4 warns about — the view republishes on every
+        // viewport change, and a merge that drops the field would wipe the
+        // analyst's notes on the first pan.
+        copy.anchoredNotes = other.anchoredNotes
         return copy
     }
 }
