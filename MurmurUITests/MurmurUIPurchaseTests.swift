@@ -32,7 +32,10 @@ final class MurmurUIPurchaseTests: XCTestCase {
     func testPurchaseSurfaceIsOneAllInclusiveRow() throws {
         let app = XCUIApplication()
         // Unowned state so the row renders a Buy / checking affordance, not "Owned".
-        app.launchArguments += ["--ui-test-sample", "--ui-test-initial-duration=2", "--ui-test-no-entitlements"]
+        // Forced short window: keeps the Settings purchase surface covered in
+        // the Xcode Cloud 1024×768 regime on every machine.
+        app.launchArguments += ["--ui-test-sample", "--ui-test-initial-duration=2",
+                                "--ui-test-no-entitlements", "--ui-test-window=1000x600"]
         app.launch()
 
         // Open the SwiftUI Settings scene. `typeKey(",")` only lands if the app
