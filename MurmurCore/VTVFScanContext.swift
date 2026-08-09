@@ -137,4 +137,25 @@ public final class VTVFScanContext {
         currentViewEndSample = viewEndSample
         showScanDialog = true
     }
+
+    /// The scan dialog's pre-flight signal-quality line (A3) — the σ read the
+    /// analyst sees BEFORE spending compute. Composed from primitives so the
+    /// wording is testable without MurmurMetrics; the App-target dialog
+    /// supplies the counts and the calibrated sensitivity of the flagged
+    /// band. Nil when no stable window fits the span — the read is omitted,
+    /// not fabricated.
+    ///
+    /// Factual and neutral by design: it reports what the calibration
+    /// observed, and never blocks the scan — the analyst stays in charge of
+    /// whether the span is worth their compute (the lever, not a cutoff).
+    public nonisolated static func preflightQualityCaption(
+        flaggedWindows: Int,
+        totalWindows: Int,
+        flaggedSensitivity: Double
+    ) -> String? {
+        guard totalWindows > 0 else { return nil }
+        let counts = "Signal quality: \(flaggedWindows.formatted()) of \(totalWindows.formatted()) windows flagged"
+        guard flaggedWindows > 0 else { return counts }
+        return counts + String(format: " — R-peak sensitivity ≈ %.2f there (NSTDB)", flaggedSensitivity)
+    }
 }

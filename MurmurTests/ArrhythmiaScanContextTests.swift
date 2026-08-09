@@ -135,4 +135,43 @@ struct ArrhythmiaScanQualityCaptionTests {
         )
         #expect(caption == "12 beats detected · RR artifact 0.0%")
     }
+
+    @Test("The QRS-axis pre-flight read joins the caption when windows exist (A3)")
+    func signalQualityCaption() {
+        let caption = ArrhythmiaScanContext.qualityCaption(
+            beatCount: 92384, leadName: "II", rrArtifactFraction: 0.032,
+            flaggedWindows: 3, totalWindows: 840
+        )
+        #expect(caption == "lead II · \(92384.formatted()) beats detected · RR artifact 3.2% · signal quality 3 of 840 windows flagged")
+    }
+
+    @Test("Zero total windows omits the read rather than fabricating a clean bill")
+    func tooShortForARead() {
+        let caption = ArrhythmiaScanContext.qualityCaption(
+            beatCount: 12, leadName: nil, rrArtifactFraction: 0,
+            flaggedWindows: 0, totalWindows: 0
+        )
+        #expect(!caption.contains("signal quality"))
+    }
+}
+
+@Suite("VTVFScanContext — pre-flight quality caption (A3)")
+struct VTVFPreflightQualityCaptionTests {
+
+    @Test("Flagged windows carry the calibrated sensitivity; clean spans just count")
+    func captionShapes() {
+        #expect(VTVFScanContext.preflightQualityCaption(
+            flaggedWindows: 3, totalWindows: 84, flaggedSensitivity: 0.875
+        ) == "Signal quality: 3 of 84 windows flagged — R-peak sensitivity ≈ 0.88 there (NSTDB)")
+        #expect(VTVFScanContext.preflightQualityCaption(
+            flaggedWindows: 0, totalWindows: 84, flaggedSensitivity: 0.875
+        ) == "Signal quality: 0 of 84 windows flagged")
+    }
+
+    @Test("No stable window means no line — omitted, not fabricated")
+    func noWindows() {
+        #expect(VTVFScanContext.preflightQualityCaption(
+            flaggedWindows: 0, totalWindows: 0, flaggedSensitivity: 0.875
+        ) == nil)
+    }
 }

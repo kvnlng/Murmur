@@ -135,7 +135,9 @@ struct ArrhythmiaScanOrchestrator: View {
         let quality = ArrhythmiaScanContext.qualityCaption(
             beatCount: result.quality.beatCount,
             leadName: leadName,
-            rrArtifactFraction: result.quality.rrArtifactFraction
+            rrArtifactFraction: result.quality.rrArtifactFraction,
+            flaggedWindows: result.quality.qualityWindows.filter(\.flagged).count,
+            totalWindows: result.quality.qualityWindows.count
         )
         let caption = "\(operatingPoints) · \(quality)"
 

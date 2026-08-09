@@ -16,6 +16,7 @@
 import Foundation
 import MurmurCore
 import MurmurInference
+import MurmurMetrics
 import SwiftUI
 
 // MARK: - View-model
@@ -50,6 +51,12 @@ final class VTVFScanModel {
     private(set) var previewScores: [VTVFWindowScore] = []
     private(set) var previewLoading = false
     private(set) var previewError: String?
+
+    // Pre-flight signal quality (A3) — the calibrated QRS-quality read on
+    // the span the scan would spend compute on, per scope. Computed once
+    // alongside the preview from the same loaded samples.
+    private(set) var preflightView: (flagged: Int, total: Int)?
+    private(set) var preflightWhole: (flagged: Int, total: Int)?
 
     // Apply state (Stage 2).
     private(set) var isApplying = false
@@ -154,6 +161,19 @@ final class VTVFScanModel {
         let modelRate = model.sampleRateHz
         let m = model
 
+        // Pre-flight signal quality (A3) on both scopes, from the samples
+        // already in hand — cheap arithmetic, no model. The read informs the
+        // analyst BEFORE the apply spends real compute; it never gates it.
+        let preflight = await Task.detached(priority: .userInitiated) { () -> (view: (Int, Int), whole: (Int, Int)) in
+            func counts(_ s: [Float]) -> (Int, Int) {
+                let windows = QRSQualityPreflight.read(samples: s, sampleRate: native)
+                return (windows.filter(\.flagged).count, windows.count)
+            }
+            return (counts(slice), counts(samples))
+        }.value
+        preflightView = preflight.view
+        preflightWhole = preflight.whole
+
         let scores = await Task.detached(priority: .userInitiated) { () -> [VTVFWindowScore] in
             let resampled = ECGResampler.resample(slice, fromRate: native, toRate: modelRate)
             let source = ArrayVTVFSampleSource(samples: resampled, sampleRateHz: modelRate)
@@ -167,6 +187,18 @@ final class VTVFScanModel {
             return result?.windowScores ?? []
         }.value
         previewScores = scores
+    }
+
+    /// The pre-flight line for the ACTIVE scope, or nil when the span is too
+    /// short for a single stable quality window.
+    var preflightCaption: String? {
+        let read = scope == .wholeRecording ? preflightWhole : preflightView
+        guard let read else { return nil }
+        return VTVFScanContext.preflightQualityCaption(
+            flaggedWindows: read.flagged,
+            totalWindows: read.total,
+            flaggedSensitivity: QRSQualityCalibration.builtInNSTDBElectrodeMotion.bands[0].sensitivity
+        )
     }
 
     // MARK: - Stage 2: commit
@@ -308,6 +340,7 @@ struct VTVFScanView: View {
             header
             Divider()
             scopePicker
+            preflightQuality
             meter
             dials
             Divider()
@@ -354,6 +387,33 @@ struct VTVFScanView: View {
         }
         .pickerStyle(.segmented)
         .accessibilityIdentifier("vtvf-scope-picker")
+    }
+
+    // MARK: - Pre-flight signal quality (A3)
+
+    /// The σ read for the active scope — stated before the analyst spends
+    /// compute, never a gate. Absent when the span can't produce one stable
+    /// quality window (omitted, not fabricated).
+    @ViewBuilder
+    private var preflightQuality: some View {
+        if let caption = scanModel.preflightCaption {
+            HStack(spacing: 6) {
+                Image(systemName: "waveform.badge.magnifyingglass")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(caption)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .help("""
+            Calibrated on MIT-BIH NSTDB (electrode-motion noise, 24 to −6 dB): \
+            in windows below the quality bar, R-peak detection sensitivity drops \
+            to ≈ 0.88 and timing error P90 to ≈ 97 ms; elsewhere sensitivity is \
+            ≥ 0.98. The scan still runs everywhere — this read is for deciding \
+            whether the span is worth the compute.
+            """)
+            .accessibilityIdentifier("vtvf-preflight-quality")
+        }
     }
 
     // MARK: - Live count + histogram

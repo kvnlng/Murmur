@@ -922,7 +922,7 @@ struct BedsideView: View {
         ]
         arrhythmiaContext.setCandidates(
             candidates,
-            parametersCaption: "lead II · 12 beats detected · RR artifact 0.0%"
+            parametersCaption: "lead II · 12 beats detected · RR artifact 0.0% · signal quality 0 of 1 windows flagged"
         )
     }
 
