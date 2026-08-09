@@ -1815,9 +1815,15 @@ struct FindingsPanel: View {
                                 .font(.caption2.monospaced())
                                 .foregroundStyle(.tertiary)
                             if let conf = candidate.confidence {
+                                // A3: measurement confidence made legible —
+                                // the number is the calibrated reliability of
+                                // the beat measurement under this span's
+                                // signal quality, and saying so is what keeps
+                                // it from reading as a severity score.
                                 Text(String(format: "conf %.2f", conf))
                                     .font(.caption2.monospaced())
                                     .foregroundStyle(.tertiary)
+                                    .help("Measurement confidence — the calibrated reliability of the beat detection under this span's signal quality. Not a severity score; rows stay in time order.")
                             }
                         }
                     }

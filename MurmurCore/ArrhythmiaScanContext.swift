@@ -129,15 +129,25 @@ public final class ArrhythmiaScanContext {
     /// The per-recording quality read, composed from primitives so the
     /// wording is testable without MurmurMetrics. `nil` leadName means the
     /// scan couldn't attribute a single lead (it is omitted, not guessed).
+    ///
+    /// `flaggedWindows` / `totalWindows` carry the QRS-axis pre-flight read
+    /// (A3): how many calibrated-quality windows fell in the collapsed-
+    /// reliability band. Zero total windows (a recording too short for one
+    /// stable read) omits the part rather than fabricating a clean bill.
     public nonisolated static func qualityCaption(
         beatCount: Int,
         leadName: String?,
-        rrArtifactFraction: Double
+        rrArtifactFraction: Double,
+        flaggedWindows: Int = 0,
+        totalWindows: Int = 0
     ) -> String {
         var parts: [String] = []
         if let leadName, !leadName.isEmpty { parts.append("lead \(leadName)") }
         parts.append("\(beatCount.formatted()) beats detected")
         parts.append(String(format: "RR artifact %.1f%%", rrArtifactFraction * 100))
+        if totalWindows > 0 {
+            parts.append("signal quality \(flaggedWindows.formatted()) of \(totalWindows.formatted()) windows flagged")
+        }
         return parts.joined(separator: " · ")
     }
 }
