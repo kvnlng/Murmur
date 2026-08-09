@@ -92,9 +92,14 @@ struct MurmurApp: App {
 
 
     var body: some Scene {
-        WindowGroup {
+        // Production minimum is 1100×720 (Guideline 4 fix), unconditionally.
+        // Under a DEBUG XCUI run the minimum is capped by the runner's
+        // visible screen so the window can fit short CI displays — see
+        // WindowSizing for the failure mode this prevents.
+        let minimums = WindowSizing.effectiveMinimums()
+        return WindowGroup {
             ContentView()
-                .frame(minWidth: 1100, minHeight: 720)
+                .frame(minWidth: minimums.width, minHeight: minimums.height)
                 // Invisible orchestrator: watches CurrentRecordingContext +
                 // PurchaseStore, computes rolling HRV samples via MurmurMetrics,
                 // and publishes to VariabilityLaneContext for BedsideView to

@@ -143,6 +143,7 @@ public struct ContentView: View {
         }
         .task {
             #if DEBUG
+            await WindowSizing.applyForcedWindowIfRequested()
             loadUITestSampleIfRequested()
             openUITestPathIfRequested()
             openUITestSessionIfRequested()

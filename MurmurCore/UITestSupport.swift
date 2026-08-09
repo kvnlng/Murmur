@@ -121,6 +121,13 @@
 //        the test exercises is the rendering, not a parallel code path.
 //        The ⌘-click itself is not covered here.
 //
+//    --ui-test-window=<width>x<height>
+//        Sizes the main window explicitly at launch (WindowSizing applies
+//        it; the production minimums are relaxed for the run). Exists so a
+//        test can reproduce Xcode Cloud's short VM display (1024×768)
+//        deterministically on any machine — the class of failure it guards
+//        is "bottom-of-window control not hittable on CI, green locally".
+//
 
 #if DEBUG
 import Foundation
@@ -155,6 +162,22 @@ enum UITestSupport {
         return raw.split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
+    }
+
+    /// Explicit window size from `--ui-test-window=<width>x<height>`. Lets a
+    /// test reproduce a SHORT DISPLAY deterministically on any machine —
+    /// Xcode Cloud's Mac VMs run 1024×768, where the production minimum
+    /// window (1100×720 content) cannot fit the visible frame and
+    /// bottom-of-window controls go off-screen ("not hittable"). Tests that
+    /// interact with bottom-region chrome launch with this flag so the
+    /// constraint is exercised locally, not discovered in CI.
+    static var forcedWindowSize: CGSize? {
+        guard let raw = value(forFlag: "ui-test-window") else { return nil }
+        let parts = raw.lowercased().split(separator: "x")
+        guard parts.count == 2,
+              let w = Double(parts[0]), let h = Double(parts[1]),
+              w > 300, h > 300 else { return nil }
+        return CGSize(width: w, height: h)
     }
 
     /// True when the process was launched with ANY `--ui-test-*` argument —
