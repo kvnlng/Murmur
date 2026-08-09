@@ -155,8 +155,15 @@ final class MurmurUITests: XCTestCase {
     @MainActor
     func testWindowHonorsMinimumSize() throws {
         // Guards: the min-window-size fix that resolved the App Store
-        // Guideline 4 rejection. If `MurmurApp` ever drops
-        // `.frame(minWidth: 1100, minHeight: 720)`, this test fails.
+        // Guideline 4 rejection. If `MurmurApp` ever drops the production
+        // minimum (WindowSizing: 1100×720 content), this test fails.
+        //
+        // Under an XCUI run the enforced minimum is CAPPED by the runner's
+        // visible screen (WindowSizing) — Xcode Cloud's 1024×768 VMs can't
+        // hold a 720-pt-content window, and a window taller than the screen
+        // makes every bottom-band control un-hittable. So the expectation
+        // here is the same cap the app computes: production minimum, or the
+        // visible frame less the chrome allowance, whichever is smaller.
         let app = XCUIApplication()
         app.launchArguments += ["--ui-test-sample"]
         app.launch()
@@ -166,12 +173,14 @@ final class MurmurUITests: XCTestCase {
             return
         }
         XCTAssertTrue(window.waitForExistence(timeout: 5))
-        // The frame call returns a CGRect; both dimensions should be at
-        // or above the minimum we set in MurmurApp.
-        XCTAssertGreaterThanOrEqual(window.frame.width, 1100,
-                                    "Window width should be at least the 1100pt minimum")
-        XCTAssertGreaterThanOrEqual(window.frame.height, 720,
-                                    "Window height should be at least the 720pt minimum")
+        let visible = NSScreen.main?.visibleFrame
+            ?? CGRect(x: 0, y: 0, width: 5000, height: 5000)
+        let expectedMinWidth = min(1100.0, visible.width - 60)
+        let expectedMinHeight = min(720.0, visible.height - 60)
+        XCTAssertGreaterThanOrEqual(window.frame.width, expectedMinWidth,
+                                    "Window width should be at least min(1100, screen) = \(expectedMinWidth)")
+        XCTAssertGreaterThanOrEqual(window.frame.height, expectedMinHeight,
+                                    "Window height should be at least min(720, screen) = \(expectedMinHeight)")
     }
 
     @MainActor
@@ -570,6 +579,49 @@ final class MurmurUITests: XCTestCase {
         let predicate = NSPredicate(format: "exists == false")
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
         return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    /// Scroll the bedside's scrolling context until `element` is hittable.
+    ///
+    /// On a short display (Xcode Cloud's 1024×768 VMs; any test launched
+    /// with `--ui-test-window=…`) the scrolling context legitimately extends
+    /// past the window, and bottom-region chrome — the trend stack, the
+    /// drawer's lower rows — must be SCROLLED to, exactly as a real analyst
+    /// would. The surface is the ScrollView that CONTAINS the context bar
+    /// (the outer scrolling context, never the drawer's internal scrollers):
+    /// a large element whose hit point stays resolvable while content moves,
+    /// where small anchors like the 13-pt bar throw transient "unable to
+    /// find hit point" mid-scroll. Wheel delivery must be element-based —
+    /// XCUICoordinate.scroll silently reaches nothing on macOS. Sweeps
+    /// downward first, then back up, in small ticks so a short row can't
+    /// be jumped over.
+    @MainActor
+    static func scrollUntilHittable(
+        _ element: XCUIElement,
+        in app: XCUIApplication,
+        maxTicks: Int = 40
+    ) -> Bool {
+        if element.isHittable { return true }
+        let surface = app.scrollViews
+            .containing(.any, identifier: "context-bar").firstMatch
+        func surfaceReady() -> Bool {
+            guard surface.exists else { return false }
+            if surface.isHittable { return true }
+            // One beat for transient mid-scroll false negatives.
+            Thread.sleep(forTimeInterval: 0.1)
+            return surface.exists && surface.isHittable
+        }
+        for _ in 0..<maxTicks {           // reveal content BELOW the fold
+            guard !element.isHittable else { return true }
+            guard surfaceReady() else { break }
+            surface.scroll(byDeltaX: 0, deltaY: -24)
+        }
+        for _ in 0..<(2 * maxTicks) {     // sweep back for content ABOVE
+            guard !element.isHittable else { return true }
+            guard surfaceReady() else { break }
+            surface.scroll(byDeltaX: 0, deltaY: 24)
+        }
+        return element.isHittable
     }
 
     /// Instance-method alias so existing tests keep compiling.

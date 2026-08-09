@@ -99,10 +99,17 @@ final class MurmurUITrendStackTests: XCTestCase {
     /// The Lanes menu removes a row. Asserted by disappearance rather than by
     /// the menu's checkmark: a menu that toggles its own state while the stack
     /// ignores it would pass any check on the menu alone.
+    ///
+    /// Runs in a FORCED SHORT WINDOW: this test failed "not hittable" on
+    /// Xcode Cloud's 1024×768 VMs, where the production minimum window can't
+    /// fit the screen and the stack's bottom chrome hangs off it. With
+    /// WindowSizing capping the minimum under XCUI runs the window fits; the
+    /// forced size reproduces that regime on every machine so the regression
+    /// can't reach CI unseen.
     @MainActor
     func testLanesMenuRemovesALane() throws {
         let app = XCUIApplication()
-        app.launchArguments += ["--ui-test-sample"]
+        app.launchArguments += ["--ui-test-sample", "--ui-test-window=1000x600"]
         app.launch()
 
         let hrLane = app.descendants(matching: .any)
@@ -113,6 +120,10 @@ final class MurmurUITrendStackTests: XCTestCase {
         let menu = app.descendants(matching: .any)
             .matching(identifier: "trend-lanes-menu").firstMatch
         XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        // Short window: the trend stack sits past the fold of the scrolling
+        // context — bring it into view the way an analyst would.
+        XCTAssertTrue(MurmurUITests.scrollUntilHittable(menu, in: app),
+                      "The Lanes menu never became clickable, even after scrolling the stack into view")
         menu.click()
 
         let toggle = app.menuItems["trend-lane-toggle-hr"]

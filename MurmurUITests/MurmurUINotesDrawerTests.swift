@@ -27,12 +27,28 @@ final class MurmurUINotesDrawerTests: XCTestCase {
     /// Launch with the fixture and force the drawer open, whatever state the
     /// previous run persisted.
     @MainActor
-    private func launchWithDrawerOpen() -> XCUIApplication {
+    /// Click an element that may sit past the fold of the scrolling context
+    /// on a short display — scroll it into view over the context bar (the
+    /// shared MurmurUITests helper), then click.
+    private func scrollIntoViewAndClick(
+        _ element: XCUIElement,
+        within app: XCUIApplication,
+        _ what: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertTrue(MurmurUITests.scrollUntilHittable(element, in: app),
+                      "\(what) never became hittable, even after scrolling",
+                      file: file, line: line)
+        element.click()
+    }
+
+    private func launchWithDrawerOpen(extraArguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments += [
             "--ui-test-sample",
             "--ui-test-initial-duration=2"
-        ]
+        ] + extraArguments
         app.launch()
 
         let contextBar = app.descendants(matching: .any)
@@ -123,9 +139,14 @@ final class MurmurUINotesDrawerTests: XCTestCase {
     }
 
     /// Clicking a note row moves the trace to the note's anchor.
+    ///
+    /// Runs in a FORCED SHORT WINDOW (Xcode Cloud's 1024×768 VMs, where this
+    /// test first failed "not hittable"): the note row can legitimately land
+    /// below the drawer's fold, so the test scrolls it into view — which is
+    /// also what a real analyst on a small display would do.
     @MainActor
     func testNoteRowClickJumpsViewport() throws {
-        let app = launchWithDrawerOpen()
+        let app = launchWithDrawerOpen(extraArguments: ["--ui-test-window=1000x600"])
 
         let viewportState = app.descendants(matching: .any)
             .matching(identifier: "ui-test-viewport-state").firstMatch
@@ -138,13 +159,17 @@ final class MurmurUINotesDrawerTests: XCTestCase {
         editToggle.click()
         let newNote = app.buttons.matching(identifier: "notes-drawer-new-note").firstMatch
         XCTAssertTrue(newNote.waitForExistence(timeout: 3))
-        newNote.click()
+        scrollIntoViewAndClick(newNote, within: app, "the new-note button")
 
         // Move the trace away from the anchor: a click on the overview strip
         // recentres mid-record (lead I is the fixture's focused default).
+        // (Scrolling down for the drawer may have pushed the ribbon above
+        // the fold — the helper sweeps both directions.)
         let ribbon = app.descendants(matching: .any)
             .matching(identifier: "overview-ribbon-I").firstMatch
         XCTAssertTrue(ribbon.waitForExistence(timeout: 3))
+        XCTAssertTrue(MurmurUITests.scrollUntilHittable(ribbon, in: app),
+                      "The overview ribbon should scroll back into view")
         let beforeScrub = viewportState.label
         ribbon.click()
         let scrubbed = NSPredicate(format: "label != %@", beforeScrub)
@@ -164,7 +189,7 @@ final class MurmurUINotesDrawerTests: XCTestCase {
             .firstMatch
         XCTAssertTrue(noteRow.waitForExistence(timeout: 3),
                       "The created note should render a list row")
-        noteRow.click()
+        scrollIntoViewAndClick(noteRow, within: app, "the note row")
 
         let jumped = NSPredicate(format: "label != %@", afterScrub)
         XCTAssertEqual(
