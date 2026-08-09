@@ -262,6 +262,16 @@ enum UITestSupport {
         ProcessInfo.processInfo.arguments.contains("--ui-test-vtvf-candidates")
     }
 
+    /// True when `--ui-test-first-run-ruo` is passed: force the first-run
+    /// RUO notice to present regardless of any stored acknowledgement (XCUI
+    /// runs share the app container's defaults, so an acknowledgement from
+    /// an earlier run must not make the notice test flaky). Every OTHER
+    /// UI-test launch suppresses the notice — see
+    /// `RUOFirstRunNotice.shouldPresent`.
+    static var forceFirstRunRUO: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-first-run-ruo")
+    }
+
     /// True when `--ui-test-arrhythmia-candidates` is passed. Same bypass as
     /// `injectVTVFCandidates`, for the arrhythmia scan (A2): BedsideView
     /// publishes a fixed candidate set into `ArrhythmiaScanContext` so the
