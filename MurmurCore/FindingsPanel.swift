@@ -1469,10 +1469,14 @@ struct FindingsPanel: View {
     }
 
     /// The RUO badge — the findings-queue surface is one of the two allowed
-    /// RUO surfaces (the VT/VF scan-dialog header is the other). Both
-    /// candidate groups' badges are THIS one surface; keeping it to exactly
-    /// these two is what keeps it credible
-    /// (feedback_research_use_only_framing.md).
+    /// PER-OUTPUT RUO surfaces (the VT/VF scan-dialog header is the other).
+    /// Both candidate groups' badges are THIS one surface; keeping output
+    /// badges to exactly these two is what keeps them credible
+    /// (feedback_research_use_only_framing.md). The once-only first-launch
+    /// disclosure (X4b, `RUOFirstRunNotice`) is deliberately NOT counted
+    /// here: it speaks about the app's posture before any output exists,
+    /// not about an output — the two kinds must not be conflated, or the
+    /// badge count starts growing by analogy.
     private func ruoBadge(_ notice: String) -> some View {
         Text("RUO")
             .font(.caption2.weight(.bold))

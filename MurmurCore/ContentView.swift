@@ -58,6 +58,11 @@ public struct ContentView: View {
     /// restores ITS OWN paper rather than the active one's.
     @State private var sessionStates: [String: MurSessionState] = [:]
     @State private var sessionProvenances: [String: MurProvenance] = [:]
+    /// X4b: the once-only first-launch RUO disclosure. Set on acknowledge,
+    /// never re-prompted (see RUOFirstRunNotice for the rule framing).
+    @AppStorage(RUOFirstRunNotice.acknowledgedDefaultsKey)
+    private var hasAcknowledgedRUONotice = false
+    @State private var showRUONotice = false
 
     struct PendingCSVImport: Identifiable {
         let id = UUID()
@@ -67,6 +72,25 @@ public struct ContentView: View {
     }
 
     public init() {}
+
+    /// X4b: present the first-run RUO notice when the gate says so. The
+    /// force/suppress split lives in `RUOFirstRunNotice.shouldPresent`;
+    /// outside DEBUG there is no force path and no UI-test suppression.
+    private func presentRUONoticeIfNeeded() {
+        #if DEBUG
+        showRUONotice = RUOFirstRunNotice.shouldPresent(
+            hasAcknowledged: hasAcknowledgedRUONotice,
+            isUITestRun: UITestSupport.isRunningUITest,
+            forcedByTest: UITestSupport.forceFirstRunRUO
+        )
+        #else
+        showRUONotice = RUOFirstRunNotice.shouldPresent(
+            hasAcknowledged: hasAcknowledgedRUONotice,
+            isUITestRun: false,
+            forcedByTest: false
+        )
+        #endif
+    }
 
     enum AppState {
         case empty
@@ -125,6 +149,16 @@ public struct ContentView: View {
             openUITestCSVIfRequested()
             openUITestHeaderlessCSVIfRequested()
             #endif
+            presentRUONoticeIfNeeded()
+        }
+        // The acknowledge button is the only way out — an Esc-dismissal
+        // would silently re-queue the notice for next launch.
+        .sheet(isPresented: $showRUONotice) {
+            RUOFirstRunView {
+                hasAcknowledgedRUONotice = true
+                showRUONotice = false
+            }
+            .interactiveDismissDisabled()
         }
         .sheet(item: $pendingCSV) { pending in
             CSVImportDialog(
