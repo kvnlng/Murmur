@@ -91,13 +91,22 @@ struct MurmurApp: App {
     }
 
 
+    /// Production minimum is 1100×720 (Guideline 4 fix), unconditionally.
+    /// Under a DEBUG XCUI run the minimum is capped by the runner's visible
+    /// screen so the window can fit short CI displays — see WindowSizing for
+    /// the failure mode this prevents.
+    ///
+    /// A property, NOT a `let` + explicit `return` inside `body`: `body` is a
+    /// @SceneBuilder, and an explicit `return` silently drops every scene
+    /// after the returned one — the Settings scene below became dead code
+    /// that way once (no Settings… menu item, no ⌘,), and the only compile
+    /// diagnostic is a warning.
+    private var minimums: (width: CGFloat, height: CGFloat) {
+        WindowSizing.effectiveMinimums()
+    }
+
     var body: some Scene {
-        // Production minimum is 1100×720 (Guideline 4 fix), unconditionally.
-        // Under a DEBUG XCUI run the minimum is capped by the runner's
-        // visible screen so the window can fit short CI displays — see
-        // WindowSizing for the failure mode this prevents.
-        let minimums = WindowSizing.effectiveMinimums()
-        return WindowGroup {
+        WindowGroup {
             ContentView()
                 .frame(minWidth: minimums.width, minHeight: minimums.height)
                 // Invisible orchestrator: watches CurrentRecordingContext +

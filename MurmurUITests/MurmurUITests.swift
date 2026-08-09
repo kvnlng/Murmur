@@ -277,8 +277,12 @@ final class MurmurUITests: XCTestCase {
         // Retired the old `summary-chip-*` chip row 2026-07-05; the
         // rail's picker does the same job in a location that's always
         // visible (dodges the CI-window-height flake).
+        //
+        // Runs in a FORCED SHORT WINDOW (~Xcode Cloud's 1024×768 VM regime,
+        // where this test failed once) so the findings rail keeps working
+        // on a display this small on every machine, not just in CI.
         let app = XCUIApplication()
-        app.launchArguments += ["--ui-test-sample"]
+        app.launchArguments += ["--ui-test-sample", "--ui-test-window=960x600"]
         app.launch()
 
         let vfRow = app.buttons.matching(identifier: "finding-row-VF").firstMatch
@@ -291,7 +295,17 @@ final class MurmurUITests: XCTestCase {
         XCTAssertTrue(picker.waitForExistence(timeout: 3))
         picker.click()
         let vtItem = app.menuItems.matching(identifier: "findings-category-filter-VT").firstMatch
-        XCTAssertTrue(vtItem.waitForExistence(timeout: 3))
+        if !vtItem.waitForExistence(timeout: 3) {
+            // Slow CI VMs: the first click can land on a stale coordinate
+            // snapshot while the capped short window is still settling, or
+            // the opened menu's AX tree can take longer than 3 s to
+            // materialise. Close whatever half-opened and try once more —
+            // the assertion below still fails if the item genuinely isn't
+            // in the menu.
+            app.typeKey(.escape, modifierFlags: [])
+            picker.click()
+        }
+        XCTAssertTrue(vtItem.waitForExistence(timeout: 5))
         vtItem.click()
 
         XCTAssertTrue(MurmurUITests.waitForElementToDisappear(vfRow, timeout: 3),
