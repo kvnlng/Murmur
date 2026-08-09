@@ -32,6 +32,10 @@ private enum IntervalTrendComputeMemo {
         let qtcFormulaName: String
         let template: MarkingsTemplate?
         let qualifiers: [IntervalBinQualifier]
+        /// X58: the gate echo lands in the repro caption, so a dial change
+        /// with an unchanged template (nothing newly excluded) must still
+        /// bust the memo.
+        let tOffsetGateCaption: String
     }
 
     private static var cachedKey: Key?
@@ -101,6 +105,11 @@ struct IntervalTrendLaneMemoizedStrip: View, Equatable {
     let onPickBinPreset: (IntervalTrendBinPreset) -> Void
     let onPickShowMode: (IntervalTrendShowMode) -> Void
     let onPickFormula: (MarkingsQTcFormula) -> Void
+    /// X58: the T-offset gate in effect + its setter. In the fingerprint so a
+    /// dial change re-renders the chip and recomputes the caption.
+    let tOffsetGateEnabled: Bool
+    let tOffsetGateScore: Int
+    let onSetTOffsetGate: (Bool, Int) -> Void
     let onAddGuide: (Double, String) -> Void
     let onRemoveGuide: (UUID) -> Void
     /// Excluded from `==` (a closure rebuilt every pass); gated by
@@ -130,12 +139,17 @@ struct IntervalTrendLaneMemoizedStrip: View, Equatable {
             && lhs.externalHoverTimeSeconds == rhs.externalHoverTimeSeconds
             && lhs.rangeFindings == rhs.rangeFindings
             && lhs.authoringEnabled == rhs.authoringEnabled
+            && lhs.tOffsetGateEnabled == rhs.tOffsetGateEnabled
+            && lhs.tOffsetGateScore == rhs.tOffsetGateScore
     }
 
     var body: some View {
         // Recompute only when a COMPUTE input changes — not on pan/zoom, which
         // only moves the render's x-domain. This is what keeps a long recording
         // from hanging as the strip body re-runs on each zoom frame.
+        let gateCaption = IntervalMarkingsContext.tOffsetGateCaption(
+            enabled: tOffsetGateEnabled, score: tOffsetGateScore
+        )
         let key = IntervalTrendComputeMemo.Key(
             beatsCount: beats.count,
             firstRPeak: beats.first?.rPeakSampleIndex,
@@ -146,7 +160,8 @@ struct IntervalTrendLaneMemoizedStrip: View, Equatable {
             templateBeatCount: templateBeatCount,
             qtcFormulaName: qtcFormulaName,
             template: template,
-            qualifiers: qualifiers
+            qualifiers: qualifiers,
+            tOffsetGateCaption: gateCaption
         )
         let data = IntervalTrendComputeMemo.data(for: key) {
             IntervalTrendComputer.compute(
@@ -161,7 +176,8 @@ struct IntervalTrendLaneMemoizedStrip: View, Equatable {
                 // code (Recording.normalBeatSampleIndices), NOT an app-computed
                 // morphology cluster — state that selection basis in the caption.
                 templateSelectionBasis: template != nil ? "annotator-coded normal (N)" : nil,
-                qualifiers: qualifiers
+                qualifiers: qualifiers,
+                tOffsetGateCaption: gateCaption
             )
         }
         IntervalTrendLane(
@@ -184,6 +200,9 @@ struct IntervalTrendLaneMemoizedStrip: View, Equatable {
             onPickBinPreset: onPickBinPreset,
             onPickShowMode: onPickShowMode,
             onPickFormula: onPickFormula,
+            tOffsetGateEnabled: tOffsetGateEnabled,
+            tOffsetGateScore: tOffsetGateScore,
+            onSetTOffsetGate: onSetTOffsetGate,
             onAddGuide: onAddGuide,
             onRemoveGuide: onRemoveGuide,
             // Gate the gesture here so a locked / unentitled lane still taps +

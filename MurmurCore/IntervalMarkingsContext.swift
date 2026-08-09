@@ -390,6 +390,51 @@ public final class IntervalMarkingsContext {
         }
     }
 
+    // MARK: - T-offset reliability gate (X58 — the analyst's dial)
+
+    /// The derived default exclusion threshold — mirror of
+    /// `MurmurMetrics.TOffsetReliability.defaultExclusionScore` (score ≥ 1,
+    /// the QTDB+LUDB-swept operating point: T-offset SD 59.3 ms at 12.6%
+    /// excluded). Named here so MurmurCore UI can state the default without
+    /// importing the paid framework, and so a drift between the two is a
+    /// one-line test.
+    public nonisolated static let defaultTOffsetExclusionScore = 1
+
+    /// X58: whether beats with an unreliable T-offset are EXCLUDED from the
+    /// QT aggregates — bin medians, the patient-normal template, and the
+    /// departure baseline. Default true (exclude): the rec-212 failure mode
+    /// is false T-terminations biased LONG, and including them silently
+    /// re-poisons the template. The analyst can include them; the app ships
+    /// the default and never arbitrates the dial.
+    public var tOffsetExclusionEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(tOffsetExclusionEnabled, forKey: Keys.tOffsetExclusionEnabled)
+        }
+    }
+
+    /// X58: the risk-score threshold at which a T-offset counts as
+    /// unreliable (exclude at score ≥ this). Clamped to 1…6 — 0 would
+    /// exclude every beat (the flag-free majority score 0), and the risk
+    /// score's practical ceiling is single-digit.
+    public var tOffsetExclusionScore: Int {
+        didSet {
+            let clamped = min(6, max(1, tOffsetExclusionScore))
+            if clamped != tOffsetExclusionScore {
+                tOffsetExclusionScore = clamped
+                return  // didSet re-fires with the clamped value and persists.
+            }
+            UserDefaults.standard.set(tOffsetExclusionScore, forKey: Keys.tOffsetExclusionScore)
+        }
+    }
+
+    /// The gate stated for captions/citations — a methods fact a reviewer
+    /// needs to reproduce the aggregates. Pure so tests pin the wording.
+    public nonisolated static func tOffsetGateCaption(enabled: Bool, score: Int) -> String {
+        enabled
+            ? "T-offset gate: exclude score ≥ \(score)"
+            : "T-offset gate: off (low-confidence beats included)"
+    }
+
     /// What the fiducial overlay is ACTUALLY drawing right now, published
     /// by the focused channel panel (the only place that knows the zoom
     /// tier, which needs canvas geometry). The Layers chip reads it so the
@@ -434,6 +479,12 @@ public final class IntervalMarkingsContext {
         } else {
             self.enabledLayers = Set(MarkingsFiducialLayer.allCases)
         }
+        // X58 gate: absent keys read as the shipped defaults (exclude, at the
+        // derived operating point).
+        self.tOffsetExclusionEnabled = UserDefaults.standard.object(forKey: Keys.tOffsetExclusionEnabled) as? Bool ?? true
+        let persistedScore = UserDefaults.standard.object(forKey: Keys.tOffsetExclusionScore) as? Int
+            ?? Self.defaultTOffsetExclusionScore
+        self.tOffsetExclusionScore = min(6, max(1, persistedScore))
     }
 
     // MARK: - Writes (orchestrator)
@@ -584,6 +635,8 @@ public final class IntervalMarkingsContext {
     private enum Keys {
         static let qtcFormula = "murmur.intervalMarkings.qtcFormula"
         static let enabledLayers = "murmur.intervalMarkings.enabledLayers"
+        static let tOffsetExclusionEnabled = "murmur.intervalMarkings.tOffsetExclusionEnabled"
+        static let tOffsetExclusionScore = "murmur.intervalMarkings.tOffsetExclusionScore"
     }
 }
 

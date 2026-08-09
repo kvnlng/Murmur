@@ -34,6 +34,10 @@ struct IntervalMarkingsOrchestrator: View {
         let recordingID: UUID?
         let owned: Bool
         let qtcFormula: MarkingsQTcFormula
+        // X58: the analyst's T-offset gate governs the template and the
+        // per-beat unreliable flags — moving the dial is a recompute.
+        let tOffsetExclusionEnabled: Bool
+        let tOffsetExclusionScore: Int
     }
 
     var body: some View {
@@ -43,7 +47,9 @@ struct IntervalMarkingsOrchestrator: View {
             .task(id: Key(
                 recordingID: recordingContext.recording?.id,
                 owned: store.hasStudio,
-                qtcFormula: markingsContext.qtcFormula
+                qtcFormula: markingsContext.qtcFormula,
+                tOffsetExclusionEnabled: markingsContext.tOffsetExclusionEnabled,
+                tOffsetExclusionScore: markingsContext.tOffsetExclusionScore
             )) {
                 await recompute()
             }
@@ -83,6 +89,15 @@ struct IntervalMarkingsOrchestrator: View {
         let spanStart = beatSampleIndices.min()
         let spanEnd = beatSampleIndices.max()
         let qtcFormula = await MainActor.run { markingsContext.qtcFormula }
+        // X58: the analyst's dial. Off means "include low-confidence beats" —
+        // no score reaches Int.max, so nothing is flagged or excluded. The
+        // X53 plausibility rules stay on either way: physical impossibility
+        // is not the analyst's dial.
+        let reliabilityThreshold = await MainActor.run {
+            markingsContext.tOffsetExclusionEnabled
+                ? markingsContext.tOffsetExclusionScore
+                : Int.max
+        }
 
         // Delineate + measure + build template off the main actor.
         // Even a multi-hour recording (~100k beats) is a few hundred
@@ -124,7 +139,8 @@ struct IntervalMarkingsOrchestrator: View {
                 from: store,
                 qtcFormula: Self.metricsFormula(from: qtcFormula),
                 excluding: QTPlausibilityFilter.defaultRules,
-                features: features
+                features: features,
+                reliabilityThreshold: reliabilityThreshold
             )
             let implausibleMask = QTPlausibilityFilter.mask(for: store)
             let calibration = CalibrationTable.builtInTOffset
@@ -153,10 +169,10 @@ struct IntervalMarkingsOrchestrator: View {
                     qtCalibratedHalfWidthMs: ciHalfWidth,
                     tOffsetIsoelectricSampleIndex: feat.tOffsetIsoelectricSampleIndex,
                     isImplausible: i < implausibleMask.count ? implausibleMask[i] : false,
-                    // X79: the SAME reliability call the template builder
-                    // applies, so what the template excluded and what the
-                    // bins/ranking withhold can never disagree.
-                    isUnreliable: !TOffsetReliability.isReliable(feat)
+                    // X79: the SAME reliability call (and threshold) the
+                    // template builder applies, so what the template excluded
+                    // and what the bins/ranking withhold can never disagree.
+                    isUnreliable: !TOffsetReliability.isReliable(feat, threshold: reliabilityThreshold)
                 )
             }
             let coreTemplate: MarkingsTemplate? = template.sampleCount > 0

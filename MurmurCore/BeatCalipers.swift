@@ -126,7 +126,7 @@ struct BeatCalipers: View {
     private var templateProvenanceFooter: some View {
         if let template {
             Divider().opacity(0.4)
-            Text(templateProvenanceText(template))
+            Text(Self.templateProvenanceText(template, sampleRate: sampleRate))
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -134,7 +134,9 @@ struct BeatCalipers: View {
         }
     }
 
-    private func templateProvenanceText(_ t: MarkingsTemplate) -> String {
+    /// Internal (not private) so the wording — methods provenance the
+    /// analyst reads against the template — is pinned by unit tests.
+    static func templateProvenanceText(_ t: MarkingsTemplate, sampleRate: Double) -> String {
         var text = "Patient normal: \(t.sampleCount) beats"
         // X25: disclose the lead the intervals were measured in. Convention is
         // to measure where the T offset is clearest (II / V5 commonly), so
@@ -143,12 +145,18 @@ struct BeatCalipers: View {
             text += " · lead \(lead)"
         }
         if let start = t.spanStartSample, let end = t.spanEndSample, sampleRate > 0 {
-            text += " · \(clockString(start))–\(clockString(end))"
+            text += " · \(clockString(start, sampleRate: sampleRate))–\(clockString(end, sampleRate: sampleRate))"
+        }
+        // X58: exclude-and-count, per reason — a bare total (or attributing
+        // everything to "physically impossible") would mislabel the
+        // reliability exclusions.
+        if t.excludedBeatCount > 0 {
+            text += " · \(t.excludedBeatCount) excluded (\(t.excludedImplausibleCount) physically impossible · \(t.excludedUnreliableCount) unreliable T-offset)"
         }
         return text
     }
 
-    private func clockString(_ sample: Int64) -> String {
+    private static func clockString(_ sample: Int64, sampleRate: Double) -> String {
         let total = max(0, Int((Double(sample) / sampleRate).rounded()))
         return String(format: "%d:%02d", total / 60, total % 60)
     }

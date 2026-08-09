@@ -136,6 +136,14 @@ struct IntervalTrendLane: View {
     /// Set the QTc formula (X44). Nil hides the formula picker.
     let onPickFormula: ((MarkingsQTcFormula) -> Void)?
 
+    /// X58: the T-offset reliability gate in effect — whether unreliable
+    /// T-offsets are excluded from the QT aggregates, and at what risk-score
+    /// threshold. Display state for the gate chip; ignored off the QTc lane.
+    let tOffsetGateEnabled: Bool
+    let tOffsetGateScore: Int
+    /// Change the gate (enabled, score). Nil hides the gate chip.
+    let onSetTOffsetGate: ((Bool, Int) -> Void)?
+
     /// Analyst-placed threshold guides for the current metric.
     /// Rendered as dashed horizontal lines with tags — never asserted
     /// by the app.
@@ -215,6 +223,9 @@ struct IntervalTrendLane: View {
         onPickBinPreset: ((IntervalTrendBinPreset) -> Void)? = nil,
         onPickShowMode: ((IntervalTrendShowMode) -> Void)? = nil,
         onPickFormula: ((MarkingsQTcFormula) -> Void)? = nil,
+        tOffsetGateEnabled: Bool = true,
+        tOffsetGateScore: Int = IntervalMarkingsContext.defaultTOffsetExclusionScore,
+        onSetTOffsetGate: ((Bool, Int) -> Void)? = nil,
         onAddGuide: ((Double, String) -> Void)? = nil,
         onRemoveGuide: ((UUID) -> Void)? = nil,
         onAuthorRange: ((Double, Double, String, String) -> Void)? = nil,
@@ -227,6 +238,9 @@ struct IntervalTrendLane: View {
         self.band = band
         self.qtcFormula = qtcFormula
         self.onPickFormula = onPickFormula
+        self.tOffsetGateEnabled = tOffsetGateEnabled
+        self.tOffsetGateScore = tOffsetGateScore
+        self.onSetTOffsetGate = onSetTOffsetGate
         self.selectedBinPreset = selectedBinPreset
         self.guides = guides
         self.events = events
@@ -311,6 +325,7 @@ struct IntervalTrendLane: View {
 
             metricPicker
             formulaPicker
+            tOffsetGateChip
             binPicker
             showModePicker
             // Honest coercion cue (X41): the analyst preferred per-beat scatter
@@ -448,6 +463,52 @@ struct IntervalTrendLane: View {
                 .help("QTc rate-correction formula. FDA/EMA favour Fridericia for drug studies; the 2009 AHA/ACCF/HRS statement preferred linear methods (Framingham, Hodges) over Bazett and Fridericia for routine monitoring. Values under different formulas are NOT comparable — don't read one against another.")
             }
         }
+    }
+
+    /// X58: the analyst's T-offset reliability dial — exclude-and-count,
+    /// exclude by default. The app ships the DERIVED operating point
+    /// (score ≥ 1, QTDB+LUDB sweep) and never arbitrates the dial; this chip
+    /// is where the analyst owns it. Governs the bin medians, the
+    /// patient-normal template, and the departure baseline — not just the
+    /// visible aggregate. QTc-only: the gate touches no other metric.
+    @ViewBuilder
+    private var tOffsetGateChip: some View {
+        if metric == .qtc, let onSet = onSetTOffsetGate {
+            controlChip(
+                label: gateChipLabel,
+                identifier: "interval-trend-lane-toffset-gate"
+            ) {
+                Menu {
+                    Toggle(isOn: Binding(
+                        get: { !tOffsetGateEnabled },
+                        set: { include in onSet(!include, tOffsetGateScore) }
+                    )) {
+                        Text("Include low-confidence beats")
+                    }
+                    Section("Exclude at T-offset risk score ≥") {
+                        ForEach(1...5, id: \.self) { score in
+                            Toggle(isOn: Binding(
+                                get: { tOffsetGateEnabled && tOffsetGateScore == score },
+                                set: { _ in onSet(true, score) }
+                            )) {
+                                Text(score == IntervalMarkingsContext.defaultTOffsetExclusionScore
+                                     ? "\(score) — derived default (QTDB+LUDB)"
+                                     : "\(score)")
+                            }
+                        }
+                    }
+                } label: {
+                    chipContent(text: gateChipLabel)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("T-offset reliability gate. Beats the delineator flags at or above the score are withheld from the QTc bin medians, the patient-normal template, and the departure baseline — withheld and counted, never hidden. The default (score ≥ 1) is the QTDB+LUDB-derived operating point: T-offset SD 59.3 ms at 12.6% excluded. Including low-confidence beats lets biased-long false T-terminations into those aggregates. Measurement reliability only — never a statement about the patient.")
+            }
+        }
+    }
+
+    private var gateChipLabel: String {
+        tOffsetGateEnabled ? "T-gate ≥\(tOffsetGateScore)" : "T-gate off"
     }
 
     @ViewBuilder

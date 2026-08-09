@@ -329,7 +329,8 @@ public enum IntervalTrendComputer {
         qtcFormulaName: String,
         templateSelectionBasis: String? = nil,
         qualifiers: [IntervalBinQualifier] = [],
-        confidenceFloor: Double = 0.60
+        confidenceFloor: Double = 0.60,
+        tOffsetGateCaption: String? = nil
     ) -> IntervalTrendData {
         // Join the paid per-bin qualifying facts (X42) by bin index — both the
         // qualifiers and the bins below start at k·binSeconds, so the index is
@@ -353,7 +354,10 @@ public enum IntervalTrendComputer {
             templateSelectionBasis: templateSelectionBasis,
             spanStartSample: template?.spanStartSample,
             spanEndSample: template?.spanEndSample,
-            sampleRate: sampleRate
+            sampleRate: sampleRate,
+            excludedImplausibleCount: template?.excludedImplausibleCount ?? 0,
+            excludedUnreliableCount: template?.excludedUnreliableCount ?? 0,
+            tOffsetGateCaption: tOffsetGateCaption
         )
 
         guard sampleRate > 0, binSeconds > 0, !beats.isEmpty else {
@@ -568,7 +572,9 @@ public enum IntervalTrendComputer {
 
     // MARK: - Repro caption
 
-    private static func reproCaption(
+    /// Internal (not private) so the wording — a methods statement the
+    /// analyst copies verbatim — is pinned by unit tests.
+    static func reproCaption(
         metric: IntervalTrendMetric,
         binSeconds: Double,
         templateBeatCount: Int?,
@@ -577,7 +583,10 @@ public enum IntervalTrendComputer {
         templateSelectionBasis: String?,
         spanStartSample: Int64?,
         spanEndSample: Int64?,
-        sampleRate: Double
+        sampleRate: Double,
+        excludedImplausibleCount: Int = 0,
+        excludedUnreliableCount: Int = 0,
+        tOffsetGateCaption: String? = nil
     ) -> String {
         let binLabel = binLabel(seconds: binSeconds)
         // X48 §4(b): the template figure must disclose what the beats were
@@ -597,10 +606,22 @@ public enum IntervalTrendComputer {
                 )
                 frag += " · spanning \(span)"
             }
+            // X58: exclude-AND-COUNT, per reason. A single total attributed to
+            // "physically impossible" would mislabel the reliability
+            // exclusions, so both causes are named whenever either fired.
+            let excludedTotal = excludedImplausibleCount + excludedUnreliableCount
+            if excludedTotal > 0 {
+                frag += " (\(excludedTotal) excluded: \(excludedImplausibleCount) physically impossible · \(excludedUnreliableCount) unreliable T-offset)"
+            }
             templateFragment = frag
         } else {
             templateFragment = "no template"
         }
+        // X58: the gate setting is a methods fact — the aggregates cannot be
+        // reproduced without it. QTc only; the gate touches no other metric.
+        let gateFragment = metric == .qtc
+            ? (tOffsetGateCaption.map { " · \($0)" } ?? "")
+            : ""
         // C3: disclose the lead the intervals were measured in — a methods
         // reviewer requires it, and this caption is copied verbatim into the
         // citation payload. Appended (not prefixed) so the metric stays the
@@ -608,7 +629,7 @@ public enum IntervalTrendComputer {
         let leadFragment = sourceLead.map { " · measured in \($0)" } ?? ""
         switch metric {
         case .qtc:
-            return "QTc · \(qtcFormulaName) · \(binLabel) bins · \(templateFragment)\(leadFragment)"
+            return "QTc · \(qtcFormulaName) · \(binLabel) bins · \(templateFragment)\(leadFragment)\(gateFragment)"
         case .pr:
             return "PR · \(binLabel) bins · \(templateFragment)\(leadFragment)"
         case .qrs:

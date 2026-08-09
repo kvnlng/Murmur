@@ -946,13 +946,19 @@ struct BedsideView: View {
                 prMs: 150, qrsMs: 90, qtMs: qtcMs * 0.9, qtcMs: qtcMs, precedingRRMs: 800
             )
         }
+        // X58: carries a fixed per-reason exclusion split so XCUI can assert
+        // the exclude-and-count surfaces (lane caption + provenance footer)
+        // render the counts without running the delineator.
         let template = MarkingsTemplate(
             sampleCount: 30,
             medianPRMs: 150, iqrPRMs: 8,
             medianQRSMs: 90, iqrQRSMs: 6,
             medianQTMs: qtcMs * 0.9, iqrQTMs: 10,
             qtcFormulaName: markingsContext.qtcFormula.displayName,
-            medianQTcMs: qtcMs, iqrQTcMs: 10
+            medianQTcMs: qtcMs, iqrQTcMs: 10,
+            excludedBeatCount: 5,
+            excludedImplausibleCount: 2,
+            excludedUnreliableCount: 3
         )
         markingsContext.set(beats: beats, sampleRate: sr, template: template)
     }
@@ -2111,6 +2117,12 @@ struct BedsideView: View {
                 },
                 onPickFormula: { formula in
                     markingsContext.qtcFormula = formula
+                },
+                tOffsetGateEnabled: markingsContext.tOffsetExclusionEnabled,
+                tOffsetGateScore: markingsContext.tOffsetExclusionScore,
+                onSetTOffsetGate: { enabled, score in
+                    markingsContext.tOffsetExclusionEnabled = enabled
+                    markingsContext.tOffsetExclusionScore = score
                 },
                 onAddGuide: { valueMs, label in
                     trendGuideStore.add(
