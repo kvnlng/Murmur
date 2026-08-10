@@ -33,6 +33,9 @@ struct BedsideView: View {
     /// candidate jumps recenter without changing zoom — for analysts who
     /// read in fixed time windows. A manual zoom breaks the lock.
     @State private var windowLockedTo10s = false
+    /// X83: the bedside column's rendered height, for deciding whether the
+    /// Variability Metrics strip fits above the pinned stage.
+    @State private var bedsideContentHeight: CGFloat = 0
     /// X28 — elapsed vs wall-clock. App preference, shared across records.
     private var timeDisplay: TimeDisplayContext { TimeDisplayContext.shared }
     /// The record's real start instant, or nil when it carried none. nil is the
@@ -1511,6 +1514,10 @@ struct BedsideView: View {
             // the pinned stage onto this branch.
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    // X83: the whole-record summary reads ABOVE the monitor
+                    // in both layouts — first in the scroll here, above the
+                    // pinned stage in focus mode.
+                    VariabilityMetricsStrip()
                     contextBar
                     ForEach(ecgChannels) { channel in
                         ChannelPanel(
@@ -1536,12 +1543,12 @@ struct BedsideView: View {
     /// places); sharing one property makes divergence impossible rather than
     /// merely detectable.
     ///
-    /// X62: the whole-record summary reads BEFORE the rolling lane — the
-    /// record's numbers, then how they move over time. That is the order an
-    /// analyst reads in.
+    /// X62 ordered the whole-record summary BEFORE the rolling lanes; X83
+    /// moves it further, ABOVE the monitor itself (each layout branch places
+    /// it), so this property now starts at the trend stack. The reading
+    /// order is unchanged — record's numbers first, then how they move.
     @ViewBuilder
     private var contextLanes: some View {
-        VariabilityMetricsStrip()
         trendStackHeader
         BedsideTrendStack(
             heartRateChannel: lowRatePartition.heartRate,
@@ -1683,6 +1690,9 @@ struct BedsideView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    if !metricsReadAboveMonitor {
+                        VariabilityMetricsStrip()
+                    }
                     contextBar
                     contextLanes
                 }
@@ -1690,6 +1700,54 @@ struct BedsideView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+        // X83: the whole-record summary reads ABOVE the monitor. As a top
+        // safe-area inset, so it reads as chrome (like the chip bar) rather
+        // than as the first row of the stage — and only when the window can
+        // hold it: on short displays the strip returns to the top of the
+        // scrolling context instead — X82's whole-or-nothing rule, applied
+        // vertically.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if metricsReadAboveMonitor {
+                VariabilityMetricsStrip()
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(.background)
+                    // The cap is load-bearing, not cosmetic. The split view
+                    // sizes its detail column by probing this view's minimum
+                    // at width 0 — where the strip's tiles wrap into a
+                    // ~1800 pt tower — and then PROPOSES that answer back as
+                    // the column's height, shoving the whole persistent stage
+                    // off-window. Bounding what the probe can measure keeps
+                    // the pathological answer out of the negotiation; at any
+                    // real width the strip is ~165 pt and the cap never bites.
+                    .frame(maxHeight: Self.metricsStripInsetMaxHeight, alignment: .top)
+            }
+        }
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            proxy.size.height
+        } action: { height in
+            bedsideContentHeight = height
+        }
+    }
+
+    /// X83: whether the Variability Metrics strip renders above the pinned
+    /// stage. Below this height the persistent column cannot hold stage +
+    /// strip and overflows off-window (measured: stage floor ~523 + strip
+    /// ~156 + divider and scroll minimum), so the strip yields back into
+    /// the scrolling context — never partially shown, never pushing the
+    /// stage off-screen. Zero height (first frame) counts as fitting so
+    /// the strip does not flash between positions during launch.
+    private static let metricsAboveMonitorMinHeight: CGFloat = 800
+
+    /// Ceiling on the strip-above-monitor inset's measured height. Roomy
+    /// enough for every strip variant at the narrowest column the tall
+    /// regime can produce (~165 pt measured, locked/insufficient smaller);
+    /// exists so the width-0 minimum-size probe (see the inset comment)
+    /// cannot report a wrapped-to-a-tower height.
+    private static let metricsStripInsetMaxHeight: CGFloat = 260
+
+    private var metricsReadAboveMonitor: Bool {
+        bedsideContentHeight <= 0 || bedsideContentHeight >= Self.metricsAboveMonitorMinHeight
     }
 
     /// The pinned stage. Contains the ECG canvas, the docked caliper
