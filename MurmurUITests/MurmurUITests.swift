@@ -601,16 +601,30 @@ final class MurmurUITests: XCTestCase {
         let surface = app.scrollViews
             .containing(.any, identifier: "context-bar").firstMatch
         guard surface.exists else { return element.isHittable }
-        for _ in 0..<maxTicks {
-            let ef = element.frame
-            let sf = surface.frame
-            // Inside the viewport (with a small margin so a row peeking one
-            // pixel past the fold doesn't count) — stop scrolling.
-            if !ef.isEmpty, ef.minY >= sf.minY + 8, ef.maxY <= sf.maxY - 8 { break }
-            // An empty frame means the element isn't realized yet — sweep
-            // down, the historical default; otherwise scroll TOWARD it.
-            let below = ef.isEmpty || ef.midY > sf.midY
-            surface.scroll(byDeltaX: 0, deltaY: below ? -24 : 24)
+        // Two passes, not one: the context column's lanes mount
+        // asynchronously (delineation, LF/HF, the X89 beat series), and each
+        // mount GROWS the scroll content and moves the target's frame — a
+        // single pass can exhaust its ticks chasing a layout that is still
+        // settling, exiting with the element half-clipped at the fold (found
+        // in X89's suite runs on an entitled machine, where all five lanes
+        // arrive over several seconds). The second pass steers on the
+        // settled layout.
+        for pass in 0..<2 {
+            if pass > 0 {
+                if element.isHittable { break }
+                usleep(1_000_000)   // let in-flight lane mounts land
+            }
+            for _ in 0..<maxTicks {
+                let ef = element.frame
+                let sf = surface.frame
+                // Inside the viewport (with a small margin so a row peeking one
+                // pixel past the fold doesn't count) — stop scrolling.
+                if !ef.isEmpty, ef.minY >= sf.minY + 8, ef.maxY <= sf.maxY - 8 { break }
+                // An empty frame means the element isn't realized yet — sweep
+                // down, the historical default; otherwise scroll TOWARD it.
+                let below = ef.isEmpty || ef.midY > sf.midY
+                surface.scroll(byDeltaX: 0, deltaY: below ? -24 : 24)
+            }
         }
         return element.isHittable
     }
