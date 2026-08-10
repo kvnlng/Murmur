@@ -51,7 +51,7 @@ enum SyntheticRecording {
     /// (~4,000 directories / ~2 GB before this sweep existed). Only entries
     /// older than an hour are removed so parallel test instances can never
     /// delete each other's live fixture.
-    private static func sweepStaleFixtures(in parent: URL) {
+    static func sweepStaleFixtures(in parent: URL) {
         let fm = FileManager.default
         guard let entries = try? fm.contentsOfDirectory(
             at: parent,
@@ -398,7 +398,7 @@ enum SyntheticRecording {
         let values: (Int) -> Int
     }
 
-    private static func safeFileName(_ name: String) -> String {
+    static func safeFileName(_ name: String) -> String {
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
         return name.unicodeScalars
             .map { allowed.contains($0) ? Character($0) : Character("_") }
