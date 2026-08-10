@@ -152,6 +152,17 @@ public struct AnchoredNote: Codable, Equatable, Sendable, Identifiable {
     /// "Include in exported report". Optional so notes saved before the field
     /// existed decode; absent reads as false.
     public var includeInReport: Bool?
+    /// X84 — the location-less kind. `true` marks a RECORD-LEVEL note: no
+    /// anchor, no marker on any band, no jump. `startSample`/`endSample` are
+    /// stored as 0 and mean nothing. Optional for the same reason as
+    /// `includeInReport`: notes saved before the field existed decode, and
+    /// absent reads as the location-marked kind they all were.
+    public var isRecordLevel: Bool?
+
+    /// The X84 kind split, readably. Every consumer that draws an anchor,
+    /// offers a jump, or captions a range must branch on this rather than
+    /// trusting the stored samples.
+    public var isLocationless: Bool { isRecordLevel == true }
 
     public init(
         id: UUID = UUID(),
@@ -161,7 +172,8 @@ public struct AnchoredNote: Codable, Equatable, Sendable, Identifiable {
         text: String = "",
         createdAt: Date,
         modifiedAt: Date,
-        includeInReport: Bool? = nil
+        includeInReport: Bool? = nil,
+        isRecordLevel: Bool? = nil
     ) {
         self.id = id
         self.startSample = startSample
@@ -171,6 +183,7 @@ public struct AnchoredNote: Codable, Equatable, Sendable, Identifiable {
         self.createdAt = createdAt
         self.modifiedAt = modifiedAt
         self.includeInReport = includeInReport
+        self.isRecordLevel = isRecordLevel
     }
 }
 

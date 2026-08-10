@@ -426,4 +426,77 @@ final class MurmurUINotesDrawerTests: XCTestCase {
         XCTAssertTrue(panel.waitForExistence(timeout: 3),
                       "⌘⇧N should reopen the collapsed drawer")
     }
+
+    // MARK: - X84: right-click authoring on the trace
+
+    /// The right-click chooser exists but its authoring items honour the
+    /// Editing latch — same rule as the drawer's own buttons.
+    @MainActor
+    func testRightClickMenuHonorsEditingLatch() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-sample"]
+        app.launch()
+
+        let stagePanel = app.descendants(matching: .any)
+            .matching(identifier: "channel-panel-I").firstMatch
+        XCTAssertTrue(stagePanel.waitForExistence(timeout: 10))
+        stagePanel.rightClick()
+
+        let newNoteItem = app.menuItems["bedside-context-new-note"]
+        XCTAssertTrue(newNoteItem.waitForExistence(timeout: 3),
+                      "Right-clicking the trace should offer a new-note item")
+        XCTAssertFalse(newNoteItem.isEnabled,
+                       "Note creation must stay behind the Editing latch")
+        app.typeKey(.escape, modifierFlags: [])
+    }
+
+    /// Right-click creates both context-note kinds: location-marked at the
+    /// clicked spot, and the location-less record note. Creation opens the
+    /// drawer on the fresh note so it can be typed into immediately.
+    @MainActor
+    func testRightClickCreatesBothNoteKinds() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-sample"]
+        app.launch()
+
+        let editToggle = app.descendants(matching: .any)
+            .matching(identifier: "edit-mode-toggle").firstMatch
+        XCTAssertTrue(editToggle.waitForExistence(timeout: 10))
+        editToggle.click()
+
+        let stagePanel = app.descendants(matching: .any)
+            .matching(identifier: "channel-panel-I").firstMatch
+        XCTAssertTrue(stagePanel.waitForExistence(timeout: 5))
+
+        // Location-marked, at the clicked time.
+        stagePanel.rightClick()
+        let newNoteItem = app.menuItems["bedside-context-new-note"]
+        XCTAssertTrue(newNoteItem.waitForExistence(timeout: 3))
+        newNoteItem.click()
+
+        let panel = app.descendants(matching: .any)
+            .matching(identifier: "context-panel").firstMatch
+        XCTAssertTrue(panel.waitForExistence(timeout: 3),
+                      "Creating from the trace should open the drawer on the fresh note")
+        let readout = app.descendants(matching: .any)
+            .matching(identifier: "notes-drawer-stepper-readout").firstMatch
+        XCTAssertTrue(readout.waitForExistence(timeout: 3))
+        XCTAssertEqual(spokenName(readout), "1 of 1")
+
+        // Location-less record note. It sorts to the head of the anchor
+        // order (no anchor), so the fresh selection reads 1 of 2.
+        stagePanel.rightClick()
+        let recordNoteItem = app.menuItems["bedside-context-new-record-note"]
+        XCTAssertTrue(recordNoteItem.waitForExistence(timeout: 3))
+        recordNoteItem.click()
+        let selectionIsFresh = NSPredicate(format: "label == '1 of 2' OR value == '1 of 2'")
+        XCTAssertEqual(
+            XCTWaiter.wait(
+                for: [XCTNSPredicateExpectation(predicate: selectionIsFresh, object: readout)],
+                timeout: 3
+            ),
+            .completed,
+            "The record note should be created and selected (was '\(spokenName(readout))')"
+        )
+    }
 }
