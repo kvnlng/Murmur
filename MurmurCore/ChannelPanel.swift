@@ -656,7 +656,15 @@ struct ChannelPanel: View {
     }
 
     /// Absolute sample index at the given canvas-local point.
+    ///
+    /// Zero-width guard is load-bearing: SwiftUI evaluates the context
+    /// menu's content (X84) during layout passes where GeometryReader has
+    /// not measured yet, and `cursorX / 0` is NaN — which `Int64.init`
+    /// TRAPS on, crashing the app under AX/menu evaluation (found by the
+    /// trend-stack UI suite the day X84 merged). A degenerate canvas
+    /// answers the viewport start rather than arithmetic on nothing.
     private func cursorSampleIndex(at location: CGPoint, in canvasSize: CGSize) -> Int64 {
+        guard canvasSize.width > 0 else { return viewport.startSample }
         let cursorX = max(0, min(canvasSize.width, location.x))
         let span = max(1, viewport.endSample - viewport.startSample)
         return viewport.startSample + Int64(Double(span) * Double(cursorX / canvasSize.width))
@@ -664,12 +672,11 @@ struct ChannelPanel: View {
 
     /// Absolute time (seconds from recording start) at the given
     /// canvas-local point, using the same viewport math the
-    /// `hoverCrosshair` overlay uses.
+    /// `hoverCrosshair` overlay uses. Same zero-width guard as
+    /// `cursorSampleIndex` (and a zero sample rate cannot divide either).
     private func cursorTimeSeconds(at location: CGPoint, in canvasSize: CGSize) -> Double {
-        let cursorX = max(0, min(canvasSize.width, location.x))
-        let span = max(1, viewport.endSample - viewport.startSample)
-        let sample = viewport.startSample + Int64(Double(span) * Double(cursorX / canvasSize.width))
-        return Double(sample) / channel.sampleRate
+        guard channel.sampleRate > 0 else { return 0 }
+        return Double(cursorSampleIndex(at: location, in: canvasSize)) / channel.sampleRate
     }
 
     /// 1-px vertical line at the cursor with a floating time label at the
