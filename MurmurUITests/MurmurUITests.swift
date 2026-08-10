@@ -582,31 +582,35 @@ final class MurmurUITests: XCTestCase {
     /// XCUICoordinate.scroll silently reaches nothing on macOS. Sweeps
     /// downward first, then back up, in small ticks so a short row can't
     /// be jumped over.
+    /// X98: steer by FRAME GEOMETRY, not by polling `isHittable`. On macOS,
+    /// `exists` and `frame` on an element clipped out of the scroll viewport
+    /// are ~0.1 s attribute reads — but `isHittable` on that same offscreen
+    /// element stalls ~20 s in XCUI's hit-test machinery, and the old
+    /// per-tick hittability poll paid that stall on every tick (one drawer
+    /// test spent 139 of 163 s in exactly seven such calls). Frames tell us
+    /// which way to scroll and when the element is inside the viewport;
+    /// `isHittable` is asked ONCE at the end, when the element is visible
+    /// and the check is cheap.
     @MainActor
     static func scrollUntilHittable(
         _ element: XCUIElement,
         in app: XCUIApplication,
         maxTicks: Int = 40
     ) -> Bool {
-        if element.isHittable { return true }
+        guard element.exists else { return false }
         let surface = app.scrollViews
             .containing(.any, identifier: "context-bar").firstMatch
-        func surfaceReady() -> Bool {
-            guard surface.exists else { return false }
-            if surface.isHittable { return true }
-            // One beat for transient mid-scroll false negatives.
-            Thread.sleep(forTimeInterval: 0.1)
-            return surface.exists && surface.isHittable
-        }
-        for _ in 0..<maxTicks {           // reveal content BELOW the fold
-            guard !element.isHittable else { return true }
-            guard surfaceReady() else { break }
-            surface.scroll(byDeltaX: 0, deltaY: -24)
-        }
-        for _ in 0..<(2 * maxTicks) {     // sweep back for content ABOVE
-            guard !element.isHittable else { return true }
-            guard surfaceReady() else { break }
-            surface.scroll(byDeltaX: 0, deltaY: 24)
+        guard surface.exists else { return element.isHittable }
+        for _ in 0..<maxTicks {
+            let ef = element.frame
+            let sf = surface.frame
+            // Inside the viewport (with a small margin so a row peeking one
+            // pixel past the fold doesn't count) — stop scrolling.
+            if !ef.isEmpty, ef.minY >= sf.minY + 8, ef.maxY <= sf.maxY - 8 { break }
+            // An empty frame means the element isn't realized yet — sweep
+            // down, the historical default; otherwise scroll TOWARD it.
+            let below = ef.isEmpty || ef.midY > sf.midY
+            surface.scroll(byDeltaX: 0, deltaY: below ? -24 : 24)
         }
         return element.isHittable
     }
