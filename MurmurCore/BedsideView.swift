@@ -25,7 +25,10 @@ struct BedsideView: View {
     /// every ChannelPanel, exactly like `viewport`.
     @State private var calibration = Calibration()
     @State private var filter = FindingFilter()
-    @State private var showFindings = true
+    /// X82: the review-queue inspector's open state lives in the coexistence
+    /// context — the analyst's intent, arbitrated against the navigator and
+    /// the window width so neither panel ever renders partially clipped.
+    @State private var panels = SidePanelCoexistenceContext.shared
     /// When on, the viewport is held at a 10-second window and finding /
     /// candidate jumps recenter without changing zoom — for analysts who
     /// read in fixed time windows. A manual zoom breaks the lock.
@@ -572,7 +575,18 @@ struct BedsideView: View {
                 .accessibilityLabel("\(authoredRangeFindings.count)")
                 .allowsHitTesting(false)
         }
-        .inspector(isPresented: $showFindings) {
+        .inspector(isPresented: Binding(
+            get: { panels.resolution.inspectorVisible },
+            // Intent only when the write DISAGREES with the resolution: when
+            // the coexistence rule hides the inspector, SwiftUI echoes the
+            // dismissal back through this binding, and recording that echo as
+            // analyst intent would keep the queue hidden after the window
+            // widens again.
+            set: { newValue in
+                guard newValue != panels.resolution.inspectorVisible else { return }
+                panels.request(.inspector, open: newValue)
+            }
+        )) {
             findingsInspector
         }
         // X60: an ID'd toolbar is a CUSTOMISABLE one — macOS then offers
@@ -683,12 +697,12 @@ struct BedsideView: View {
             #endif
             ToolbarItem(id: "findings-toggle", placement: .automatic, showsByDefault: true) {
                 Button {
-                    showFindings.toggle()
+                    panels.request(.inspector, open: !panels.resolution.inspectorVisible)
                 } label: {
                     Label("Review queue", systemImage: ToolbarGlyph.reviewQueue)
                 }
                 .help(Self.findingsHelp)
-                .tint(showFindings ? Color.accentColor : nil)
+                .tint(panels.resolution.inspectorVisible ? Color.accentColor : nil)
                 .accessibilityIdentifier("findings-toggle")
             }
         }

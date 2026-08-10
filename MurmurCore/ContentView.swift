@@ -51,7 +51,14 @@ public struct ContentView: View {
     /// left to the split view so it can be shown deliberately — a folder open
     /// is exactly when an analyst wants the record list, and without a binding
     /// there was no way back once macOS collapsed it.
-    @State private var navigatorVisibility: NavigationSplitViewVisibility = .all
+    ///
+    /// X82: the stored value is the analyst's INTENT; what the split view
+    /// shows is `panels.resolution`, which additionally applies the
+    /// coexistence rule — below `SidePanelCoexistenceContext.coexistenceWidth`
+    /// the navigator and the review-queue inspector cannot both be open
+    /// without clipping both of them, so the least-recently-requested one
+    /// yields entirely.
+    @State private var panels = SidePanelCoexistenceContext.shared
     /// X63-C: per-record session state + provenance from an opened `.mur`,
     /// keyed by the same id the navigator and `importStates` use. Staged into
     /// `CurrentRecordingContext` as each record is activated, so every record
@@ -459,7 +466,7 @@ public struct ContentView: View {
         // This matters beyond navigation: the Save Session flag lives on a
         // sidebar row, so a navigator that cannot be shown is a feature that
         // cannot be reached.
-        NavigationSplitView(columnVisibility: $navigatorVisibility) {
+        NavigationSplitView(columnVisibility: navigatorVisibilityBinding) {
             RecordSidebar(records: records, importStates: importStates, selection: $selection)
                 .navigationTitle(source.displayName)
                 .navigationSplitViewColumnWidth(min: 160, ideal: 240, max: 320)
@@ -480,8 +487,9 @@ public struct ContentView: View {
                 // toolbar region, so it collapses together with the column —
                 // once hidden there is no icon left to bring the record list
                 // back. This one lives on the detail side, which stays on
-                // screen, and drives `navigatorVisibility` directly so it
-                // toggles both ways regardless of responder-chain state.
+                // screen, and records the analyst's intent with the
+                // coexistence context so it toggles both ways regardless of
+                // responder-chain state.
                 .toolbar { sidebarToggleToolbarItem }
         }
         .onChange(of: selection) { oldValue, newValue in
@@ -528,17 +536,43 @@ public struct ContentView: View {
         } message: {
             Text("Anchored notes save with the session — File ▸ Save Session (⌘S). Switching records discards them.")
         }
+        // X82: the coexistence rule needs the real window content width —
+        // and needs to know a navigator exists (the direct shell has none,
+        // and a stale narrow width must not arbitrate against it there).
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            proxy.size.width
+        } action: { width in
+            panels.windowContentWidth = width
+        }
+        .onAppear { panels.navigatorPresent = true }
+        .onDisappear { panels.navigatorPresent = false }
+    }
+
+    /// X82: what the split view SHOWS. Reads the coexistence resolution;
+    /// writes back as analyst intent (View ▸ Show/Hide Sidebar and the split
+    /// view's own drag-collapse both land here).
+    private var navigatorVisibilityBinding: Binding<NavigationSplitViewVisibility> {
+        Binding(
+            get: { panels.resolution.navigatorVisible ? .all : .detailOnly },
+            // Same echo guard as the inspector binding: only a write that
+            // disagrees with the resolution is analyst intent.
+            set: { newValue in
+                let open = newValue != .detailOnly
+                guard open != panels.resolution.navigatorVisible else { return }
+                panels.request(.navigator, open: open)
+            }
+        )
     }
 
     /// A leading toolbar button that shows or hides the record navigator by
-    /// flipping the split view's column visibility. Placed on the detail pane
-    /// so it survives the sidebar collapsing.
+    /// recording the analyst's intent with the coexistence context. Placed on
+    /// the detail pane so it survives the sidebar collapsing.
     @ToolbarContentBuilder
     private var sidebarToggleToolbarItem: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
             Button {
                 withAnimation {
-                    navigatorVisibility = navigatorVisibility == .detailOnly ? .all : .detailOnly
+                    panels.request(.navigator, open: !panels.resolution.navigatorVisible)
                 }
             } label: {
                 Label("Toggle Record List", systemImage: "sidebar.leading")
