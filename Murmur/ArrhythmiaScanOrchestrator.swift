@@ -16,8 +16,11 @@
 //  Unlike VT/VF there is no scan dialog: the detectors are cheap RR-series
 //  arithmetic (no Core ML, no operating-point preview), so the scan runs
 //  automatically on load — the same trigger discipline as delineation.
-//  Every operating point is a data-derived default (AFDB pRR50 bound,
-//  60/100 bands, 2 s pause floor); the app never arbitrates a dial.
+//  Pause and AFib operating points are data-derived defaults (AFDB pRR50
+//  bound, 2 s pause floor). The rate band is the analyst's own dials (X91,
+//  `ArrhythmiaScanSettings`): the app still never ARBITRATES a threshold —
+//  it defaults to the definitional 60/100 bands and echoes whatever the
+//  analyst set into the caption, rescanning on every change.
 //
 //  MurmurCore never imports MurmurMetrics — the detectors and the
 //  candidate→annotation minting all happen here.
@@ -33,10 +36,16 @@ struct ArrhythmiaScanOrchestrator: View {
     @State private var recordingContext = CurrentRecordingContext.shared
     @State private var scanContext = ArrhythmiaScanContext.shared
     @State private var store = PurchaseStore.shared
+    /// X91: the analyst's rate-band dials. Part of the task key, so turning
+    /// a dial rescans the open recording with the new thresholds.
+    @State private var settings = ArrhythmiaScanSettings.shared
 
     private struct Key: Hashable {
         let recordingID: UUID?
         let owned: Bool
+        let lowBpm: Double
+        let highBpm: Double
+        let minDurationSeconds: Double
     }
 
     var body: some View {
@@ -45,7 +54,10 @@ struct ArrhythmiaScanOrchestrator: View {
             .allowsHitTesting(false)
             .task(id: Key(
                 recordingID: recordingContext.recording?.id,
-                owned: store.hasStudio
+                owned: store.hasStudio,
+                lowBpm: settings.lowBpm,
+                highBpm: settings.highBpm,
+                minDurationSeconds: settings.minDurationSeconds
             )) {
                 await rescan()
             }
@@ -73,10 +85,14 @@ struct ArrhythmiaScanOrchestrator: View {
         }
         let sampleRate = ecgChannel.sampleRate
 
-        // Drop the previous recording's candidates BEFORE the compute — on a
-        // long record the scan takes real time, and stale spans rendering
-        // over the new recording until it finishes would be a lie.
-        await MainActor.run { scanContext.clearCandidates() }
+        // Drop the previous candidates BEFORE the compute — on a long record
+        // the scan takes real time, and stale spans rendering until it
+        // finishes would be a lie. X91: publish a scanning placeholder
+        // instead of clearing to nothing — an empty-and-caption-less context
+        // unmounts the queue's group header, and with it the dials the
+        // analyst may be mid-interaction with (a rescan is often CAUSED by
+        // those dials).
+        await MainActor.run { scanContext.setCandidates([], parametersCaption: "scanning…") }
 
         // Lead names in the same order `ecgLeadSamples` built the buffers.
         // An unreadable channel is dropped from the buffers but not from
@@ -88,7 +104,14 @@ struct ArrhythmiaScanOrchestrator: View {
             .map(\.name)
         let namesAligned = leadNames.count == leads.count
 
-        let rhythmConfig = RhythmBandConfig()
+        // X91: the analyst's dials, snapshotted for this scan — the same
+        // values the caption below echoes, so the citation can never drift
+        // from the config that actually ran.
+        let rhythmConfig = RhythmBandConfig(
+            lowBpm: settings.lowBpm,
+            highBpm: settings.highBpm,
+            minDurationSeconds: settings.minDurationSeconds
+        )
         let pauseConfig = PauseConfig()
         let afibConfig = AFibConfig()
 
@@ -123,27 +146,42 @@ struct ArrhythmiaScanOrchestrator: View {
             )
         }
 
-        // Operating points first (they define what a candidate IS), then the
-        // per-recording quality read. All data-derived defaults, named so the
-        // caption stays a citation rather than decoration.
-        let operatingPoints = String(
-            format: "outside %.0f–%.0f bpm · pause ≥ %.1f s · pRR50 ≥ %.3f (AFDB)",
-            rhythmConfig.lowBpm, rhythmConfig.highBpm,
-            pauseConfig.minGapMs / 1000.0,
-            afibConfig.pRR50Threshold
-        )
-        let quality = ArrhythmiaScanContext.qualityCaption(
-            beatCount: result.quality.beatCount,
-            leadName: leadName,
-            rrArtifactFraction: result.quality.rrArtifactFraction,
-            flaggedWindows: result.quality.qualityWindows.filter(\.flagged).count,
-            totalWindows: result.quality.qualityWindows.count
-        )
-        let caption = "\(operatingPoints) · \(quality)"
+        let caption = Self.caption(
+            rhythmConfig: rhythmConfig, pauseConfig: pauseConfig,
+            afibConfig: afibConfig, quality: result.quality, leadName: leadName)
 
         await MainActor.run {
             scanContext.setCandidates(annotations, parametersCaption: caption)
         }
+    }
+
+    /// Operating points first (they define what a candidate IS), then the
+    /// per-recording quality read. The rate band is the analyst's dials
+    /// (X91), echoed verbatim; pause and AFib stay data-derived defaults.
+    private static func caption(
+        rhythmConfig: RhythmBandConfig,
+        pauseConfig: PauseConfig,
+        afibConfig: AFibConfig,
+        quality: ArrhythmiaScanQuality,
+        leadName: String?
+    ) -> String {
+        let operatingPoints = ArrhythmiaScanSettings.rhythmCaption(
+            lowBpm: rhythmConfig.lowBpm,
+            highBpm: rhythmConfig.highBpm,
+            minDurationSeconds: rhythmConfig.minDurationSeconds
+        ) + String(
+            format: " · pause ≥ %.1f s · pRR50 ≥ %.3f (AFDB)",
+            pauseConfig.minGapMs / 1000.0,
+            afibConfig.pRR50Threshold
+        )
+        let qualityCaption = ArrhythmiaScanContext.qualityCaption(
+            beatCount: quality.beatCount,
+            leadName: leadName,
+            rrArtifactFraction: quality.rrArtifactFraction,
+            flaggedWindows: quality.qualityWindows.filter(\.flagged).count,
+            totalWindows: quality.qualityWindows.count
+        )
+        return "\(operatingPoints) · \(qualityCaption)"
     }
 
     // MARK: - Enum bridging

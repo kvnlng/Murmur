@@ -268,3 +268,41 @@ struct SyntheticRichFixtureTests {
                 "Trend channels should import alongside the leads")
     }
 }
+
+#if canImport(MurmurMetrics)
+/// X91: the arrhythmia scan service over the generated record — the dials'
+/// detection path with constructed truth. The fixture's ~72 bpm sinus sits
+/// inside the default 60–100 band (no rate candidates); a bradycardia
+/// threshold raised above the mean rate must find the slow rhythm, and a
+/// time window longer than any run must suppress it again.
+@Suite("Synthetic ECG → arrhythmia scan (X91)")
+struct SyntheticECGArrhythmiaScanTests {
+    @Test("Raised brady threshold finds the constructed slow rhythm; a long window suppresses it")
+    func rateDialsGoverning() {
+        let output = SyntheticECG.generate(.init(durationSeconds: 180))
+        let leads = output.leads.map { $0.map(Float.init) }
+        let rate = output.truth.parameters.ecgSampleRate
+
+        let defaults = ArrhythmiaScanService.scan(leads: leads, sampleRate: rate)
+        #expect(defaults.quality.beatCount > 150,
+                "QRS detection should find the ~216 constructed beats, got \(defaults.quality.beatCount)")
+        let defaultRate = defaults.candidates.filter {
+            $0.kind == .bradycardia || $0.kind == .tachycardia
+        }
+        #expect(defaultRate.isEmpty,
+                "A ~72 bpm sinus record has no rate candidates at the 60–100 default")
+
+        let raised = ArrhythmiaScanService.scan(
+            leads: leads, sampleRate: rate,
+            rhythmConfig: .init(lowBpm: 80))
+        let brady = raised.candidates.filter { $0.kind == .bradycardia }
+        #expect(!brady.isEmpty, "lowBpm 80 over a ~72 bpm record must mint bradycardia runs")
+
+        let windowed = ArrhythmiaScanService.scan(
+            leads: leads, sampleRate: rate,
+            rhythmConfig: .init(lowBpm: 80, minDurationSeconds: 175))
+        #expect(windowed.candidates.filter { $0.kind == .bradycardia }.isEmpty,
+                "A 175 s window over a 180 s record suppresses every run")
+    }
+}
+#endif
