@@ -2,8 +2,11 @@
 //  LeadChipBar.swift
 //  MurmurCore
 //
-//  The lead chips above the stage, with the Focus/Strips toggle. Plain-click
-//  focuses a lead alone; ⌘-click adds or removes an overlaid lead (X64).
+//  The lead chips above the stage, with the Focus/Strips toggle. A click
+//  toggles a lead in or out of the overlaid stage; ⌥-click shows a lead
+//  alone (X94 — clicking was X64's ⌘-click, but that gesture's only
+//  affordance was a `.help()` tooltip, which renders nowhere on macOS 26,
+//  so to a user multi-lead selection simply "didn't work").
 //  Extracted from BedsideView in X67.
 //
 
@@ -179,20 +182,27 @@ struct LeadChipBar: View {
         .accessibilityIdentifier("lead-chip-\(channel.name)")
     }
 
-    /// Plain click selects this lead alone; ⌘-click adds or removes it from
-    /// the overlay.
+    /// A click toggles this lead in or out of the stage; ⌥-click shows it
+    /// alone. ⌘-click still toggles — X64 muscle memory keeps working.
+    ///
+    /// X94: toggling used to be ⌘-click only, with plain click collapsing to
+    /// the clicked lead. The additive gesture's sole affordance was a
+    /// `.help()` tooltip that renders nowhere on macOS 26, so the natural
+    /// gesture — just clicking another lead — silently REPLACED the stage
+    /// instead, and multi-lead selection read as broken. Now the natural
+    /// gesture is the feature, and the escape to a single lead moves to ⌥.
     ///
     /// The modifier is read from `NSEvent` rather than through a SwiftUI
-    /// `TapGesture().modifiers(.command)` because that route needs the chip to
+    /// `TapGesture().modifiers(…)` because that route needs the chip to
     /// stop being a `Button` — and a Button is what gives the chip its
     /// keyboard activation, its focus ring and its XCUI `.buttons` identity.
-    /// Reading the flags inside the action keeps ONE code path for both
+    /// Reading the flags inside the action keeps ONE code path for all
     /// clicks, so there is no gesture-precedence race between them.
     private func toggleOrSelect(_ channel: Channel) {
-        let commandHeld = NSEvent.modifierFlags.contains(.command)
-        guard commandHeld, let selection = layoutMode.leadSelection else {
-            // Plain click always collapses to this lead alone — the way out of
-            // any overlay, from any state.
+        let optionHeld = NSEvent.modifierFlags.contains(.option)
+        guard let selection = layoutMode.leadSelection, !optionHeld else {
+            // ⌥-click — or any click from strips mode, where there is no
+            // selection to toggle against — shows this lead alone.
             layoutMode = .focus(only: channel.id)
             return
         }
@@ -201,9 +211,9 @@ struct LeadChipBar: View {
 
     private func chipHelp(channel: Channel, rank: Int?) -> String {
         switch rank {
-        case 0:  return "\(channel.name) — primary lead. ⌘-click another lead to overlay it."
-        case .some(let rank): return "\(channel.name) — overlaid in \(LeadPalette.ink(rank: rank).name). ⌘-click to remove."
-        case nil: return "\(channel.name) — click to show alone, ⌘-click to overlay."
+        case 0:  return "\(channel.name) — primary lead. Click another lead to overlay it; ⌥-click one to show it alone."
+        case .some(let rank): return "\(channel.name) — overlaid in \(LeadPalette.ink(rank: rank).name). Click to remove."
+        case nil: return "\(channel.name) — click to overlay, ⌥-click to show alone."
         }
     }
 

@@ -98,14 +98,15 @@ public struct LeadSelection: Equatable, Sendable {
         ordered.firstIndex(of: id)
     }
 
-    /// ⌘-click: add the lead to the overlay, or take it back out.
+    /// A chip click (X94; ⌘-click before it): add the lead to the overlay,
+    /// or take it back out.
     ///
     /// Removing the primary promotes the next lead in selection order rather
-    /// than refusing. "⌘-click removes a lead" with a silent exception for the
+    /// than refusing. "A click removes a lead" with a silent exception for the
     /// primary would be a hole the analyst discovers by finding a lead they
     /// cannot remove, with nothing on screen explaining why.
     ///
-    /// The one case that IS refused: ⌘-clicking the last remaining lead. There
+    /// The one case that IS refused: clicking the last remaining lead. There
     /// is no zero-lead focus mode to fall into, and emptying the stage is not
     /// a plausible intent — so it holds rather than doing something arbitrary.
     public func toggling(_ id: Channel.ID) -> LeadSelection {
@@ -124,8 +125,9 @@ public struct LeadSelection: Equatable, Sendable {
         return LeadSelection(primary: primary, uncheckedSecondaries: secondaries + [id])
     }
 
-    // Plain click — "that lead, alone" — is `LeadSelection(primary:)`, reached
-    // through `BedsideLayoutMode.focus(only:)`. It gets no method here: it
-    // discards the current selection entirely, so there is nothing for an
-    // instance method to do with `self`.
+    // ⌥-click — "that lead, alone" (plain click before X94) — is
+    // `LeadSelection(primary:)`, reached through
+    // `BedsideLayoutMode.focus(only:)`. It gets no method here: it discards
+    // the current selection entirely, so there is nothing for an instance
+    // method to do with `self`.
 }

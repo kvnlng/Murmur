@@ -218,33 +218,6 @@ final class MurmurUITests: XCTestCase {
     // MARK: - Tier 5: layout & filter regression guards
 
     @MainActor
-    func testClickingLeadChipShiftsFocus() throws {
-        // Guards: lead-chip-bar wiring + focus-mode panel swap. Default
-        // focus is lead I. Click lead-chip-V1; the focused panel should
-        // become channel-panel-V1 and channel-panel-I should disappear
-        // (focus mode renders one panel at a time).
-        let app = XCUIApplication()
-        app.launchArguments += ["--ui-test-sample"]
-        app.launch()
-
-        let panelI = app.descendants(matching: .any)
-            .matching(identifier: "channel-panel-I").firstMatch
-        XCTAssertTrue(panelI.waitForExistence(timeout: 5),
-                      "Default focus is lead I; channel-panel-I should render")
-
-        let chipV1 = app.buttons.matching(identifier: "lead-chip-V1").firstMatch
-        XCTAssertTrue(chipV1.waitForExistence(timeout: 3))
-        chipV1.click()
-
-        let panelV1 = app.descendants(matching: .any)
-            .matching(identifier: "channel-panel-V1").firstMatch
-        XCTAssertTrue(panelV1.waitForExistence(timeout: 3),
-                      "After clicking lead-chip-V1, channel-panel-V1 should render")
-        XCTAssertTrue(waitForElementToDisappear(panelI, timeout: 2),
-                      "Focus mode shows one panel at a time; channel-panel-I should disappear")
-    }
-
-    @MainActor
     func testLayoutModeToggleShowsAllChannels() throws {
         // Guards: layout-mode-strips wiring. Default mode is .focus(I) →
         // only channel-panel-I is rendered. Flip to Strips → every ECG
