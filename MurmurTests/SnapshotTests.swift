@@ -266,6 +266,34 @@ final class SnapshotTests: XCTestCase {
         assertSnapshot(of: render(view, size: CGSize(width: 552, height: 120)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 
+    /// X92: the LF/HF lane carries a leading y-scale (3-tick, the RMSSD
+    /// treatment) — a dimensionless ratio with no scale was a shape, not a
+    /// measurement. The fixture includes a mid-series hole one window wide,
+    /// pinning the line-break-across-absences rule through the Charts port.
+    func testLFHFLanePlot_withScaleAndGap() {
+        let samples: [VariabilityLaneSample] = (0..<30).compactMap { i in
+            if (12...14).contains(i) { return nil }   // the hole
+            let t = Double(i) * 60.0
+            let v = 1.2 + 0.8 * sin(Double(i) * 0.5)
+            return VariabilityLaneSample(
+                windowStartSeconds: t - 150,
+                windowEndSeconds: t + 150,
+                value: v,
+                isEligible: true
+            )
+        }
+        let view = LFHFLanePlot(
+            samples: samples,
+            recordingRange: 0...1800,
+            stepSeconds: 60
+        )
+        .frame(width: 520, height: 46)
+        .padding()
+        .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 552, height: 78)),
+                       as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
     func testVariabilityLane_withHoverHighlight() {
         // Same 30-sample sinusoid as the all-eligible case but with an
         // externalHoverTimeSeconds pinned in the middle. Baseline
