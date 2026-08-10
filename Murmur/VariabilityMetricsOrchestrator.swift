@@ -104,19 +104,29 @@ struct VariabilityMetricsOrchestrator: View {
         if let range {
             beats = beats.filter { range.contains($0) }
         }
+        // Too few beats to measure. On the WHOLE record that is silence — the
+        // pre-X73 behaviour, and nothing the analyst can dial changes it. But
+        // a SCOPED range (window / hour) that comes up short must keep the
+        // strip mounted (X95): unmounting takes the scope picker with it, so
+        // "zoom to 10 s in Window scope" read as the whole pane vanishing,
+        // with no way back except zooming out.
+        func publishEmpty() {
+            if range != nil {
+                metricsContext.setInsufficient(scope: scopeContext.scope, beatCount: beats.count)
+            } else {
+                metricsContext.clear()
+            }
+        }
         guard let sampleRate = recording.channels.first?.sampleRate,
               let series = ECGMetricsExtractor.rrSeries(
                   fromBeatSampleIndices: beats,
                   sampleRate: sampleRate
               ) else {
-            // A scoped window can legitimately hold too few beats to measure.
-            // That is silence, not a seam — there is nothing to sell someone
-            // who already owns the feature and simply zoomed in too far.
-            metricsContext.clear()
+            publishEmpty()
             return
         }
         guard let report = ECGMetricsService.compute(from: series) else {
-            metricsContext.clear()
+            publishEmpty()
             return
         }
         metricsContext.set(summary: Self.summary(

@@ -387,6 +387,20 @@ enum UITestSupport {
         return n
     }
 
+    /// If `--ui-test-seed-atr-normals=N` is set, returns N. Like the beat
+    /// seed above, but the annotations carry a `wfdb.atr.*` source, so they
+    /// pass `Recording.normalBeatSampleIndices()`'s provenance filter and
+    /// feed the variability-metrics pipeline (X95's tests need a fixture the
+    /// strip can actually measure). A separate flag rather than a source
+    /// change on the existing seed: the review-queue and LOD tests count on
+    /// `ui-test-seed` findings NOT reading as atr-coded normals, which the
+    /// FindingsPanel would collapse.
+    static var seedATRNormalBeatsCount: Int? {
+        guard let raw = value(forFlag: "ui-test-seed-atr-normals"),
+              let n = Int(raw), n > 0 else { return nil }
+        return n
+    }
+
     /// True when `--ui-test-grant-studio` is passed. Grants the Studio
     /// entitlement in `PurchaseStore.init` and skips the entitlement walk —
     /// the counterpart of `--ui-test-no-entitlements`, for driving REAL paid

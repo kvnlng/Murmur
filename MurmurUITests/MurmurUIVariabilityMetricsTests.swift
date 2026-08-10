@@ -1,0 +1,73 @@
+//
+//  MurmurUIVariabilityMetricsTests.swift
+//  MurmurUITests
+//
+//  X95 — the Variability Metrics strip on an unmeasurable scoped window.
+//
+//  The reported bug: "the window will disappear if the 10s zoom is selected."
+//  Mechanism: in Window scope, a viewport holding fewer than 3 normal beats
+//  computed no report, the context cleared, and a nil summary unmounted the
+//  WHOLE strip — scope picker included, so the one control that could undo
+//  the state vanished with it. What is pinned here is the strip's presence:
+//  it must stay mounted, say why it is empty, and keep the picker reachable.
+//
+
+import XCTest
+
+final class MurmurUIVariabilityMetricsTests: XCTestCase {
+
+    override func setUpWithError() throws {
+        continueAfterFailure = false
+    }
+
+    @MainActor
+    func testShortScopedWindowKeepsStripMountedWithScopePicker() throws {
+        let app = XCUIApplication()
+        // 8 atr-sourced normals across the 10 s fixture: whole record measures
+        // (7 intervals); a 2 s window holds ~2 beats — one interval short.
+        app.launchArguments += ["--ui-test-sample", "--ui-test-seed-atr-normals=8"]
+        app.launch()
+
+        // The populated strip, whole-record scope (the default).
+        let strip = app.descendants(matching: .any)
+            .matching(identifier: "variability-metrics-strip").firstMatch
+        XCTAssertTrue(strip.waitForExistence(timeout: 20),
+                      "The fixture should populate the Variability Metrics strip")
+
+        // Narrow the scope to the visible window. The segmented picker's
+        // segments surface as radio buttons on macOS.
+        let windowSegment = app.radioButtons["Window"].firstMatch
+        XCTAssertTrue(MurmurUITests.scrollUntilHittable(windowSegment, in: app),
+                      "The scope picker's Window segment should be clickable")
+        windowSegment.click()
+        XCTAssertTrue(strip.waitForExistence(timeout: 5),
+                      "The 10 s fixture window holds enough beats — Window scope still measures")
+
+        // Zoom to 2 s: ~2 normal beats, below the 3 the compute needs.
+        let zoom2s = app.buttons.matching(identifier: "zoom-ladder-2s").firstMatch
+        XCTAssertTrue(zoom2s.waitForExistence(timeout: 3),
+                      "The 10 s fixture should offer the 2 s ladder rung")
+        zoom2s.click()
+
+        // THE BUG: the strip used to unmount entirely here. It must stay,
+        // with the caption saying why and the picker still present.
+        let insufficient = app.descendants(matching: .any)
+            .matching(identifier: "variability-metrics-insufficient").firstMatch
+        XCTAssertTrue(insufficient.waitForExistence(timeout: 5),
+                      "An unmeasurable scoped window must keep the strip mounted with its empty state")
+        let caption = app.descendants(matching: .any)
+            .matching(identifier: "variability-metrics-insufficient-caption").firstMatch
+        XCTAssertTrue(caption.waitForExistence(timeout: 3))
+        let picker = app.descendants(matching: .any)
+            .matching(identifier: "metrics-scope-picker").firstMatch
+        XCTAssertTrue(picker.exists,
+                      "The scope picker must survive the empty state — it is the way back out")
+
+        // And it IS the way back out: Whole scope repopulates the numbers.
+        let wholeSegment = app.radioButtons["Whole"].firstMatch
+        XCTAssertTrue(MurmurUITests.scrollUntilHittable(wholeSegment, in: app))
+        wholeSegment.click()
+        XCTAssertTrue(strip.waitForExistence(timeout: 5),
+                      "Switching back to Whole scope should repopulate the strip")
+    }
+}

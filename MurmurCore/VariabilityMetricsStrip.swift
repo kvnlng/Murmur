@@ -46,6 +46,8 @@ public struct VariabilityMetricsStrip: View {
     public var body: some View {
         if let summary = context.summary {
             populated(summary)
+        } else if let scope = context.insufficientScope {
+            insufficient(scope: scope, beatCount: context.insufficientBeatCount)
         } else if context.isLocked {
             unlockSeam
         }
@@ -234,6 +236,44 @@ public struct VariabilityMetricsStrip: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier(row.id)
+    }
+
+    // MARK: - Insufficient scoped window (X95)
+
+    /// The strip's shape survives an unmeasurable scoped range: title, scope
+    /// picker, and a caption saying why there are no numbers. Unmounting
+    /// instead (the pre-X95 behaviour) took the scope picker down with it, so
+    /// zooming to a short window in Window scope made the whole pane vanish
+    /// with no way back except zooming out.
+    private func insufficient(scope: MetricsScope, beatCount: Int) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("Variability Metrics")
+                    .font(.subheadline.weight(.semibold))
+                Spacer(minLength: 8)
+                scopePicker
+            }
+            Text(Self.insufficientCaption(scope: scope, beatCount: beatCount))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("variability-metrics-insufficient-caption")
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.secondary.opacity(0.06))
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("variability-metrics-insufficient")
+    }
+
+    /// Static and public-in-effect (internal, testable): the caption states
+    /// the population honestly — count, requirement, and the two ways out.
+    static func insufficientCaption(scope: MetricsScope, beatCount: Int) -> String {
+        let beats = beatCount == 1 ? "1 normal beat" : "\(beatCount) normal beats"
+        return "\(beats) in this \(scope.provenanceLabel) — at least 3 are needed to measure. "
+            + "Widen the window or switch scope."
     }
 
     // MARK: - Locked

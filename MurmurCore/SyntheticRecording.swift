@@ -352,6 +352,25 @@ enum SyntheticRecording {
                 """)
             }
         }
+        // Same shape, atr-like provenance: these DO read as normal beats to
+        // `normalBeatSampleIndices()`, so the variability-metrics pipeline
+        // has a population to measure (X95).
+        if let count = UITestSupport.seedATRNormalBeatsCount, count > 0 {
+            let total = 2500
+            let stride = max(1, total / count)
+            for i in 0..<count {
+                let sample = i * stride
+                findings.append("""
+                {
+                  "kind": "point",
+                  "startSample": \(sample),
+                  "category": "N",
+                  "label": "N",
+                  "source": "wfdb.atr.ui-test-seed"
+                }
+                """)
+            }
+        }
         #endif
         let json = """
         {
