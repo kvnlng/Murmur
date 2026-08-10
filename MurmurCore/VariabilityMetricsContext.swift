@@ -110,25 +110,45 @@ public final class VariabilityMetricsContext {
     public private(set) var summary: VariabilityMetricsSummary?
 
     /// True when a recording is open but the paid entitlement is absent — the
-    /// one empty case that earns an unlock seam. Every other empty case (no
-    /// recording, too few beats) is silence, because there is nothing to sell
-    /// the analyst that they do not already have.
+    /// one empty case that earns an unlock seam. No recording, or a whole
+    /// record with too few beats, is silence: there is nothing to sell the
+    /// analyst and nothing they can dial to change the answer.
     public private(set) var isLocked: Bool = false
+
+    /// Set when the analyst NARROWED the scope (window / hour) to a stretch
+    /// with too few beats to measure (X95). This is not silence: silence
+    /// unmounts the whole strip, and the scope picker goes with it — leaving
+    /// the analyst stuck in a scope whose only control just vanished, which
+    /// reads as "the Variability Metrics window disappeared". The strip stays
+    /// mounted, says why it is empty, and keeps the picker reachable.
+    public private(set) var insufficientScope: MetricsScope?
+    /// Beat count behind `insufficientScope`, for the caption's honesty.
+    public private(set) var insufficientBeatCount: Int = 0
 
     public init() {}
 
     public func set(summary: VariabilityMetricsSummary?) {
         self.summary = summary
         self.isLocked = false
+        self.insufficientScope = nil
     }
 
     public func setLocked() {
         self.summary = nil
         self.isLocked = true
+        self.insufficientScope = nil
+    }
+
+    public func setInsufficient(scope: MetricsScope, beatCount: Int) {
+        self.summary = nil
+        self.isLocked = false
+        self.insufficientScope = scope
+        self.insufficientBeatCount = beatCount
     }
 
     public func clear() {
         self.summary = nil
         self.isLocked = false
+        self.insufficientScope = nil
     }
 }

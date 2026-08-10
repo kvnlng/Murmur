@@ -6010,6 +6010,58 @@ struct MetricsScopeTests {
     }
 }
 
+/// X95. A scoped window with too few beats keeps the strip mounted.
+///
+/// The pre-X95 behaviour cleared the summary, which unmounted the whole strip
+/// — including the scope picker, the one control that could undo the state.
+/// These pin the context's three-way state machine and the caption's honesty.
+@Suite("Variability metrics insufficiency (X95)")
+struct VariabilityMetricsInsufficiencyTests {
+
+    @MainActor
+    @Test("setInsufficient is its own state, exclusive with summary and locked")
+    func insufficiencyState() {
+        let c = VariabilityMetricsContext()
+        c.setInsufficient(scope: .visibleWindow, beatCount: 2)
+        #expect(c.insufficientScope == .visibleWindow)
+        #expect(c.insufficientBeatCount == 2)
+        #expect(c.summary == nil)
+        #expect(!c.isLocked)
+    }
+
+    @MainActor
+    @Test("Every other transition clears the insufficiency")
+    func transitionsClear() {
+        let c = VariabilityMetricsContext()
+        c.setInsufficient(scope: .hour, beatCount: 0)
+        c.setLocked()
+        #expect(c.insufficientScope == nil)
+
+        c.setInsufficient(scope: .hour, beatCount: 0)
+        c.clear()
+        #expect(c.insufficientScope == nil)
+
+        c.setInsufficient(scope: .hour, beatCount: 0)
+        c.set(summary: nil)
+        #expect(c.insufficientScope == nil)
+    }
+
+    @MainActor
+    @Test("The caption states count, requirement, and both ways out")
+    func captionHonesty() {
+        let caption = VariabilityMetricsStrip.insufficientCaption(scope: .visibleWindow, beatCount: 2)
+        #expect(caption.contains("2 normal beats"))
+        #expect(caption.contains("visible window"))
+        #expect(caption.contains("at least 3"))
+        #expect(caption.contains("Widen the window or switch scope"))
+
+        // Singular beat, singular noun — a caption that says "1 normal beats"
+        // undermines the exactness the numbers above it claim.
+        #expect(VariabilityMetricsStrip.insufficientCaption(scope: .hour, beatCount: 1)
+            .contains("1 normal beat in this hour"))
+    }
+}
+
 /// X70. The stage's zoom ladder.
 ///
 /// At 12 leads / 250 Hz / 72 h, getting from a 10 s window to the whole record
