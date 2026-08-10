@@ -82,8 +82,10 @@ public final class IntervalTrendLaneContext {
         self.metric = IntervalTrendMetric(rawValue: metricRaw) ?? .qtc
         let binRaw = defaults.string(forKey: Keys.bin) ?? IntervalTrendBinPreset.twoMinute.rawValue
         self.binPreset = IntervalTrendBinPreset(rawValue: binRaw) ?? .twoMinute
-        let modeRaw = defaults.string(forKey: Keys.showMode) ?? IntervalTrendShowMode.medianAndIQR.rawValue
-        self.showMode = IntervalTrendShowMode(rawValue: modeRaw) ?? .medianAndIQR
+        // X88: the default read is a plain median line, matching the other
+        // location-finder lanes; the ribbons live behind "median + IQR".
+        let modeRaw = defaults.string(forKey: Keys.showMode) ?? IntervalTrendShowMode.medianOnly.rawValue
+        self.showMode = IntervalTrendShowMode(rawValue: modeRaw) ?? .medianOnly
     }
 
     private func persist() {

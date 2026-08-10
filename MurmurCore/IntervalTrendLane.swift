@@ -107,21 +107,11 @@ struct IntervalTrendLane: View {
     /// per-beat scatter is coerced to median + IQR at map scale.
     let showMode: IntervalTrendShowMode
 
-    /// Zoom band the lane is rendering (X41). Follows the ECG viewport: `.map`
-    /// at wide zoom (whole-recording ribbon), `.window` when zoomed into
-    /// minutes (the lane's x-domain is that window; per-beat scatter is legible).
-    /// Defaults to `.map` so existing callers/tests keep the ribbon read.
-    let band: IntervalTrendLaneBand
-
-    /// The representation actually drawn — preference capped by the band.
+    /// The representation actually drawn — the preference with per-beat
+    /// scatter coerced away (X88: the x-domain is always the whole record,
+    /// where scatter is the illegible wall).
     private var effectiveShowMode: IntervalTrendShowMode {
-        IntervalTrendRepresentation.effectiveMode(preferred: showMode, band: band)
-    }
-
-    /// True when the analyst asked for per-beat scatter but the map-scale band
-    /// coerced it away — drives a small "zoom in" hint so the coercion is honest.
-    private var scatterCoerced: Bool {
-        showMode == .perBeatScatter && effectiveShowMode != .perBeatScatter
+        IntervalTrendRepresentation.effectiveMode(preferred: showMode)
     }
 
     /// The QTc rate-correction formula in effect (X44). Shown as a picker on
@@ -210,7 +200,6 @@ struct IntervalTrendLane: View {
         data: IntervalTrendData,
         metric: IntervalTrendMetric,
         showMode: IntervalTrendShowMode,
-        band: IntervalTrendLaneBand = .map,
         qtcFormula: MarkingsQTcFormula = .fridericia,
         selectedBinPreset: IntervalTrendBinPreset,
         guides: [IntervalTrendGuide] = [],
@@ -235,7 +224,6 @@ struct IntervalTrendLane: View {
         self.data = data
         self.metric = metric
         self.showMode = showMode
-        self.band = band
         self.qtcFormula = qtcFormula
         self.onPickFormula = onPickFormula
         self.tOffsetGateEnabled = tOffsetGateEnabled
@@ -328,15 +316,6 @@ struct IntervalTrendLane: View {
             tOffsetGateChip
             binPicker
             showModePicker
-            // Honest coercion cue (X41): the analyst preferred per-beat scatter
-            // but the map-scale band shows median + IQR instead. Only appears in
-            // that state, so it never crowds the default row.
-            if scatterCoerced {
-                Text("zoom in for per-beat")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .accessibilityIdentifier("interval-trend-lane-scatter-hint")
-            }
             addGuideChip
         }
     }
@@ -516,7 +495,12 @@ struct IntervalTrendLane: View {
         if let onPick = onPickShowMode {
             controlChip(label: showMode.displayName, identifier: "interval-trend-lane-show-picker") {
                 Menu {
-                    ForEach(IntervalTrendShowMode.allCases, id: \.self) { option in
+                    // X88: per-beat scatter is permanently coerced (whole-
+                    // record x-domain), so offering it would be a dead option.
+                    ForEach(
+                        IntervalTrendShowMode.allCases.filter { $0 != .perBeatScatter },
+                        id: \.self
+                    ) { option in
                         Button(option.displayName) { onPick(option) }
                     }
                 } label: {
@@ -896,10 +880,12 @@ struct IntervalTrendLane: View {
 
                 // Measurement band (tight, ~30% opacity) — bootstrap CI
                 // on the bin median = MEASUREMENT uncertainty (how well
-                // we know the trend point). Distinct from IQR: denser
-                // + narrower, always drawn regardless of show-mode. This
-                // is the visible surface of the calibrated
-                // per-beat-uncertainty aggregation.
+                // we know the trend point). Distinct from IQR: denser +
+                // narrower. X88 gates it behind the "median + IQR" show
+                // mode so the default read is a plain line matching the
+                // other location-finder lanes; the censored-bin dashed
+                // median + chevrons below stay in EVERY mode — they are
+                // a correctness disclosure, not decoration.
                 //
                 // For CENSORED bins (a beat inside hit the T-search-
                 // window ceiling → true T-offset ≥ reported), the band
@@ -908,37 +894,22 @@ struct IntervalTrendLane: View {
                 // "≥ bandLower". The up-chevron markers + "QT ≥"
                 // annotation on the top edge (Canvas overlay below)
                 // signal the lower-bound state.
-                ForEach(eligibleRuns.indices, id: \.self) { idx in
-                    let run = eligibleRuns[idx]
-                    ForEach(run) { bin in
-                        AreaMark(
-                            x: .value("t", bin.centerSeconds),
-                            yStart: .value("band-lo", bin.bandLowerMs),
-                            yEnd: .value(
-                                "band-hi",
-                                bin.hasCensoredBeats ? yDomain.upperBound : bin.bandUpperMs
-                            ),
-                            series: .value("band-run", idx)
-                        )
-                        .foregroundStyle(Color.primary.opacity(0.30))
-                        .interpolationMethod(.monotone)
-                    }
-                }
-
-                // Per-beat scatter — every underlying beat as a faint point.
-                // Legible only at window scale, so it renders only in the
-                // `.window` band (X41), where the lane's x-domain IS the
-                // viewport window and the points fill the width. At map scale
-                // `effectiveShowMode` has already coerced this away.
-                if effectiveShowMode == .perBeatScatter {
-                    ForEach(scatterPoints, id: \.id) { pt in
-                        PointMark(
-                            x: .value("t", pt.time),
-                            y: .value("beat", pt.value)
-                        )
-                        .symbol(.circle)
-                        .symbolSize(10)
-                        .foregroundStyle(Color.primary.opacity(0.35))
+                if effectiveShowMode == .medianAndIQR {
+                    ForEach(eligibleRuns.indices, id: \.self) { idx in
+                        let run = eligibleRuns[idx]
+                        ForEach(run) { bin in
+                            AreaMark(
+                                x: .value("t", bin.centerSeconds),
+                                yStart: .value("band-lo", bin.bandLowerMs),
+                                yEnd: .value(
+                                    "band-hi",
+                                    bin.hasCensoredBeats ? yDomain.upperBound : bin.bandUpperMs
+                                ),
+                                series: .value("band-run", idx)
+                            )
+                            .foregroundStyle(Color.primary.opacity(0.30))
+                            .interpolationMethod(.monotone)
+                        }
                     }
                 }
 
@@ -1249,31 +1220,6 @@ struct IntervalTrendLane: View {
     /// treatment layers on top.
     private var censoredBins: [IntervalTrendBin] {
         data.bins.filter { $0.hasCensoredBeats && $0.isEligible }
-    }
-
-    private struct ScatterPoint: Identifiable {
-        let id: String
-        let time: Double
-        let value: Double
-    }
-
-    private var scatterPoints: [ScatterPoint] {
-        var points: [ScatterPoint] = []
-        // Only bins whose centre falls in the visible domain — at window band
-        // that is the viewport window, keeping the per-beat cloud scoped to
-        // what the analyst is actually looking at (X41).
-        for bin in data.bins where bin.isEligible && timeRangeSeconds.contains(bin.centerSeconds) {
-            for (idx, v) in bin.perBeatValues.enumerated() {
-                points.append(
-                    ScatterPoint(
-                        id: "\(bin.centerSeconds)-\(idx)",
-                        time: bin.centerSeconds,
-                        value: v
-                    )
-                )
-            }
-        }
-        return points
     }
 
     private var hoveredBin: IntervalTrendBin? {

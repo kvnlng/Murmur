@@ -561,24 +561,6 @@ final class SnapshotTests: XCTestCase {
         assertSnapshot(of: render(view, size: CGSize(width: 552, height: 160)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 
-    func testIntervalTrendLane_perBeatScatter() {
-        // Scatter show-mode renders every eligible per-beat value as a
-        // faint point. Guards against the "scatter mode is wired but
-        // the data path never populated perBeatValues" regression.
-        let view = IntervalTrendLane(
-            timeRangeSeconds: 0...1800,
-            data: makeCanonicalTrendData(),
-            metric: .qtc,
-            showMode: .perBeatScatter,
-            band: .window,          // X41: scatter renders only at window scale
-            selectedBinPreset: .twoMinute
-        )
-        .frame(width: 520)
-        .padding()
-        .background(Color.white)
-        assertSnapshot(of: render(view, size: CGSize(width: 552, height: 160)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
-    }
-
     func testIntervalTrendLane_withGuidesAndEvents() {
         // The overlay layer: analyst-set threshold guides (dashed
         // horizontal lines) + analyst-authored events (vertical
@@ -1114,17 +1096,16 @@ extension SnapshotTests {
 @MainActor
 extension SnapshotTests {
 
-    /// At map scale a per-beat-scatter PREFERENCE is coerced to median + IQR
-    /// (no whole-recording point wall) and the "zoom in for per-beat" hint
-    /// appears. Pickers are omitted (a live Menu renders as a placeholder in
-    /// the headless ImageRenderer); the hint renders independently of them.
+    /// A per-beat-scatter PREFERENCE (persisted from before X88) is coerced
+    /// to median + IQR — the lane's x-domain is always the whole record, so
+    /// the point wall never renders. Pickers are omitted (a live Menu
+    /// renders as a placeholder in the headless ImageRenderer).
     func testIntervalTrendLane_scatterCoercedAtMapScale() {
         let view = IntervalTrendLane(
             timeRangeSeconds: 0...1800,
             data: makeCanonicalTrendData(),
             metric: .qtc,
             showMode: .perBeatScatter,
-            band: .map,
             selectedBinPreset: .twoMinute
         )
         .frame(width: 520)

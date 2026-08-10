@@ -1481,29 +1481,17 @@ struct WheelZoomOverflowTests {
     }
 }
 
-@Suite("Interval trend lane LOD (X41)")
+@Suite("Interval trend lane representation (X41 → X88)")
 struct IntervalTrendRepresentationTests {
 
-    @Test("Band follows the viewport window against the 5-min threshold")
-    func band() {
-        #expect(IntervalTrendRepresentation.band(viewportWindowSeconds: 10) == .window)
-        #expect(IntervalTrendRepresentation.band(viewportWindowSeconds: 300) == .window)   // boundary inclusive
-        #expect(IntervalTrendRepresentation.band(viewportWindowSeconds: 301) == .map)
-        #expect(IntervalTrendRepresentation.band(viewportWindowSeconds: 1800) == .map)      // whole 30-min record
-        #expect(IntervalTrendRepresentation.band(viewportWindowSeconds: 0) == .map)         // degenerate
-    }
-
-    @Test("Per-beat scatter is coerced away at map scale, honoured in a window")
+    @Test("Per-beat scatter is always coerced — the lane's x-domain is the whole record")
     func scatterCoercion() {
-        // Map scale: scatter → median + IQR (never the whole-recording wall);
-        // the aggregate modes render unchanged.
-        #expect(IntervalTrendRepresentation.effectiveMode(preferred: .perBeatScatter, band: .map) == .medianAndIQR)
-        #expect(IntervalTrendRepresentation.effectiveMode(preferred: .medianOnly, band: .map) == .medianOnly)
-        #expect(IntervalTrendRepresentation.effectiveMode(preferred: .medianAndIQR, band: .map) == .medianAndIQR)
-        // Window scale: the picker's choice is honoured, scatter included.
-        for mode in IntervalTrendShowMode.allCases {
-            #expect(IntervalTrendRepresentation.effectiveMode(preferred: mode, band: .window) == mode)
-        }
+        // X88 retired the zoom-band system: the lane never re-domains to the
+        // viewport, so scatter is permanently the illegible wall and is
+        // coerced to median + IQR. The aggregate modes render unchanged.
+        #expect(IntervalTrendRepresentation.effectiveMode(preferred: .perBeatScatter) == .medianAndIQR)
+        #expect(IntervalTrendRepresentation.effectiveMode(preferred: .medianOnly) == .medianOnly)
+        #expect(IntervalTrendRepresentation.effectiveMode(preferred: .medianAndIQR) == .medianAndIQR)
     }
 }
 
