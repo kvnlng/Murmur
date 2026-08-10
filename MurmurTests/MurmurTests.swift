@@ -8197,3 +8197,74 @@ struct UnreliableConsistencyTests {
                 "got: \(text ?? "nil")")
     }
 }
+
+/// X82. Side panels render whole or not at all.
+///
+/// Below the coexistence width the navigator and the review-queue inspector
+/// clip each other at both window edges, so the rule arbitrates: the most
+/// recently requested panel wins, the other yields entirely, and both
+/// wanted-states survive so a widened window restores the yielded one.
+@Suite("Side-panel coexistence (X82)")
+struct SidePanelCoexistenceTests {
+
+    private typealias Ctx = SidePanelCoexistenceContext
+
+    @Test("A wide window shows both panels")
+    func wideShowsBoth() {
+        let r = Ctx.resolve(width: 1400, navigatorWanted: true, inspectorWanted: true, lastRequested: .inspector)
+        #expect(r.navigatorVisible && r.inspectorVisible)
+    }
+
+    @Test("Exactly at the threshold both still fit")
+    func thresholdInclusive() {
+        let r = Ctx.resolve(width: Ctx.coexistenceWidth, navigatorWanted: true, inspectorWanted: true, lastRequested: .navigator)
+        #expect(r.navigatorVisible && r.inspectorVisible)
+    }
+
+    @Test("A narrow window shows only the last-requested panel")
+    func narrowArbitrates() {
+        let nav = Ctx.resolve(width: 1100, navigatorWanted: true, inspectorWanted: true, lastRequested: .navigator)
+        #expect(nav.navigatorVisible && !nav.inspectorVisible)
+        let insp = Ctx.resolve(width: 1100, navigatorWanted: true, inspectorWanted: true, lastRequested: .inspector)
+        #expect(!insp.navigatorVisible && insp.inspectorVisible)
+    }
+
+    @Test("Zero width — before first layout — never collapses anything")
+    func zeroWidthIsFits() {
+        let r = Ctx.resolve(width: 0, navigatorWanted: true, inspectorWanted: true, lastRequested: .inspector)
+        #expect(r.navigatorVisible && r.inspectorVisible)
+    }
+
+    @Test("A lone wanted panel shows at any width — the rule only arbitrates the pair")
+    func lonePanelAlwaysShows() {
+        let r = Ctx.resolve(width: 600, navigatorWanted: false, inspectorWanted: true, lastRequested: .navigator)
+        #expect(!r.navigatorVisible && r.inspectorVisible)
+    }
+
+    @MainActor
+    @Test("request() records intent; only an OPEN claims the win")
+    func requestSemantics() {
+        let c = Ctx()
+        c.windowContentWidth = 1100
+        c.navigatorPresent = true
+        c.request(.navigator, open: true)
+        #expect(c.lastRequested == .navigator)
+        #expect(c.resolution.navigatorVisible && !c.resolution.inspectorVisible)
+        // Closing a panel must not steal the win for it.
+        c.request(.inspector, open: false)
+        #expect(c.lastRequested == .navigator)
+        c.request(.inspector, open: true)
+        #expect(c.lastRequested == .inspector)
+        #expect(!c.resolution.navigatorVisible && c.resolution.inspectorVisible)
+    }
+
+    @MainActor
+    @Test("No navigator on screen — a stale narrow width must not hide the inspector")
+    func absentNavigatorNeverArbitrates() {
+        let c = Ctx()
+        c.windowContentWidth = 1000        // stale from an earlier browse
+        c.navigatorPresent = false         // direct single-record shell
+        #expect(c.resolution.inspectorVisible)
+        #expect(!c.resolution.navigatorVisible)
+    }
+}

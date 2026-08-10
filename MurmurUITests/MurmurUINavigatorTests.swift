@@ -19,6 +19,22 @@ final class MurmurUINavigatorTests: XCTestCase {
         continueAfterFailure = false
     }
 
+    /// Close the review-queue inspector so the navigator can show at ANY
+    /// window width (X82: below the coexistence width the two panels never
+    /// coexist, and the queue holds the default win).
+    @MainActor
+    private func closeReviewQueue(_ app: XCUIApplication) {
+        let findings = app.descendants(matching: .any)
+            .matching(identifier: "findings-panel").firstMatch
+        guard findings.waitForExistence(timeout: 5) else { return }
+        let queueToggle = app.descendants(matching: .any)
+            .matching(identifier: "findings-toggle").firstMatch
+        XCTAssertTrue(queueToggle.waitForExistence(timeout: 5))
+        queueToggle.click()
+        XCTAssertTrue(MurmurUITests.waitForElementToDisappear(findings, timeout: 5),
+                      "Closing the review queue should dismiss the inspector")
+    }
+
     /// The review-queue toggle. Guards the X68 glyph swap: it was
     /// `stethoscope.circle`, which named a clinical role rather than the thing
     /// the button does.
@@ -52,6 +68,13 @@ final class MurmurUINavigatorTests: XCTestCase {
         XCTAssertTrue(navigatorToggle.waitForExistence(timeout: 15),
                       "The browse shell should carry a navigator toggle")
 
+        // X82: on a window below the coexistence width (Cloud's VMs — or a
+        // persisted narrow frame anywhere) the navigator and the review
+        // queue cannot both be open, and the queue holds the default win.
+        // Close the queue so the navigator shows unconditionally; this test
+        // is about the navigator's furniture, not the arbitration.
+        closeReviewQueue(app)
+
         let search = app.descendants(matching: .any)
             .matching(identifier: "record-search-field").firstMatch
         XCTAssertTrue(search.waitForExistence(timeout: 5),
@@ -79,6 +102,11 @@ final class MurmurUINavigatorTests: XCTestCase {
         XCTAssertTrue(ourToggle.waitForExistence(timeout: 15))
         XCTAssertFalse(app.buttons["Hide Sidebar"].exists,
                        "The system sidebar toggle must be suppressed — two adjacent toggles was X81")
+
+        // X82: below the coexistence width the review queue holds the win
+        // and the navigator yields. Close the queue so the round trip below
+        // exercises the toggle, not the arbitration (which has its own test).
+        closeReviewQueue(app)
 
         // And the one toggle is sufficient: collapse, then bring the
         // navigator back — the round trip the system button can't make.
