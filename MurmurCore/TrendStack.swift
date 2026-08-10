@@ -173,7 +173,22 @@ struct TrendStack: View {
             .padding(.leading, 10)
 
             lane.plot
-                .frame(maxWidth: .infinity, maxHeight: lane.height == nil ? nil : .infinity)
+                // `minWidth: 0` is load-bearing (X97). With only `maxWidth`
+                // set, a frame's MINIMUM follows its child — and the interval
+                // lane's chips row (six .fixedSize() controls) has a ~520 pt
+                // floor. That floor propagated up through the vertical
+                // ScrollView into the split view's detail-minimum, and below
+                // ~1115 pt of window the whole bedside column overflowed the
+                // window at both edges, clipping the pinned stage. A
+                // width-compliant slot keeps the column honest; a chips row
+                // too wide for a pathologically narrow cell clips inside its
+                // own row instead of shoving the primary surface off-screen.
+                // Leading-aligned so a too-wide cell loses its TRAILING edge
+                // only — clipping the leading edge would take the metric name
+                // and the caption's start, which are the parts that identify
+                // what the lane is.
+                .frame(minWidth: 0, maxWidth: .infinity, maxHeight: lane.height == nil ? nil : .infinity, alignment: .topLeading)
+                .clipped()
                 .overlay {
                     // The seek surface lives on the lane's plot cell, not on
                     // the cross-lane overlay: the cell's own geometry IS the
