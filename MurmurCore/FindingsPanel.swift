@@ -173,6 +173,10 @@ struct FindingsPanel: View {
     /// and the categories are what the analyst is triaging by.
     @State private var candidateRenderBound: Int = FindingsPanel.candidateCollapsedBound
     @State private var arrhythmiaGroupExpanded: Bool = true
+    /// X91: the rate-band dials popover, anchored to the group header's
+    /// settings button.
+    @State private var showingArrhythmiaDials = false
+    @State private var scanSettings = ArrhythmiaScanSettings.shared
     /// Same X75 render bound rationale as the VT/VF group.
     @State private var arrhythmiaRenderBound: Int = FindingsPanel.candidateCollapsedBound
     /// Which review state the queue is showing. Defaults to the work that
@@ -700,7 +704,8 @@ struct FindingsPanel: View {
 
     @ViewBuilder
     private var queueList: some View {
-        if filtered.isEmpty && sortedCandidates.isEmpty && sortedArrhythmiaCandidates.isEmpty {
+        if filtered.isEmpty && sortedCandidates.isEmpty && sortedArrhythmiaCandidates.isEmpty
+            && !arrhythmiaScanRan {
             ContentUnavailableView(
                 "No findings",
                 systemImage: "magnifyingglass",
@@ -720,8 +725,12 @@ struct FindingsPanel: View {
                     }
                     // Arrhythmia detector candidates — their own group, in
                     // time order (not a score ranking), same non-interleave
-                    // rule as the VT/VF group.
-                    if !sortedArrhythmiaCandidates.isEmpty {
+                    // rule as the VT/VF group. X91: the group stays mounted
+                    // whenever a scan RAN, even at zero candidates —
+                    // otherwise tightening the dials until nothing qualifies
+                    // would unmount the very controls needed to loosen them,
+                    // and "0 at these thresholds" is itself a finding.
+                    if !sortedArrhythmiaCandidates.isEmpty || arrhythmiaScanRan {
                         arrhythmiaGroupSection
                     }
                     ForEach(deviationRankedGroups) { group in
@@ -1700,6 +1709,13 @@ struct FindingsPanel: View {
     // algorithmic detectors whose `confidence` is measurement reliability —
     // ranking by it would present reliability as a severity score.
 
+    /// True when the arrhythmia scan has published for this recording —
+    /// the caption travels with every publish, so its presence IS the
+    /// "scan ran" signal (nil in the free viewer and before first publish).
+    private var arrhythmiaScanRan: Bool {
+        arrhythmiaParametersCaption?.isEmpty == false
+    }
+
     /// Arrhythmia candidates in time order, in the current disposition
     /// bucket. Same reasoning as `sortedCandidates` for why the disposition
     /// filter reaches them.
@@ -1761,6 +1777,13 @@ struct FindingsPanel: View {
     }
 
     private var arrhythmiaGroupHeader: some View {
+        HStack(spacing: 0) {
+            arrhythmiaGroupHeaderButton
+            arrhythmiaDialsButton
+        }
+    }
+
+    private var arrhythmiaGroupHeaderButton: some View {
         Button {
             arrhythmiaGroupExpanded.toggle()
         } label: {
@@ -1801,6 +1824,103 @@ struct FindingsPanel: View {
                 .fill(arrhythmiaGroupExpanded ? Color.secondary.opacity(0.05) : Color.clear)
         )
         .accessibilityIdentifier("arrhythmia-candidate-group-header")
+    }
+
+    // MARK: - Rate-band dials (X91)
+
+    /// Sits BESIDE the header button, not inside its label — a control
+    /// nested in another Button's label would swallow the header's
+    /// expand/collapse click.
+    private var arrhythmiaDialsButton: some View {
+        Button {
+            showingArrhythmiaDials.toggle()
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
+        .help("Rate-band detection thresholds")
+        .accessibilityLabel("Rate-band detection settings")
+        .accessibilityIdentifier("arrhythmia-scan-settings")
+        .padding(.trailing, 10)
+        .popover(isPresented: $showingArrhythmiaDials, arrowEdge: .bottom) {
+            arrhythmiaDialsPopover
+        }
+    }
+
+    /// The analyst's dials. Every change republishes through the scan
+    /// orchestrator (its task keys on these values), and the values in
+    /// effect are echoed in the group caption — the X58 discipline: the
+    /// numbers on screen always name the thresholds that produced them.
+    private var arrhythmiaDialsPopover: some View {
+        @Bindable var settings = scanSettings
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("Rate-band detection")
+                .font(.subheadline.weight(.semibold))
+            arrhythmiaDialRow(
+                label: "Bradycardia below",
+                value: $settings.lowBpm,
+                unit: "bpm",
+                step: 5,
+                identifier: "arrhythmia-dial-low"
+            )
+            arrhythmiaDialRow(
+                label: "Tachycardia above",
+                value: $settings.highBpm,
+                unit: "bpm",
+                step: 5,
+                identifier: "arrhythmia-dial-high"
+            )
+            arrhythmiaDialRow(
+                label: "Sustained at least",
+                value: $settings.minDurationSeconds,
+                unit: "s",
+                step: 5,
+                identifier: "arrhythmia-dial-window"
+            )
+            Text("0 s = every in-band run. Thresholds define candidates, "
+                + "not diagnoses; changing them rescans the recording.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Spacer()
+                Button("Reset to 60–100 bpm, any duration") {
+                    settings.resetToDefaults()
+                }
+                .disabled(settings.isDefault)
+                .accessibilityIdentifier("arrhythmia-dials-reset")
+            }
+        }
+        .padding(14)
+        .frame(width: 300)
+    }
+
+    private func arrhythmiaDialRow(
+        label: String,
+        value: Binding<Double>,
+        unit: String,
+        step: Double,
+        identifier: String
+    ) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.callout)
+            Spacer(minLength: 8)
+            TextField("", value: value, format: .number.precision(.fractionLength(0)))
+                .textFieldStyle(.roundedBorder)
+                .multilineTextAlignment(.trailing)
+                .frame(width: 56)
+                .accessibilityIdentifier(identifier)
+            Stepper("", value: value, step: step)
+                .labelsHidden()
+                .accessibilityLabel(label)
+            Text(unit)
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+                .frame(width: 26, alignment: .leading)
+        }
     }
 
     private var arrhythmiaSubtitle: String {
