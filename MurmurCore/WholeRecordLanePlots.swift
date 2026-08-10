@@ -23,6 +23,7 @@
 //  a bad minute away against fifty-nine good ones.
 //
 
+import Charts
 import SwiftUI
 
 /// Heart-rate trend across the whole recording, as a min/max band with a mean
@@ -123,6 +124,12 @@ struct QualityLanePlot: View {
 /// analyzer declined is ABSENT, and the line breaks there rather than
 /// bridging it — a bridge would draw a ratio where the method said there
 /// isn't one.
+///
+/// X92: rendered with Swift Charts so the lane carries a leading y-scale —
+/// the same 3-tick treatment as the RMSSD lane. A dimensionless ratio with
+/// no scale was a shape, not a measurement ("The LF / HF track needs a
+/// scale"). The previous `Canvas` renderer's autoscale + gap-breaking rules
+/// carry over unchanged.
 struct LFHFLanePlot: View {
     /// Rolling windows, `windowStartSeconds…windowEndSeconds` in recording
     /// seconds, `value` = LF/HF ratio.
@@ -132,37 +139,59 @@ struct LFHFLanePlot: View {
     /// this many steps breaks the line.
     let stepSeconds: Double
 
-    var body: some View {
-        Canvas { ctx, size in
-            let span = recordingRange.upperBound - recordingRange.lowerBound
-            guard span > 0, !samples.isEmpty else { return }
-            let eligible = samples.filter(\.isEligible)
-            guard let lo = eligible.map(\.value).min(),
-                  let hi = eligible.map(\.value).max() else { return }
-            // Pad the autoscale so a flat series doesn't hug an edge.
-            let pad = Swift.max((hi - lo) * 0.1, 0.05)
-            let yLo = lo - pad, yHi = hi + pad
-            func x(_ seconds: Double) -> CGFloat {
-                CGFloat((seconds - recordingRange.lowerBound) / span) * size.width
+    /// Eligible samples chunked into contiguous runs — one LineMark series
+    /// per run, so the line breaks across holes exactly as the Canvas did.
+    private var runs: [[VariabilityLaneSample]] {
+        var out: [[VariabilityLaneSample]] = []
+        var current: [VariabilityLaneSample] = []
+        var previousCenter: Double?
+        for sample in samples.filter(\.isEligible) {
+            let center = sample.windowCenterSeconds
+            if let prev = previousCenter, center - prev > stepSeconds * 1.5 {
+                if !current.isEmpty { out.append(current) }
+                current = []
             }
-            func y(_ v: Double) -> CGFloat {
-                size.height - CGFloat((v - yLo) / (yHi - yLo)) * size.height
-            }
-            var line = Path()
-            var previousCenter: Double?
-            for sample in eligible {
-                let center = sample.windowCenterSeconds
-                let point = CGPoint(x: x(center), y: y(sample.value))
-                // Break the line across holes — absent windows are absences.
-                if let prev = previousCenter, center - prev <= stepSeconds * 1.5 {
-                    line.addLine(to: point)
-                } else {
-                    line.move(to: point)
-                }
-                previousCenter = center
-            }
-            ctx.stroke(line, with: .color(.accentColor.opacity(0.85)), lineWidth: 1)
+            current.append(sample)
+            previousCenter = center
         }
+        if !current.isEmpty { out.append(current) }
+        return out
+    }
+
+    /// Autoscale padded so a flat series doesn't hug an edge — the same
+    /// rule the Canvas renderer used.
+    private var yDomain: ClosedRange<Double> {
+        let values = samples.filter(\.isEligible).map(\.value)
+        guard let lo = values.min(), let hi = values.max() else { return 0...1 }
+        let pad = Swift.max((hi - lo) * 0.1, 0.05)
+        return (lo - pad)...(hi + pad)
+    }
+
+    var body: some View {
+        Chart {
+            ForEach(runs.indices, id: \.self) { idx in
+                ForEach(runs[idx]) { sample in
+                    LineMark(
+                        x: .value("t", sample.windowCenterSeconds),
+                        y: .value("lfhf", sample.value),
+                        series: .value("run", idx)
+                    )
+                    .foregroundStyle(Color.accentColor.opacity(0.85))
+                    .lineStyle(StrokeStyle(lineWidth: 1))
+                }
+            }
+        }
+        .chartXAxis(.hidden)
+        .chartXScale(domain: recordingRange)
+        // The y-scale: same tick count, font and gridline treatment as the
+        // RMSSD lane, so the two variability lanes read as one family.
+        .chartYAxis {
+            AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) { _ in
+                AxisValueLabel().font(.caption2.monospacedDigit())
+                AxisGridLine().foregroundStyle(.secondary.opacity(0.15))
+            }
+        }
+        .chartYScale(domain: yDomain)
         .accessibilityHidden(true)
     }
 }
