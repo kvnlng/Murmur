@@ -1527,7 +1527,8 @@ struct BedsideView: View {
                             calibration: calibration,
                             annotations: annotationsForChannel(channel),
                             candidates: candidatesForChannel(channel),
-                            sizing: .strip
+                            sizing: .strip,
+                            noteAuthoring: noteAuthoringHooks
                         )
                     }
                     contextLanes
@@ -1771,7 +1772,8 @@ struct BedsideView: View {
                     annotations: annotationsForChannel(channel),
                     candidates: candidatesForChannel(channel),
                     sizing: .focus,
-                    overlayChannels: overlayChannels
+                    overlayChannels: overlayChannels,
+                    noteAuthoring: noteAuthoringHooks
                 )
                 // Tear down + rebuild when the focused lead changes —
                 // WaveformCanvas's MTKView caches the previous channel's
@@ -1826,7 +1828,10 @@ struct BedsideView: View {
                     channelName: channel.name,
                     dispositionsByID: dispositionStore.records,
                     candidates: candidatesForChannel(channel),
-                    noteAnchors: anchoredNotes.map {
+                    // X84: record-level notes have no anchor — drawing one
+                    // at sample 0 would invent a location the note refuses
+                    // to have.
+                    noteAnchors: anchoredNotes.filter { !$0.isLocationless }.map {
                         $0.startSample...max($0.startSample, $0.endSample)
                     }
                 )
@@ -2439,7 +2444,94 @@ struct BedsideView: View {
     /// Move the trace to a note's anchor. Honours the 10 s pin the same way
     /// finding jumps do: pinned, the window stays 10 s and centres on the
     /// anchor; unpinned, the viewport becomes the anchor range itself.
+    // MARK: - Right-click authoring (X84)
+
+    /// The hooks the trace's context menu calls back through. Notes append to
+    /// the same collection the drawer edits; findings go through the same
+    /// store + persistence as drag-to-author. The menu is the second way in;
+    /// the drawer's own buttons stay.
+    private var noteAuthoringHooks: NoteAuthoringHooks {
+        NoteAuthoringHooks(
+            isEditing: isEditing,
+            canAuthorFindings: canAuthorFindings,
+            addNote: { sample in addAnchoredNote(atSample: sample) },
+            addRecordNote: { addRecordNote() },
+            addFinding: { sample in markFinding(atSample: sample) },
+            timeLabel: { sample in noteTimeLabel(sample) }
+        )
+    }
+
+    private func noteTimeLabel(_ sample: Int64) -> String {
+        let sr = viewport.sampleRate
+        guard sr > 0 else { return "—" }
+        let mode = timeDisplay.effectiveMode(hasAbsoluteStart: recording.hasAbsoluteStartTime)
+        return ViewportTimeFormat.coordinate(
+            Double(sample) / sr, mode: mode, startUnixMillis: recordingStartUnixMillis
+        )
+    }
+
+    /// A location-marked note anchored to the clicked INSTANT (start ==
+    /// end). The drawer's own button still anchors to the current window —
+    /// the two entries answer different questions ("this beat" vs "this
+    /// stretch I'm looking at").
+    private func addAnchoredNote(atSample sample: Int64) {
+        let now = Date()
+        let note = AnchoredNote(
+            startSample: sample,
+            endSample: sample,
+            leadName: focusedChannel?.name,
+            createdAt: now,
+            modifiedAt: now
+        )
+        anchoredNotes.append(note)
+        openDrawer(selecting: note)
+    }
+
+    /// The location-less kind (X84): record-level, no anchor, no marker.
+    private func addRecordNote() {
+        let now = Date()
+        let note = AnchoredNote(
+            startSample: 0,
+            endSample: 0,
+            createdAt: now,
+            modifiedAt: now,
+            isRecordLevel: true
+        )
+        anchoredNotes.append(note)
+        openDrawer(selecting: note)
+    }
+
+    /// Creation without a visible editor is a note the analyst can't type
+    /// into — every entry point opens the drawer on the fresh note.
+    private func openDrawer(selecting note: AnchoredNote) {
+        drawerSelection = .note(note.id)
+        withAnimation(.snappy(duration: 0.18)) { notesDrawerExpanded = true }
+    }
+
+    /// A point finding at the clicked sample — the point-kind sibling of
+    /// `authorRangeFinding`, with the same source stamp, persistence, and
+    /// review-queue/WFDB behaviour.
+    private func markFinding(atSample sample: Int64) {
+        let finding = Annotation(
+            kind: .point,
+            sampleIndex: sample,
+            category: "ANALYST_FINDING",
+            label: "Analyst mark",
+            source: Annotation.analystAuthoredSource,
+            lead: focusedChannel?.name,
+            citationCaption: "Marked by the analyst on the \(focusedChannel?.name ?? "ECG") trace"
+        )
+        attachedAnnotations.append(finding)
+        do {
+            try BundleAnnotationsFile.write(allAnnotations, to: recordingDirectory)
+        } catch {
+            attachError = "Finding was added for this session but could not be saved to the bundle: \(error.localizedDescription)"
+        }
+    }
+
     private func jumpToNoteAnchor(_ note: AnchoredNote) {
+        // X84: a record-level note has no anchor; there is nothing to jump to.
+        guard !note.isLocationless else { return }
         if windowLockedTo10s {
             viewport.center(onSample: (note.startSample + note.endSample) / 2)
         } else {
@@ -2450,9 +2542,12 @@ struct BedsideView: View {
     }
 
     /// ⌥J/⌥K — step through the notes in anchor order, opening the drawer so
-    /// the analyst can see which note they landed on.
+    /// the analyst can see which note they landed on. Record-level notes are
+    /// not part of the walk: the walk IS a tour of anchors (X84), and
+    /// `jumpToNoteAnchor` would silently no-op on them anyway.
     private func stepNote(by delta: Int) {
-        let ordered = anchoredNotes.sorted { $0.startSample < $1.startSample }
+        let ordered = anchoredNotes.filter { !$0.isLocationless }
+            .sorted { $0.startSample < $1.startSample }
         guard let next = ContextDrawer.stepped(notes: ordered, selection: drawerSelection, by: delta) else { return }
         drawerSelection = .note(next.id)
         notesDrawerExpanded = true

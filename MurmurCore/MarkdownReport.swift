@@ -87,10 +87,16 @@ enum MarkdownReport {
             lines.append("## Analyst notes (\(notes.count))")
             lines.append("")
             for note in notes.sorted(by: { $0.startSample < $1.startSample }) {
-                let start = formatTime(seconds: Double(note.startSample) / sampleRate)
-                let end = formatTime(seconds: Double(note.endSample) / sampleRate)
-                let lead = note.leadName.map { " · lead \($0)" } ?? ""
-                lines.append("- **\(start)–\(end)**\(lead)")
+                // X84: the record-level kind states its scope; a fabricated
+                // "0:00.0–0:00.0" would read as an anchor at the record start.
+                if note.isLocationless {
+                    lines.append("- **Record note**")
+                } else {
+                    let start = formatTime(seconds: Double(note.startSample) / sampleRate)
+                    let end = formatTime(seconds: Double(note.endSample) / sampleRate)
+                    let lead = note.leadName.map { " · lead \($0)" } ?? ""
+                    lines.append("- **\(start)–\(end)**\(lead)")
+                }
                 for textLine in note.text.components(separatedBy: .newlines) {
                     lines.append("  \(textLine)")
                 }

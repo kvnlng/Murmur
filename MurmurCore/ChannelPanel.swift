@@ -13,6 +13,23 @@ import AppKit
 import Charts
 import SwiftUI
 
+/// X84 — what a right-click on the trace can create, supplied by the owner
+/// (BedsideView) because notes and findings live in ITS stores. The panel
+/// contributes only the geometry: which sample sits under the cursor.
+struct NoteAuthoringHooks {
+    /// The Editing latch — note items render disabled without it.
+    var isEditing: Bool
+    /// Editing + the Studio entitlement — the finding item's gate, the same
+    /// pair `canAuthorFindings` applies to drag-to-author on the trend lane.
+    var canAuthorFindings: Bool
+    var addNote: (Int64) -> Void
+    var addRecordNote: () -> Void
+    var addFinding: (Int64) -> Void
+    /// Mode-aware time label (elapsed vs wall-clock) for menu items, so the
+    /// menu speaks the same clock as every other surface.
+    var timeLabel: (Int64) -> String
+}
+
 struct ChannelPanel: View {
     enum Sizing {
         /// Strips mode — compact stacked layout. Floor is small enough that a
@@ -56,6 +73,9 @@ struct ChannelPanel: View {
     /// no hit testing. Everything that carries a MEASUREMENT belongs to
     /// `channel`, the designated primary.
     var overlayChannels: [Channel] = []
+    /// X84 — right-click authoring hooks. Nil (e.g. in previews or surfaces
+    /// without stores) renders no context menu at all.
+    var noteAuthoring: NoteAuthoringHooks?
 
     @State private var clippedRanges: [ClippedRange] = []
     /// Recording-wide min/max for this channel, populated by the same
@@ -550,6 +570,42 @@ struct ChannelPanel: View {
                 ))
             }
             .contentShape(Rectangle())
+            // X84: right-click on the trace creates a note or a finding AT
+            // THAT LOCATION. The sample under the cursor comes from the
+            // hover tracker — a right-click IS a cursor position, so
+            // `hoverLocation` is current when the menu builds. A plain
+            // `.contextMenu` carries no click coordinates of its own; this
+            // is the only per-click geometry available without an AppKit
+            // right-mouse overlay, and it matches the crosshair the analyst
+            // is already looking at.
+            .contextMenu {
+                if let hooks = noteAuthoring {
+                    let sample = cursorSampleIndex(at: hoverLocation, in: liveSize)
+                    Button("New note at \(hooks.timeLabel(sample))") {
+                        hooks.addNote(sample)
+                    }
+                    .disabled(!hooks.isEditing)
+                    .accessibilityIdentifier("bedside-context-new-note")
+                    Button("New record note (no anchor)") {
+                        hooks.addRecordNote()
+                    }
+                    .disabled(!hooks.isEditing)
+                    .accessibilityIdentifier("bedside-context-new-record-note")
+                    Divider()
+                    Button("Mark finding at \(hooks.timeLabel(sample))") {
+                        hooks.addFinding(sample)
+                    }
+                    .disabled(!hooks.canAuthorFindings)
+                    .accessibilityIdentifier("bedside-context-mark-finding")
+                    if !hooks.isEditing {
+                        Divider()
+                        // Same rule as every other authoring surface: say WHY
+                        // the items are disabled rather than leaving a dead
+                        // menu to be puzzled over.
+                        Text("Unlock Editing to add notes or findings")
+                    }
+                }
+            }
             .gesture(panGesture(in: liveSize))
             .gesture(zoomGesture(in: liveSize))
             // Publish the focused trace's geometry so the calibration readout

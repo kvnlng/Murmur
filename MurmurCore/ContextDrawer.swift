@@ -125,6 +125,20 @@ struct ContextDrawer: View {
                   ? "Anchor a note to the current window"
                   : "Unlock Editing to add notes")
             .accessibilityIdentifier("notes-drawer-new-note")
+
+            // X84: the location-less kind — record-level, no anchor. Both
+            // kinds are creatable here AND from the trace's right-click menu.
+            Button {
+                createRecordNote()
+            } label: {
+                Label("Record note", systemImage: "doc.badge.plus")
+                    .font(.caption)
+            }
+            .disabled(!isEditing)
+            .help(isEditing
+                  ? "Add a record-level note — about the whole recording, no anchor"
+                  : "Unlock Editing to add notes")
+            .accessibilityIdentifier("notes-drawer-new-record-note")
         }
         .buttonStyle(.borderless)
     }
@@ -264,19 +278,25 @@ struct ContextDrawer: View {
     private func noteRow(_ note: AnchoredNote, index: Int) -> some View {
         Button {
             selection = .note(note.id)
-            onJump(note)
+            // X84: a record-level note has no anchor — selecting it edits
+            // it, and the trace stays where the analyst left it.
+            if !note.isLocationless { onJump(note) }
         } label: {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
+                // The anchored kind carries the accent dot the bands echo;
+                // the record-level kind carries a hollow one — same column,
+                // visibly not a location.
                 Circle()
-                    .fill(Color.accentColor)
+                    .fill(note.isLocationless ? Color.clear : Color.accentColor)
+                    .stroke(Color.accentColor, lineWidth: note.isLocationless ? 1 : 0)
                     .frame(width: 7, height: 7)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 6) {
-                        Text(timeLabel(note.startSample))
+                        Text(note.isLocationless ? "Record note" : timeLabel(note.startSample))
                             .font(.caption.weight(.semibold).monospacedDigit())
                         Spacer(minLength: 4)
-                        Text(durationLabel(note))
+                        Text(note.isLocationless ? "no anchor" : durationLabel(note))
                             .font(.caption2.monospacedDigit())
                             .foregroundStyle(.tertiary)
                     }
@@ -498,6 +518,9 @@ struct ContextDrawer: View {
     }
 
     private func anchorCaption(_ note: AnchoredNote) -> String {
+        // X84: the location-less kind states its scope instead of inventing
+        // a zero-length range at sample 0.
+        if note.isLocationless { return "record-level — no anchor" }
         let span = durationLabel(note)
         if let lead = note.leadName {
             return "anchored to a \(span) range in lead \(lead)"
@@ -515,6 +538,22 @@ struct ContextDrawer: View {
             leadName: currentLeadName,
             createdAt: now,
             modifiedAt: now
+        )
+        notes.append(note)
+        selection = .note(note.id)
+    }
+
+    /// X84 — the location-less kind. No anchor, no lead provenance: the note
+    /// is about the RECORD, and stamping the currently-focused lead on it
+    /// would claim a scope it doesn't have.
+    private func createRecordNote() {
+        let now = Date()
+        let note = AnchoredNote(
+            startSample: 0,
+            endSample: 0,
+            createdAt: now,
+            modifiedAt: now,
+            isRecordLevel: true
         )
         notes.append(note)
         selection = .note(note.id)
