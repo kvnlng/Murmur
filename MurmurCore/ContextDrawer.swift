@@ -207,8 +207,8 @@ struct ContextDrawer: View {
                             identifier: "note-row-document"
                         )
                     }
-                    ForEach(filteredNotes) { note in
-                        noteRow(note)
+                    ForEach(Array(filteredNotes.enumerated()), id: \.element.id) { index, note in
+                        noteRow(note, index: index)
                     }
                 }
             }
@@ -261,7 +261,7 @@ struct ContextDrawer: View {
         .accessibilityIdentifier(identifier)
     }
 
-    private func noteRow(_ note: AnchoredNote) -> some View {
+    private func noteRow(_ note: AnchoredNote, index: Int) -> some View {
         Button {
             selection = .note(note.id)
             onJump(note)
@@ -291,7 +291,14 @@ struct ContextDrawer: View {
         }
         .buttonStyle(.plain)
         .background(selection == .note(note.id) ? Color.accentColor.opacity(0.15) : .clear)
-        .accessibilityIdentifier("note-row-\(note.id.uuidString)")
+        // Positional, not UUID-based (X98). The UUID id forced tests to find
+        // anchored rows with a BEGINSWITH predicate — and XCUI serves plain
+        // identifier matches cheaply but pays a full-app snapshot (~20 s in
+        // this app) for EVERY evaluation of an opaque predicate, which made
+        // one drawer test spend 139 of 163 s in a single query. A stable
+        // "first anchored row" address costs nothing to look up; rows are in
+        // list order, so `note-row-anchored-0` is the top row after sort.
+        .accessibilityIdentifier("note-row-anchored-\(index)")
     }
 
     private var filteredNotes: [AnchoredNote] {

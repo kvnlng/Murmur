@@ -183,10 +183,12 @@ final class MurmurUINotesDrawerTests: XCTestCase {
         )
 
         // Click the note's row — the trace must come back to the anchor.
+        // Addressed by the stable positional identifier (X98): anchored rows
+        // are `note-row-anchored-<index>` in list order, so the fresh note is
+        // index 0 and no BEGINSWITH predicate is needed to find it.
         let afterScrub = viewportState.label
         let noteRow = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "identifier BEGINSWITH 'note-row-' AND identifier != 'note-row-hea' AND identifier != 'note-row-document'"))
-            .firstMatch
+            .matching(identifier: "note-row-anchored-0").firstMatch
         XCTAssertTrue(noteRow.waitForExistence(timeout: 3),
                       "The created note should render a list row")
         scrollIntoViewAndClick(noteRow, within: app, "the note row")
