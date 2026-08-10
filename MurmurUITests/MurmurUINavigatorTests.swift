@@ -63,6 +63,36 @@ final class MurmurUINavigatorTests: XCTestCase {
                       "The navigator should carry a RECORDS section header")
     }
 
+    /// X81: the toolbar carries ONE sidebar toggle — ours. The split view's
+    /// injected "Hide Sidebar" button is suppressed: it lives in the sidebar's
+    /// own toolbar region and vanishes with the collapsed column (the X63-B
+    /// trap, still real on macOS 26), and beside the persistent toggle it
+    /// read as two adjacent buttons doing the same thing.
+    @MainActor
+    func testToolbarCarriesExactlyOneSidebarToggle() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-open-sample-session"]
+        app.launch()
+
+        let ourToggle = app.descendants(matching: .any)
+            .matching(identifier: "toolbar-sidebar-toggle").firstMatch
+        XCTAssertTrue(ourToggle.waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["Hide Sidebar"].exists,
+                       "The system sidebar toggle must be suppressed — two adjacent toggles was X81")
+
+        // And the one toggle is sufficient: collapse, then bring the
+        // navigator back — the round trip the system button can't make.
+        let search = app.descendants(matching: .any)
+            .matching(identifier: "record-search-field").firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        ourToggle.click()
+        XCTAssertTrue(MurmurUITests.waitForElementToDisappear(search, timeout: 3),
+                      "Toggling should collapse the navigator")
+        ourToggle.click()
+        XCTAssertTrue(search.waitForExistence(timeout: 3),
+                      "Toggling again should bring the navigator back")
+    }
+
     /// The overflow menu carries Customize Toolbar…, which is the only route
     /// to visible labels while `.help()` renders nothing — so it is load-
     /// bearing, not a convenience.

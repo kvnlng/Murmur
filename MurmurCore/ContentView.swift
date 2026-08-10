@@ -463,6 +463,14 @@ public struct ContentView: View {
             RecordSidebar(records: records, importStates: importStates, selection: $selection)
                 .navigationTitle(source.displayName)
                 .navigationSplitViewColumnWidth(min: 160, ideal: 240, max: 320)
+                // X81: suppress the split view's own sidebar toggle. With the
+                // persistent toggle below, the toolbar carried TWO adjacent
+                // sidebar buttons while the navigator was open. The system one
+                // is the wrong one to keep: it lives in the sidebar's toolbar
+                // region and vanishes with the collapsed column (verified on
+                // macOS 26 — the X63-B trap is still real), so it can hide
+                // the navigator but never bring it back.
+                .toolbar(removing: .sidebarToggle)
         } detail: {
             detailPane
                 .navigationTitle(detailTitle)
