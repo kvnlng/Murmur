@@ -124,7 +124,8 @@ struct BedsideView: View {
     /// stack that opened empty would make the analyst discover the menu
     /// before seeing anything.
     @State private var visibleTrendLanes: Set<String> = [
-        BedsideTrendStack.hrLaneID, "rmssd", "interval-trend",
+        BedsideTrendStack.hrLaneID, BedsideTrendStack.beatHRLaneID,
+        "rmssd", "interval-trend",
         BedsideTrendStack.lfhfLaneID, BedsideTrendStack.qualityLaneID,
     ]
     /// Rolling LF/HF series (X76) — computed by the App-target orchestrator
@@ -1576,6 +1577,10 @@ struct BedsideView: View {
                 recordingRange: recordingTimeRange,
                 viewportRange: viewportTimeRange,
                 visibleLanes: visibleTrendLanes,
+                // X89 — the delineator's beats; empty (no lane) in the free
+                // viewer, same gate the interval lane inherits.
+                beats: markingsContext.beats,
+                beatSampleRate: markingsContext.sampleRate,
                 onSeek: { seconds in
                     viewport.center(onSample: Int64(seconds * max(1, viewport.sampleRate)))
                 },
@@ -1667,6 +1672,7 @@ struct BedsideView: View {
         let available = BedsideTrendStack.availableLanes(
             heartRate: lowRatePartition.heartRate,
             quality: qualityChannels,
+            beatHR: !markingsContext.beats.isEmpty,
             rmssd: !laneContext.samples.isEmpty,
             interval: !markingsContext.beats.isEmpty,
             lfhf: !lfhfContext.samples.isEmpty

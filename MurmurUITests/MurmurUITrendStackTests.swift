@@ -30,6 +30,26 @@ final class MurmurUITrendStackTests: XCTestCase {
         return (element.value as? String) ?? ""
     }
 
+    /// X85 made the whole stack foldable behind `@AppStorage`, so every test
+    /// that asserts lane CONTENT inherits whatever fold state the container
+    /// last persisted — the X72 lesson, again: a suite run that starts with
+    /// the stack folded fails every lane assertion that runs before the fold
+    /// test happens to heal the state. Drive to expanded first, the same way
+    /// `testHeaderBarFoldsTheStackWhole` always has.
+    @MainActor
+    private func ensureTrendStackExpanded(_ app: XCUIApplication, timeout: TimeInterval = 20) {
+        let bar = app.descendants(matching: .any)
+            .matching(identifier: "trend-stack-bar").firstMatch
+        // No stack chrome at all — let the test's own assertion say so.
+        guard bar.waitForExistence(timeout: timeout) else { return }
+        let stack = app.descendants(matching: .any)
+            .matching(identifier: "trend-stack").firstMatch
+        if stack.waitForExistence(timeout: 3) { return }
+        _ = MurmurUITests.scrollUntilHittable(bar, in: app)
+        bar.click()
+        _ = stack.waitForExistence(timeout: 3)
+    }
+
     /// The Context drawer's expansion is `@AppStorage`, so whatever the last
     /// run (or a developer's manual session) left behind is what this test
     /// inherits — and an expanded drawer pushes the Lanes menu below the
@@ -59,6 +79,7 @@ final class MurmurUITrendStackTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments += ["--ui-test-sample"]
         app.launch()
+        ensureTrendStackExpanded(app)
 
         let stack = app.descendants(matching: .any)
             .matching(identifier: "trend-stack").firstMatch
@@ -81,6 +102,7 @@ final class MurmurUITrendStackTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments += ["--ui-test-sample"]
         app.launch()
+        ensureTrendStackExpanded(app)
 
         let caption = app.descendants(matching: .any)
             .matching(identifier: "trend-stack-caption").firstMatch
@@ -111,6 +133,7 @@ final class MurmurUITrendStackTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments += ["--ui-test-sample", "--ui-test-window=1000x600"]
         app.launch()
+        ensureTrendStackExpanded(app)
 
         let hrLane = app.descendants(matching: .any)
             .matching(identifier: "trend-lane-hr").firstMatch
@@ -144,6 +167,7 @@ final class MurmurUITrendStackTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments += ["--ui-test-sample", "--ui-test-inject-lfhf-lane"]
         app.launch()
+        ensureTrendStackExpanded(app)
 
         let lane = app.descendants(matching: .any)
             .matching(identifier: "trend-lane-lfhf").firstMatch
@@ -175,6 +199,7 @@ final class MurmurUITrendStackTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments += ["--ui-test-sample", "--ui-test-no-entitlements"]
         app.launch()
+        ensureTrendStackExpanded(app)
 
         let qualityLane = app.descendants(matching: .any)
             .matching(identifier: "trend-lane-quality").firstMatch
@@ -185,6 +210,49 @@ final class MurmurUITrendStackTests: XCTestCase {
             .matching(identifier: "trend-lane-lfhf").firstMatch
         XCTAssertFalse(lfhfLane.exists,
                        "The free viewer must never render the LF/HF measurement lane")
+
+        // X89: beat-derived HR rides the delineator's beats, which are
+        // Studio-gated — the free viewer must not carry the lane either.
+        let beatHRLane = app.descendants(matching: .any)
+            .matching(identifier: "trend-lane-hr-beats").firstMatch
+        XCTAssertFalse(beatHRLane.exists,
+                       "The free viewer must never render the beat-derived HR lane")
+    }
+
+    /// X89 wire-up, the X52 §5 pattern: the injected fiducial store carries
+    /// 30 beats at a uniform 800 ms R–R — exactly 75.0 bpm — so this asserts
+    /// the RENDERED value column equals the computed rate, catching a
+    /// binding slip between `BeatHeartRateSeries` and the screen that a
+    /// green unit suite would miss.
+    @MainActor
+    func testBeatDerivedHRLaneRendersComputedRate() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-sample", "--ui-test-inject-qtc-lane=455"]
+        app.launch()
+        ensureTrendStackExpanded(app)
+
+        let lane = app.descendants(matching: .any)
+            .matching(identifier: "trend-lane-hr-beats").firstMatch
+        XCTAssertTrue(lane.waitForExistence(timeout: 20),
+                      "Published beats should produce the beat-derived HR lane")
+
+        let value = lane.descendants(matching: .staticText)
+            .matching(NSPredicate(format: "label == '75.0' OR value == '75.0'"))
+            .firstMatch
+        XCTAssertTrue(value.waitForExistence(timeout: 5),
+                      "800 ms R–R must render as exactly 75.0 bpm in the value column")
+
+        // The Lanes menu offers the lane once beats exist.
+        collapseContextDrawer(app)
+        let menu = app.descendants(matching: .any)
+            .matching(identifier: "trend-lanes-menu").firstMatch
+        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        XCTAssertTrue(MurmurUITests.scrollUntilHittable(menu, in: app),
+                      "The Lanes menu should scroll into view")
+        menu.click()
+        XCTAssertTrue(app.menuItems["trend-lane-toggle-hr-beats"].waitForExistence(timeout: 5),
+                      "The Lanes menu should offer the beat-derived HR lane")
+        app.typeKey(.escape, modifierFlags: [])
     }
 
     /// X85: the header bar folds the stack whole, like the Context drawer —

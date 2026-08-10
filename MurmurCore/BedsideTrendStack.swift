@@ -22,6 +22,12 @@ struct BedsideTrendStack: View {
     /// Which lanes the analyst has switched on. Lanes absent from the record
     /// never appear regardless.
     let visibleLanes: Set<String>
+    /// X89 — the delineator's beats, for the beat-derived HR lane. Empty in
+    /// the free viewer (delineation is Studio-gated upstream) and on records
+    /// not yet delineated; the lane simply doesn't exist then.
+    let beats: [MarkingsBeat]
+    /// The ECG sample rate `beats`' R-peak indices are expressed in.
+    let beatSampleRate: Double
     var onSeek: ((Double) -> Void)?
 
     /// These lanes are supplied by the caller, because they carry their own
@@ -37,8 +43,12 @@ struct BedsideTrendStack: View {
     @State private var heartRateRate: Double = 0
     @State private var quality: [Float] = []
     @State private var qualityRate: Double = 0
+    /// X89 — computed off the render path: `lanes` re-evaluates on every
+    /// viewport change, and a 24 h record's beat list is ~10⁵ elements.
+    @State private var beatHR: BeatHeartRateSeries.Series = .empty
 
     static let hrLaneID = "hr"
+    static let beatHRLaneID = "hr-beats"
     static let lfhfLaneID = "lfhf"
     static let qualityLaneID = "quality"
 
@@ -71,7 +81,10 @@ struct BedsideTrendStack: View {
     }
 
     private var loadKey: String {
+        // Beats key on count + endpoints, not the whole array — an element-wise
+        // key would put an O(n) comparison on every render for a task id.
         "\(heartRateChannel?.id.uuidString ?? "-")|\(qualityChannels.map(\.name).joined(separator: ","))"
+            + "|\(beats.count)-\(beats.first?.rPeakSampleIndex ?? 0)-\(beats.last?.rPeakSampleIndex ?? 0)-\(beatSampleRate)"
     }
 
     private var lanes: [TrendStackLane] {
@@ -88,6 +101,25 @@ struct BedsideTrendStack: View {
                 HeartRateLanePlot(
                     samples: heartRate,
                     sampleRate: heartRateRate,
+                    recordingRange: recordingRange
+                )
+            })
+        }
+        // X89 — beat-derived HR, right under the channel lane it complements:
+        // same quantity, different population (detected beats vs a device's
+        // trend channel), and the subtitles say which is which.
+        if !beatHR.samples.isEmpty, visibleLanes.contains(Self.beatHRLaneID) {
+            out.append(TrendStackLane(
+                id: Self.beatHRLaneID,
+                title: "HR · beat-derived",
+                subtitle: "bpm · median per \(Int(BeatHeartRateSeries.defaultBinSeconds)) s · from R–R",
+                value: currentValue(of: beatHR.samples, rate: beatHR.sampleRate),
+                height: 46,
+                seekable: true
+            ) {
+                HeartRateLanePlot(
+                    samples: beatHR.samples,
+                    sampleRate: beatHR.sampleRate,
                     recordingRange: recordingRange
                 )
             })
@@ -120,12 +152,14 @@ struct BedsideTrendStack: View {
     static func availableLanes(
         heartRate: Channel?,
         quality: [Channel],
+        beatHR: Bool,
         rmssd: Bool,
         interval: Bool,
         lfhf: Bool
     ) -> [(id: String, label: String)] {
         var out: [(String, String)] = []
         if heartRate != nil { out.append((hrLaneID, "Trends · HR")) }
+        if beatHR { out.append((beatHRLaneID, "HR · beat-derived")) }
         if rmssd { out.append(("rmssd", "RMSSD")) }
         if interval { out.append(("interval-trend", "Interval trend")) }
         if lfhf { out.append((lfhfLaneID, "LF / HF")) }
@@ -156,6 +190,9 @@ struct BedsideTrendStack: View {
         if let hr = heartRateChannel {
             parts.append("HR from \(hr.name) at \(rateLabel(heartRateRate))")
         }
+        if !beatHR.samples.isEmpty {
+            parts.append("beat HR from \(beatHR.beatCount) detected beats")
+        }
         if let q = qualityChannels.first {
             parts.append("quality from \(q.name) at \(rateLabel(qualityRate))")
         }
@@ -185,6 +222,14 @@ struct BedsideTrendStack: View {
                 qualityRate = q.sampleRate
             }
         }
+        // X89 — pure arithmetic over the published beats; recomputes only
+        // when `loadKey` moves (a new record, or the delineator republishes).
+        let series = BeatHeartRateSeries.compute(
+            beats: beats,
+            sampleRate: beatSampleRate,
+            recordingDurationSeconds: recordingRange.upperBound - recordingRange.lowerBound
+        )
+        await MainActor.run { beatHR = series }
     }
 
     /// Trend channels are tiny by design — a 72-hour record at 1/60 Hz is
