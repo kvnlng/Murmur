@@ -9,25 +9,13 @@ public struct ContentView: View {
     @State private var state: AppState = .empty
     @State private var importStates: [String: RecordImportState] = [:]
     @State private var selection: String?
-    /// X77 — a sidebar selection intercepted by the unsaved-notes guard,
-    /// waiting on the confirmation dialog. Wrapped so `target: nil`
-    /// (deselection) is still a parked intent, distinguishable from "none".
-    @State private var pendingGuardedSelection: PendingSelection?
-    /// Lets the guard's own selection writes pass through `onChange` without
-    /// re-entering the guard. The two writes need different treatment: the
-    /// REVERT must not re-run `handleSelectionChanged` (the record on screen
-    /// never changed, and re-running would re-stage a `.mur` session restore
-    /// for it), while the APPROVED switch is a real change and must.
-    @State private var suppressUnsavedNotesGuard: UnsavedNotesGuardBypass?
-
-    private enum UnsavedNotesGuardBypass {
-        case revert
-        case approvedSwitch
-    }
-
-    private struct PendingSelection {
-        let target: String?
-    }
+    /// X86 — the one-time crash-loss disclosure, raised the first time a
+    /// switch actually carries unsaved notes. `hasSeenCrashLossNotice` is the
+    /// per-install acknowledgement; the gate itself (with its UI-test
+    /// suppress/force split) is `CrashLossNotice.shouldPresent`.
+    @AppStorage(CrashLossNotice.shownDefaultsKey)
+    private var hasSeenCrashLossNotice = false
+    @State private var showCrashLossNotice = false
 
     /// X78 — an open intercepted by the unsaved-notes guard, parked as the
     /// action itself (the entry paths carry different payloads — a URL, a
@@ -215,12 +203,15 @@ public struct ContentView: View {
                 pendingGuardedOpen = nil
                 // Explicit discard, same reasoning as X77: the quit guard
                 // must not later warn about notes that are already gone.
+                // X86: that now includes the carried set — an open tears
+                // down every record's in-memory work, not just the open one.
                 CurrentRecordingContext.shared.liveSessionState.anchoredNotes = nil
+                CarriedSessionStore.shared.reset()
                 pending.run()
             }
             Button("Cancel", role: .cancel) { pendingGuardedOpen = nil }
         } message: {
-            Text("Anchored notes save with the session — File ▸ Save Session (⌘S). Opening something else discards them.")
+            Text("Anchored notes save with the session — File ▸ Save Session (⌘S). Opening something else discards them, on every record in this session.")
         }
     }
 
@@ -229,8 +220,12 @@ public struct ContentView: View {
     /// point rather than one per entry path: Finder opens, Open Record… /
     /// Open Session… / Import CSV…, Open Recent, and the toolbar Open
     /// button's folder pick all pass through here.
+    ///
+    /// X86: "unsaved" now means the whole working set — the open record OR
+    /// any record parked in `CarriedSessionStore` with unsaved notes.
     private func runGuardingUnsavedNotes(_ action: @escaping () -> Void) {
-        if CurrentRecordingContext.shared.hasUnsavedAnchoredNotes {
+        if CurrentRecordingContext.shared.hasUnsavedAnchoredNotes
+            || !CarriedSessionStore.shared.unsavedRecordIDs.isEmpty {
             pendingGuardedOpen = PendingOpen(run: action)
         } else {
             action()
@@ -372,8 +367,10 @@ public struct ContentView: View {
                 store[record.id] = record.provenance
             }
             // A session is its own working set; flags from a previously-open
-            // folder do not belong to it.
+            // folder do not belong to it. Neither does carried unsaved work —
+            // the X78 guard already adjudicated it before this open ran.
             SessionFlagStore.shared.reset()
+            CarriedSessionStore.shared.reset()
             for record in plan.records {
                 SessionFlagStore.shared.register(
                     FlaggedRecord(id: record.id, recording: record.recording, directory: record.directory)
@@ -493,48 +490,27 @@ public struct ContentView: View {
                 .toolbar { sidebarToggleToolbarItem }
         }
         .onChange(of: selection) { oldValue, newValue in
-            // X77 — the record-switch half of the unsaved-anchored-notes
-            // guard (#113). Switching tears down BedsideView's @State, which
-            // is where unsaved notes live; the quit guard alone would let a
-            // sidebar click lose silently what ⌘Q warns about.
-            if let bypass = suppressUnsavedNotesGuard {
-                suppressUnsavedNotesGuard = nil
-                if bypass == .approvedSwitch {
-                    handleSelectionChanged(newValue, source: source)
-                }
-                return
-            }
-            if oldValue != nil, oldValue != newValue,
-               CurrentRecordingContext.shared.hasUnsavedAnchoredNotes {
-                // Park the intent and put the selection back; the dialog
-                // decides. The flag keeps the revert from re-entering here.
-                pendingGuardedSelection = PendingSelection(target: newValue)
-                suppressUnsavedNotesGuard = .revert
-                selection = oldValue
-                return
+            // X86 (#135) — switching records no longer interrupts. The X77
+            // record-switch confirmation used to stand here, because the
+            // switch tears down BedsideView's @State, where unsaved notes
+            // live. Now the outgoing record's live state is PARKED instead
+            // (viewport, paper, and notes ride together), re-applied when
+            // the analyst comes back, and written by File ▸ Save Session.
+            // The quit and open guards still warn — over the whole
+            // in-memory set, not just the record on screen.
+            if let oldValue, oldValue != newValue {
+                carrySessionState(forRecordID: oldValue)
             }
             handleSelectionChanged(newValue, source: source)
         }
-        .confirmationDialog(
-            "Switch records with unsaved anchored notes?",
-            isPresented: Binding(
-                get: { pendingGuardedSelection != nil },
-                set: { if !$0 { pendingGuardedSelection = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button("Discard and Switch", role: .destructive) {
-                guard let pending = pendingGuardedSelection else { return }
-                pendingGuardedSelection = nil
-                // The discard is explicit: clear the live notes so the quit
-                // guard can't later warn about notes that are already gone.
-                CurrentRecordingContext.shared.liveSessionState.anchoredNotes = nil
-                suppressUnsavedNotesGuard = .approvedSwitch
-                selection = pending.target
-            }
-            Button("Cancel", role: .cancel) { pendingGuardedSelection = nil }
+        // X86 — the one-time crash-loss disclosure, raised by the first
+        // switch that actually carries unsaved notes. One acknowledgement,
+        // per install: unsaved work living in memory is the app's standing
+        // behaviour now, not a per-switch decision.
+        .alert(CrashLossNotice.title, isPresented: $showCrashLossNotice) {
+            Button("OK") { showCrashLossNotice = false }
         } message: {
-            Text("Anchored notes save with the session — File ▸ Save Session (⌘S). Switching records discards them.")
+            Text(CrashLossNotice.message)
         }
         // X82: the coexistence rule needs the real window content width —
         // and needs to know a navigator exists (the direct shell has none,
@@ -741,6 +717,7 @@ public struct ContentView: View {
             // session is scoped to the folder being worked. A different folder
             // is a different working set.
             SessionFlagStore.shared.reset()
+            CarriedSessionStore.shared.reset()
             sessionStates = [:]
             sessionProvenances = [:]
             setAppState(.browsing(source: .folder(folderURL), records: records.map(RecordListEntry.init)))
@@ -821,15 +798,73 @@ public struct ContentView: View {
         }
     }
 
+    /// X86 — park the outgoing record's live state as the analyst switches
+    /// away, so the switch loses nothing. The snapshot in
+    /// `liveSessionState` is still the OLD record's at this moment: the
+    /// incoming bedside view hasn't mounted, and only it republishes.
+    ///
+    /// Guarded on the context actually showing the record being left —
+    /// clicking past a still-importing record must not park another
+    /// record's state under its id.
+    private func carrySessionState(forRecordID id: String) {
+        let context = CurrentRecordingContext.shared
+        guard case .imported(_, let recording) = importStates[id],
+              context.recording?.id == recording.id else { return }
+        CarriedSessionStore.shared.carry(
+            recordID: id,
+            state: context.liveSessionState,
+            savedNotes: context.sessionSavedNotes
+        )
+        guard context.hasUnsavedAnchoredNotes else { return }
+        // Carried unsaved notes ARE analyst work, so the record joins the
+        // save set by default (a default, not a lock — an explicit unflag
+        // stays unflagged, same as the X63-B bundle probe). Without this,
+        // Save Session after annotating three records would silently write
+        // only the open one.
+        SessionFlagStore.shared.applyDefaultFlag(for: id)
+        presentCrashLossNoticeIfNeeded()
+    }
+
+    /// X86 — one disclosure, the first time a switch carries unsaved work.
+    private func presentCrashLossNoticeIfNeeded() {
+        #if DEBUG
+        let present = CrashLossNotice.shouldPresent(
+            hasSeen: hasSeenCrashLossNotice,
+            isUITestRun: UITestSupport.isRunningUITest,
+            forcedByTest: UITestSupport.forceCrashLossNotice
+        )
+        #else
+        let present = CrashLossNotice.shouldPresent(
+            hasSeen: hasSeenCrashLossNotice,
+            isUITestRun: false,
+            forcedByTest: false
+        )
+        #endif
+        guard present else { return }
+        hasSeenCrashLossNotice = true
+        showCrashLossNotice = true
+    }
+
     /// Stage the per-record session state an opened `.mur` carried, if any.
     /// Consumed by the bedside view on appear (X59), so a later re-render can
     /// not re-apply a stale restore over the analyst's own navigation.
+    ///
+    /// X86: state parked by a record switch outranks the `.mur`'s — it is
+    /// the same record, later. Consuming the parked entry (rather than
+    /// reading it) is what keeps `CarriedSessionStore` from double-counting
+    /// the on-screen record's notes or restoring stale state over newer
+    /// work; the carried saved-notes baseline rides along so the restore
+    /// doesn't mark unsaved notes as durable.
     private func stageSessionRestore(for id: String) {
-        if let state = sessionStates[id] {
-            CurrentRecordingContext.shared.pendingSessionRestore = state
+        let context = CurrentRecordingContext.shared
+        if let carried = CarriedSessionStore.shared.consume(recordID: id) {
+            context.pendingSessionRestore = carried.state
+            context.pendingCarriedNotesBaseline = .init(notes: carried.savedNotes)
+        } else if let state = sessionStates[id] {
+            context.pendingSessionRestore = state
         }
         if let provenance = sessionProvenances[id] {
-            CurrentRecordingContext.shared.restoredProvenance = provenance
+            context.restoredProvenance = provenance
         }
     }
 

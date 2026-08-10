@@ -240,13 +240,16 @@ final class MurmurUINotesDrawerTests: XCTestCase {
                       "Discard and Quit should terminate the app")
     }
 
-    /// X77 (#113), the record-switch half: clicking another sidebar record
-    /// with an unsaved note warns; Cancel stays on the record with the note
-    /// intact, Discard and Switch lands on the other record without it.
+    /// X86 (#135), replacing the X77 record-switch confirmation this spot
+    /// used to test: switching records with an unsaved note no longer
+    /// interrupts. The note rides along in memory — the one-time crash-loss
+    /// disclosure presents on the first carrying switch (forced here, since
+    /// XCUI runs share the app container's defaults), the second record
+    /// opens fresh, and switching back restores the first record's note.
     @MainActor
-    func testSwitchingRecordsWithUnsavedNotesWarns() throws {
+    func testSwitchingRecordsCarriesUnsavedNotes() throws {
         let app = XCUIApplication()
-        app.launchArguments += ["--ui-test-open-folder=2"]
+        app.launchArguments += ["--ui-test-open-folder=2", "--ui-test-crash-loss-notice"]
         app.launch()
 
         // The first record auto-selects and imports; drive the drawer open.
@@ -272,33 +275,36 @@ final class MurmurUINotesDrawerTests: XCTestCase {
         XCTAssertTrue(readout.waitForExistence(timeout: 3))
         XCTAssertEqual(spokenName(readout), "1 of 1")
 
-        // Click the second record — the guard must intercept.
+        // The record navigator may have yielded to the review-queue
+        // inspector: X82's coexistence rule collapses whichever panel was
+        // least recently requested when the window can't hold both, and the
+        // inspector wins by default. Requesting the navigator through its
+        // detail-side toggle is the analyst's own recovery path — and the
+        // only one that works on Xcode Cloud's 1024-wide screens, where the
+        // two panels can never coexist.
         let row2 = app.descendants(matching: .any)
             .matching(NSPredicate(
                 format: "identifier BEGINSWITH 'record-row-' AND identifier CONTAINS 'synth2'"
             )).firstMatch
+        if !row2.waitForExistence(timeout: 3) {
+            let sidebarToggle = app.descendants(matching: .any)
+                .matching(identifier: "toolbar-sidebar-toggle").firstMatch
+            XCTAssertTrue(sidebarToggle.waitForExistence(timeout: 5))
+            sidebarToggle.click()
+        }
         XCTAssertTrue(row2.waitForExistence(timeout: 10),
                       "The folder fixture should list a second record")
         row2.click()
 
-        // Scoped to the window: the confirmation's buttons also surface as
-        // Touch Bar elements, which XCUI refuses to click.
-        let discard = app.windows.firstMatch.buttons["Discard and Switch"].firstMatch
-        XCTAssertTrue(discard.waitForExistence(timeout: 5),
-                      "Switching with an unsaved note should raise the confirmation")
-        app.windows.firstMatch.buttons["Cancel"].firstMatch.click()
+        // No confirmation — instead, the one-time crash-loss disclosure.
+        // Scoped to the window: alert buttons also surface as Touch Bar
+        // elements, which XCUI refuses to click.
+        let noticeOK = app.windows.firstMatch.buttons["OK"].firstMatch
+        XCTAssertTrue(noticeOK.waitForExistence(timeout: 5),
+                      "The first carrying switch should present the crash-loss notice")
+        noticeOK.click()
 
-        // Cancel keeps the record AND the note.
-        XCTAssertTrue(readout.waitForExistence(timeout: 3))
-        XCTAssertEqual(spokenName(readout), "1 of 1",
-                       "Cancel must keep the analyst on the record with their note intact")
-
-        // Same click, approved this time.
-        row2.click()
-        XCTAssertTrue(discard.waitForExistence(timeout: 5))
-        discard.click()
-
-        // The switch lands on the second record: fresh bedside, no notes.
+        // The switch proceeded: second record, fresh bedside, no notes.
         let noNotes = NSPredicate(format: "label == 'no notes' OR value == 'no notes'")
         let landed = XCTNSPredicateExpectation(
             predicate: noNotes,
@@ -306,7 +312,86 @@ final class MurmurUINotesDrawerTests: XCTestCase {
                 .matching(identifier: "notes-drawer-stepper-readout").firstMatch
         )
         XCTAssertEqual(XCTWaiter.wait(for: [landed], timeout: 20), .completed,
-                       "Discard and Switch should land on the second record with no notes")
+                       "The switch should land on the second record with no notes")
+
+        // Switch back: the first record's unsaved note was carried, not lost.
+        let row1 = app.descendants(matching: .any)
+            .matching(NSPredicate(
+                format: "identifier BEGINSWITH 'record-row-' AND identifier CONTAINS 'synth.hea'"
+            )).firstMatch
+        XCTAssertTrue(row1.waitForExistence(timeout: 5))
+        row1.click()
+
+        // "1 note", not "1 of 1": the note count is back but nothing is
+        // stepper-selected on a restore — selection is navigation state, and
+        // the analyst hadn't stepped to it when they switched away.
+        let restored = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label == '1 note' OR value == '1 note'"),
+            object: app.descendants(matching: .any)
+                .matching(identifier: "notes-drawer-stepper-readout").firstMatch
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [restored], timeout: 20), .completed,
+                       "Switching back should restore the carried unsaved note")
+    }
+
+    /// X86: the quit guard covers the whole in-memory set. The unsaved note
+    /// lives on a record the analyst switched AWAY from — the open record is
+    /// clean — and ⌘Q must still warn, because quitting loses the carried
+    /// work just as surely as it loses on-screen work.
+    @MainActor
+    func testQuitWarnsAboutCarriedUnsavedNotes() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-open-folder=2"]
+        app.launch()
+
+        let contextBar = app.descendants(matching: .any)
+            .matching(identifier: "context-bar").firstMatch
+        XCTAssertTrue(contextBar.waitForExistence(timeout: 20))
+        let panel = app.descendants(matching: .any)
+            .matching(identifier: "context-panel").firstMatch
+        if !panel.exists { contextBar.click() }
+        XCTAssertTrue(panel.waitForExistence(timeout: 3))
+
+        let editToggle = app.descendants(matching: .any)
+            .matching(identifier: "edit-mode-toggle").firstMatch
+        XCTAssertTrue(editToggle.waitForExistence(timeout: 3))
+        editToggle.click()
+        let newNote = app.buttons.matching(identifier: "notes-drawer-new-note").firstMatch
+        XCTAssertTrue(newNote.waitForExistence(timeout: 3))
+        newNote.click()
+
+        // Switch to the clean second record (see the carry test for why the
+        // navigator may need requesting first).
+        let row2 = app.descendants(matching: .any)
+            .matching(NSPredicate(
+                format: "identifier BEGINSWITH 'record-row-' AND identifier CONTAINS 'synth2'"
+            )).firstMatch
+        if !row2.waitForExistence(timeout: 3) {
+            let sidebarToggle = app.descendants(matching: .any)
+                .matching(identifier: "toolbar-sidebar-toggle").firstMatch
+            XCTAssertTrue(sidebarToggle.waitForExistence(timeout: 5))
+            sidebarToggle.click()
+        }
+        XCTAssertTrue(row2.waitForExistence(timeout: 10))
+        row2.click()
+
+        let noNotes = NSPredicate(format: "label == 'no notes' OR value == 'no notes'")
+        let landed = XCTNSPredicateExpectation(
+            predicate: noNotes,
+            object: app.descendants(matching: .any)
+                .matching(identifier: "notes-drawer-stepper-readout").firstMatch
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [landed], timeout: 20), .completed,
+                       "The open record must be the clean one for this test to prove anything")
+
+        app.typeKey("q", modifierFlags: .command)
+        // NSAlert buttons; app-scoped because the alert is app-modal.
+        let discard = app.buttons["Discard and Quit"].firstMatch
+        XCTAssertTrue(discard.waitForExistence(timeout: 5),
+                      "⌘Q with a CARRIED unsaved note should still raise the warning")
+        discard.click()
+        XCTAssertTrue(app.wait(for: .notRunning, timeout: 10),
+                      "Discard and Quit should terminate the app")
     }
 
     @MainActor

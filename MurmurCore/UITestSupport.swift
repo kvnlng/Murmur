@@ -295,6 +295,15 @@ enum UITestSupport {
         ProcessInfo.processInfo.arguments.contains("--ui-test-first-run-ruo")
     }
 
+    /// True when `--ui-test-crash-loss-notice` is passed: force the X86
+    /// one-time crash-loss disclosure to present on the first carrying
+    /// switch, regardless of any stored acknowledgement — the same
+    /// shared-defaults reasoning as `forceFirstRunRUO`. Every other UI-test
+    /// launch suppresses it; see `CrashLossNotice.shouldPresent`.
+    static var forceCrashLossNotice: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-crash-loss-notice")
+    }
+
     /// True when `--ui-test-arrhythmia-candidates` is passed. Same bypass as
     /// `injectVTVFCandidates`, for the arrhythmia scan (A2): BedsideView
     /// publishes a fixed candidate set into `ArrhythmiaScanContext` so the

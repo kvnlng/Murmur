@@ -239,6 +239,43 @@ struct SessionFlagStoreTests {
         #expect(payloads[2].provenanceJSON == nil)
     }
 
+    /// X86: a carried state is that record's OWN, captured when the analyst
+    /// switched away — the opposite of a fabricated coordinate, so a flagged
+    /// record that has one saves it. Provenance stays open-only.
+    @Test("A flagged record with carried state saves its own state")
+    func carriedStateRidesWithItsRecord() throws {
+        let carriedJSON = Data(#"{"viewportStartSample":42}"#.utf8)
+        let flagged = [
+            record("100.hea", directory: try tempDir("a")),
+            record("101.hea", directory: try tempDir("b")),
+        ]
+        let payloads = SessionSaveSet.payloads(
+            flagged: flagged,
+            openRecording: flagged[1].recording, openDirectory: flagged[1].directory,
+            sessionJSON: sessionJSON, provenanceJSON: provenanceJSON,
+            carriedSessionJSONByID: ["100.hea": carriedJSON]
+        )
+        #expect(payloads[0].sessionJSON == carriedJSON)
+        #expect(payloads[0].provenanceJSON == nil)
+        // The OPEN record's live snapshot still outranks anything carried —
+        // it is the same state, newer.
+        #expect(payloads[1].sessionJSON == sessionJSON)
+    }
+
+    /// X86: unsaved notes carried across a switch are analyst work that the
+    /// disk probe can't see, so they pre-flag through the in-memory overload —
+    /// with the same once-only, analyst-wins contract.
+    @Test("Carried unsaved work pre-flags, and an explicit unflag still wins")
+    func carriedWorkPreflags() {
+        let store = SessionFlagStore()
+        store.applyDefaultFlag(for: "100.hea")
+        #expect(store.isFlagged("100.hea"))
+
+        store.toggle("100.hea")                 // analyst says no
+        store.applyDefaultFlag(for: "100.hea")  // switch away again
+        #expect(!store.isFlagged("100.hea"), "a default must not overrule the analyst")
+    }
+
     /// An analyst can flag records without the open one being among them.
     @Test("A flagged set that excludes the open record carries no live state")
     func openRecordOutsideTheFlaggedSet() throws {
