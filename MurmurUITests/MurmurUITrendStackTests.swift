@@ -186,4 +186,39 @@ final class MurmurUITrendStackTests: XCTestCase {
         XCTAssertFalse(lfhfLane.exists,
                        "The free viewer must never render the LF/HF measurement lane")
     }
+
+    /// X85: the header bar folds the stack whole, like the Context drawer —
+    /// and unfolds it again.
+    @MainActor
+    func testHeaderBarFoldsTheStackWhole() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-sample", "--ui-test-window=1000x600"]
+        app.launch()
+
+        let bar = app.descendants(matching: .any)
+            .matching(identifier: "trend-stack-bar").firstMatch
+        XCTAssertTrue(bar.waitForExistence(timeout: 20))
+        collapseContextDrawer(app)
+
+        let stack = app.descendants(matching: .any)
+            .matching(identifier: "trend-stack").firstMatch
+        // Drive to a known state first — the fold is @AppStorage, so this
+        // test inherits whatever a previous run left behind (the X72
+        // lesson: never blind-toggle persisted state).
+        if !stack.exists {
+            XCTAssertTrue(MurmurUITests.scrollUntilHittable(bar, in: app))
+            bar.click()
+            XCTAssertTrue(stack.waitForExistence(timeout: 3),
+                          "Unfolding from a persisted-folded state should mount the stack")
+        }
+
+        XCTAssertTrue(MurmurUITests.scrollUntilHittable(bar, in: app),
+                      "The trend-stack bar should scroll into view")
+        bar.click()
+        XCTAssertTrue(MurmurUITests.waitForElementToDisappear(stack, timeout: 3),
+                      "Clicking the bar should fold the stack whole")
+        bar.click()
+        XCTAssertTrue(stack.waitForExistence(timeout: 3),
+                      "Clicking the bar again should unfold the stack")
+    }
 }

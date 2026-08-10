@@ -139,6 +139,12 @@ struct BedsideView: View {
     /// the design says as much.
     @AppStorage("murmur.notesDrawerExpanded")
     private var notesDrawerExpanded: Bool = false
+    /// X85 — the trend stack folds like the Context drawer. Defaults
+    /// EXPANDED (unlike the drawer): the stack is a primary reading surface
+    /// that has always been visible; folding is an option the analyst takes,
+    /// not a demotion the app applies.
+    @AppStorage("murmur.trendStackExpanded")
+    private var trendStackExpanded: Bool = true
     /// X72 — the analyst's time-anchored notes. Session work product: they
     /// travel in `sessionSnapshot` → `MurSessionState` and are written by
     /// File ▸ Save Session, never autosaved (DECISIONS §4).
@@ -1551,20 +1557,24 @@ struct BedsideView: View {
     @ViewBuilder
     private var contextLanes: some View {
         trendStackHeader
-        BedsideTrendStack(
-            heartRateChannel: lowRatePartition.heartRate,
-            qualityChannels: qualityChannels,
-            directory: recordingDirectory,
-            recordingRange: recordingTimeRange,
-            viewportRange: viewportTimeRange,
-            visibleLanes: visibleTrendLanes,
-            onSeek: { seconds in
-                viewport.center(onSample: Int64(seconds * max(1, viewport.sampleRate)))
-            },
-            rmssdLane: rmssdLane,
-            intervalLane: intervalLane,
-            lfhfLane: lfhfLane
-        )
+        // X85: folded, the header bar is all that renders — same
+        // whole-region collapse as the Context drawer.
+        if trendStackExpanded {
+            BedsideTrendStack(
+                heartRateChannel: lowRatePartition.heartRate,
+                qualityChannels: qualityChannels,
+                directory: recordingDirectory,
+                recordingRange: recordingTimeRange,
+                viewportRange: viewportTimeRange,
+                visibleLanes: visibleTrendLanes,
+                onSeek: { seconds in
+                    viewport.center(onSample: Int64(seconds * max(1, viewport.sampleRate)))
+                },
+                rmssdLane: rmssdLane,
+                intervalLane: intervalLane,
+                lfhfLane: lfhfLane
+            )
+        }
     }
 
     /// The rolling LF/HF lane (X76). Nil — no row at all — when the series is
@@ -1637,6 +1647,12 @@ struct BedsideView: View {
     /// The `Lanes` menu (X74). Sits above the stack rather than inside it,
     /// because it governs which rows exist and a control that can remove the
     /// container it lives in is a control that can hide itself.
+    ///
+    /// X85: the header row is also the stack's fold toggle, mirroring the
+    /// Context bar — chevron, click-to-fold, whole-region collapse. Folded,
+    /// the bar reports what's inside (the shown-lane count) and the Lanes
+    /// menu hides: configuring rows that aren't rendered is a control that
+    /// appears to do nothing.
     @ViewBuilder
     private var trendStackHeader: some View {
         let available = BedsideTrendStack.availableLanes(
@@ -1647,34 +1663,54 @@ struct BedsideView: View {
             lfhf: !lfhfContext.samples.isEmpty
         )
         if !available.isEmpty {
+            let shown = available.count(where: { visibleTrendLanes.contains($0.id) })
             HStack(spacing: 8) {
-                Text("Trend stack")
-                    .font(.subheadline.weight(.semibold))
-                Text("one axis · click the HR or quality lane to move the trace")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 8)
-                Menu {
-                    ForEach(available, id: \.id) { lane in
-                        Button {
-                            if visibleTrendLanes.contains(lane.id) {
-                                visibleTrendLanes.remove(lane.id)
-                            } else {
-                                visibleTrendLanes.insert(lane.id)
-                            }
-                        } label: {
-                            Label(lane.label,
-                                  systemImage: visibleTrendLanes.contains(lane.id) ? "checkmark" : "")
-                        }
-                        .accessibilityIdentifier("trend-lane-toggle-\(lane.id)")
+                Button {
+                    withAnimation(.snappy(duration: 0.18)) {
+                        trendStackExpanded.toggle()
                     }
                 } label: {
-                    Text("Lanes")
-                        .font(.caption)
+                    HStack(spacing: 6) {
+                        Image(systemName: trendStackExpanded ? "chevron.down" : "chevron.right")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text("Trend stack")
+                            .font(.subheadline.weight(.semibold))
+                        Text(trendStackExpanded
+                             ? "one axis · click the HR or quality lane to move the trace"
+                             : "\(shown) lane\(shown == 1 ? "" : "s")")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 8)
+                    }
+                    .contentShape(Rectangle())
                 }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-                .accessibilityIdentifier("trend-lanes-menu")
+                .buttonStyle(.plain)
+                .accessibilityLabel("Trend stack. \(shown) lane\(shown == 1 ? "" : "s")")
+                .accessibilityIdentifier("trend-stack-bar")
+                if trendStackExpanded {
+                    Menu {
+                        ForEach(available, id: \.id) { lane in
+                            Button {
+                                if visibleTrendLanes.contains(lane.id) {
+                                    visibleTrendLanes.remove(lane.id)
+                                } else {
+                                    visibleTrendLanes.insert(lane.id)
+                                }
+                            } label: {
+                                Label(lane.label,
+                                      systemImage: visibleTrendLanes.contains(lane.id) ? "checkmark" : "")
+                            }
+                            .accessibilityIdentifier("trend-lane-toggle-\(lane.id)")
+                        }
+                    } label: {
+                        Text("Lanes")
+                            .font(.caption)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .accessibilityIdentifier("trend-lanes-menu")
+                }
             }
         }
     }
