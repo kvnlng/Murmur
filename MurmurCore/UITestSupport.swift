@@ -138,7 +138,7 @@ enum UITestSupport {
     /// Returns the value parsed from `--<flag>=<value>` in
     /// `ProcessInfo.processInfo.arguments`, or nil if the flag is absent
     /// or the value isn't parseable as the requested type.
-    private static func value(forFlag flag: String) -> String? {
+    static func value(forFlag flag: String) -> String? {
         let prefix = "--\(flag)="
         for arg in ProcessInfo.processInfo.arguments where arg.hasPrefix(prefix) {
             return String(arg.dropFirst(prefix.count))
@@ -162,22 +162,6 @@ enum UITestSupport {
         return raw.split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
-    }
-
-    /// Explicit window size from `--ui-test-window=<width>x<height>`. Lets a
-    /// test reproduce a SHORT DISPLAY deterministically on any machine —
-    /// Xcode Cloud's Mac VMs run 1024×768, where the production minimum
-    /// window (1100×720 content) cannot fit the visible frame and
-    /// bottom-of-window controls go off-screen ("not hittable"). Tests that
-    /// interact with bottom-region chrome launch with this flag so the
-    /// constraint is exercised locally, not discovered in CI.
-    static var forcedWindowSize: CGSize? {
-        guard let raw = value(forFlag: "ui-test-window") else { return nil }
-        let parts = raw.lowercased().split(separator: "x")
-        guard parts.count == 2,
-              let w = Double(parts[0]), let h = Double(parts[1]),
-              w > 300, h > 300 else { return nil }
-        return CGSize(width: w, height: h)
     }
 
     /// True when the process was launched with ANY `--ui-test-*` argument —
