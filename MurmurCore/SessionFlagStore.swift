@@ -111,6 +111,16 @@ public final class SessionFlagStore {
         }
     }
 
+    /// X86 — the same pre-flag default, for analyst work that exists only in
+    /// memory: unsaved notes being carried across a record switch never touch
+    /// the bundle, so the disk probe above cannot see them. Same contract —
+    /// fires once, and an analyst's explicit unflag stays unflagged.
+    public func applyDefaultFlag(for id: String) {
+        guard !defaulted.contains(id) else { return }
+        defaulted.insert(id)
+        flaggedIDs.insert(id)
+    }
+
     /// Clear everything — a different folder is a different working set.
     public func reset() {
         flaggedIDs.removeAll()
@@ -200,22 +210,29 @@ public enum SessionSaveSet {
     ///   - flagged: the sidebar's flagged set, in the analyst's order.
     ///   - openRecording/openDirectory: whatever is on screen right now.
     ///   - sessionJSON/provenanceJSON: state describing the OPEN record only.
+    ///   - carriedSessionJSONByID: X86 — session state parked by a record
+    ///     switch, keyed by sidebar id. Unlike the open record's viewport,
+    ///     this IS knowable for a non-open record: it is that record's own
+    ///     state, captured the moment the analyst switched away.
     ///
     /// With nothing flagged this returns the open record alone, so the
     /// single-record gesture behaves exactly as it always has.
     ///
     /// Only the open record receives `sessionJSON` and `provenanceJSON`. Those
     /// describe where the analyst is and what the on-screen numbers were made
-    /// of, and neither is knowable for a record that is merely flagged. Copying
-    /// the open record's viewport onto every record in the set would be a
-    /// fabricated coordinate — the same error class as X32's invented start
-    /// time.
+    /// of. Copying the open record's viewport onto every record in the set
+    /// would be a fabricated coordinate — the same error class as X32's
+    /// invented start time; a CARRIED state is the opposite of fabricated,
+    /// so a flagged record that has one gets it. Provenance stays open-only:
+    /// it describes the on-screen template, which is recomputed live and was
+    /// never captured for a parked record.
     public static func payloads(
         flagged: [FlaggedRecord],
         openRecording: Recording?,
         openDirectory: URL?,
         sessionJSON: Data?,
-        provenanceJSON: Data?
+        provenanceJSON: Data?,
+        carriedSessionJSONByID: [String: Data] = [:]
     ) -> [MurSessionPackage.RecordPayload] {
         guard !flagged.isEmpty else {
             guard let openRecording, let openDirectory else { return [] }
@@ -234,7 +251,7 @@ public enum SessionSaveSet {
                 recording: record.recording,
                 recordingDirectory: record.directory,
                 provenanceJSON: isOpen ? provenanceJSON : nil,
-                sessionJSON: isOpen ? sessionJSON : nil
+                sessionJSON: isOpen ? sessionJSON : carriedSessionJSONByID[record.id]
             )
         }
     }

@@ -885,9 +885,18 @@ struct BedsideView: View {
         if let notes = restore.anchoredNotes {
             anchoredNotes = notes
         }
-        // What was just restored IS the saved state — seed the drawer's
-        // unsaved-indicator baseline with it.
-        context.sessionSavedNotes = restore.anchoredNotes ?? []
+        if let carried = context.pendingCarriedNotesBaseline {
+            // X86: this restore came from CarriedSessionStore, not from a
+            // `.mur` — its notes are only as saved as they were when the
+            // analyst switched away. Keeping the parked baseline is what
+            // lets the drawer footer and the quit guard stay truthful.
+            context.pendingCarriedNotesBaseline = nil
+            context.sessionSavedNotes = carried.notes
+        } else {
+            // What was just restored IS the saved state — seed the drawer's
+            // unsaved-indicator baseline with it.
+            context.sessionSavedNotes = restore.anchoredNotes ?? []
+        }
     }
 
     #if DEBUG

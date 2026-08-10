@@ -87,6 +87,21 @@ public final class CurrentRecordingContext {
         (liveSessionState.anchoredNotes ?? []) != (sessionSavedNotes ?? [])
     }
 
+    /// X86 — the saved-notes baseline riding along with a carried restore.
+    /// A record re-activated from `CarriedSessionStore` must keep the
+    /// baseline it was PARKED with: `applyPendingSessionRestoreIfNeeded`
+    /// otherwise seeds the baseline from the restore itself (right for a
+    /// `.mur`, whose restored notes ARE saved), which would silently mark
+    /// carried unsaved notes as durable. Wrapped because the baseline's own
+    /// `nil` ("never saved") must stay distinguishable from "no carried
+    /// baseline staged". Consumed by the bedside view alongside
+    /// `pendingSessionRestore`.
+    public struct CarriedNotesBaseline: Sendable {
+        public var notes: [AnchoredNote]?
+        public init(notes: [AnchoredNote]?) { self.notes = notes }
+    }
+    public var pendingCarriedNotesBaseline: CarriedNotesBaseline?
+
     public init() {}
 
     /// Publish that `recording` is now current, loaded from `directory`.
@@ -97,6 +112,10 @@ public final class CurrentRecordingContext {
         // activation re-seeds it when the bedside view applies the restore.
         if self.recording?.id != recording.id {
             sessionSavedNotes = nil
+            // X86: a baseline staged for a record that never mounted its
+            // bedside view (e.g. the analyst clicked past a still-importing
+            // record) must not leak onto this one.
+            pendingCarriedNotesBaseline = nil
         }
         self.recording = recording
         self.directory = directory
@@ -112,5 +131,6 @@ public final class CurrentRecordingContext {
         pendingSessionRestore = nil
         restoredProvenance = nil
         sessionSavedNotes = nil
+        pendingCarriedNotesBaseline = nil
     }
 }

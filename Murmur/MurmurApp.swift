@@ -22,11 +22,16 @@ import UniformTypeIdentifiers
 final class MurmurAppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard CurrentRecordingContext.shared.hasUnsavedAnchoredNotes else { return .terminateNow }
+        // X86: unsaved work is no longer only the open record's — switching
+        // records parks notes in `CarriedSessionStore` instead of forcing a
+        // save, so this guard covers the whole in-memory set.
+        let hasUnsavedAnywhere = CurrentRecordingContext.shared.hasUnsavedAnchoredNotes
+            || !CarriedSessionStore.shared.unsavedRecordIDs.isEmpty
+        guard hasUnsavedAnywhere else { return .terminateNow }
         let alert = NSAlert()
         alert.messageText = "Quit with unsaved anchored notes?"
         alert.informativeText = "Anchored notes save with the session — File ▸ Save Session (⌘S). "
-            + "Quitting now discards them."
+            + "Quitting now discards them, on every record in this session."
         alert.addButton(withTitle: "Save Session…")
         alert.addButton(withTitle: "Discard and Quit")
         alert.addButton(withTitle: "Cancel")
@@ -351,6 +356,13 @@ func saveSessionPanel() -> Bool {
         // X72: the write succeeded, so what was live is now the saved
         // baseline — the Context drawer's unsaved indicator reads this.
         context.sessionSavedNotes = context.liveSessionState.anchoredNotes ?? []
+        // X86: carried records that were actually WRITTEN (the flagged set)
+        // are durable now too. A carried record left unflagged was not
+        // written, so it stays unsaved and the quit guard keeps warning
+        // about it — the panel stated the save's scope, and this must agree.
+        CarriedSessionStore.shared.markSaved(
+            recordIDs: SessionFlagStore.shared.flaggedRecords.map(\.id)
+        )
         return true
     } catch {
         presentSessionAlert(title: "Couldn't save session", message: error.localizedDescription)
@@ -391,7 +403,12 @@ private func sessionPayloads() -> [MurSessionPackage.RecordPayload] {
         openRecording: context.recording,
         openDirectory: context.directory,
         sessionJSON: sessionJSON,
-        provenanceJSON: provenanceJSON
+        provenanceJSON: provenanceJSON,
+        // X86: parked state for records the analyst annotated and switched
+        // away from — each flagged record saves ITS OWN carried viewport and
+        // notes, not a fabricated copy of the open record's.
+        carriedSessionJSONByID: CarriedSessionStore.shared.entries
+            .compactMapValues { try? JSONEncoder().encode($0.state) }
     )
 }
 
