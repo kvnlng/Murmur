@@ -793,10 +793,38 @@ struct FindingsPanel: View {
             .accessibilityElement(children: .combine)
             .accessibilityLabel(Self.groupRowAXLabel(group))
             .accessibilityIdentifier("finding-group-\(group.category)")
+            .contextMenu { groupContextMenu(for: group) }
 
             if isExpanded {
                 exemplarRows(for: group)
             }
+        }
+    }
+
+    /// X90: right-click on a group header offers Dismiss All. Same latch as
+    /// the per-row disposition buttons — outside edit mode the builder is
+    /// empty and macOS shows no menu at all. Only UNREVIEWED findings are
+    /// dismissed (`DispositionStore.dismissAll`); the title says so whenever
+    /// that makes it fewer than the whole group, so the analyst is never
+    /// surprised by which rows changed. Operates on the group AS RENDERED —
+    /// the filtered entries — dismissing what the analyst is looking at, not
+    /// rows a filter is hiding.
+    @ViewBuilder
+    private func groupContextMenu(for group: FindingGroup) -> some View {
+        if isEditing {
+            let unreviewed = group.entries.filter {
+                dispositionStore.record(for: $0.annotation.id) == nil
+            }
+            Button(
+                unreviewed.count == group.entries.count
+                    ? "Dismiss All (\(unreviewed.count))"
+                    : "Dismiss \(unreviewed.count) Unreviewed"
+            ) {
+                let acted = dispositionStore.dismissAll(unreviewed.map(\.annotation.id))
+                recentlyActed.formUnion(acted)
+            }
+            .disabled(unreviewed.isEmpty)
+            .accessibilityIdentifier("group-dismiss-all-\(group.category)")
         }
     }
 

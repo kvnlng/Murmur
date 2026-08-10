@@ -93,6 +93,31 @@ final class DispositionStore {
         persist()
     }
 
+    /// X90: bulk dismissal for a group's "Dismiss All". Only UNREVIEWED
+    /// annotations change — a bulk gesture must never overwrite an explicit
+    /// per-finding judgment, so confirmed (and already-dismissed) records
+    /// keep their state, kind, note, and reviewer. One sidecar write for the
+    /// whole batch. Returns the ids actually dismissed, so the caller can
+    /// mark exactly those as recently acted on.
+    @discardableResult
+    func dismissAll(_ annotationIDs: [UUID]) -> [UUID] {
+        let now = Date.now
+        var dismissed: [UUID] = []
+        for id in annotationIDs where records[id] == nil {
+            records[id] = AnnotationDisposition(
+                annotationID: id,
+                state: .dismissed,
+                confirmedKind: nil,
+                note: nil,
+                reviewedAt: now,
+                reviewedBy: defaultReviewerName
+            )
+            dismissed.append(id)
+        }
+        if !dismissed.isEmpty { persist() }
+        return dismissed
+    }
+
     /// Wipe a single annotation's disposition — returns it to "unreviewed."
     func reset(_ annotationID: UUID) {
         guard records.removeValue(forKey: annotationID) != nil else { return }

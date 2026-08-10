@@ -2897,6 +2897,60 @@ struct DispositionStoreTests {
         #expect(tally.total == 4)
     }
 
+    @Test("Dismiss-all dismisses only the unreviewed ids and reports them")
+    func dismissAllSkipsReviewed() throws {
+        let dir = try Self.makeBundle()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = DispositionStore(bundleDirectory: dir, defaultReviewerName: "tester")
+        let confirmed = annotation()
+        let dismissed = annotation()
+        let fresh1 = annotation()
+        let fresh2 = annotation()
+        store.confirm(confirmed.id, kind: .vt, note: "sustained run")
+        store.dismiss(dismissed.id, note: "noise")
+
+        let acted = store.dismissAll([confirmed.id, dismissed.id, fresh1.id, fresh2.id])
+        #expect(Set(acted) == Set([fresh1.id, fresh2.id]))
+
+        // The bulk gesture never overwrites explicit judgments.
+        let keptConfirm = try #require(store.record(for: confirmed.id))
+        #expect(keptConfirm.state == .confirmed)
+        #expect(keptConfirm.confirmedKind == .vt)
+        #expect(keptConfirm.note == "sustained run")
+        #expect(store.record(for: dismissed.id)?.note == "noise")
+
+        #expect(store.state(for: fresh1.id) == .dismissed)
+        #expect(store.state(for: fresh2.id) == .dismissed)
+    }
+
+    @Test("Dismiss-all of nothing new writes nothing and returns empty")
+    func dismissAllNoOp() throws {
+        let dir = try Self.makeBundle()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = DispositionStore(bundleDirectory: dir, defaultReviewerName: "tester")
+        let ann = annotation()
+        store.confirm(ann.id, kind: nil)
+        #expect(store.dismissAll([ann.id]).isEmpty)
+        #expect(store.dismissAll([]).isEmpty)
+        // No sidecar churn: the confirmed record is still the only one.
+        #expect(store.records.count == 1)
+    }
+
+    @Test("Dismiss-all persists the batch to the sidecar in one write")
+    func dismissAllPersists() throws {
+        let dir = try Self.makeBundle()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = DispositionStore(bundleDirectory: dir, defaultReviewerName: "tester")
+        let a = annotation()
+        let b = annotation()
+        store.dismissAll([a.id, b.id])
+
+        let reloaded = DispositionStore(bundleDirectory: dir, defaultReviewerName: "tester")
+        #expect(reloaded.state(for: a.id) == .dismissed)
+        #expect(reloaded.state(for: b.id) == .dismissed)
+        #expect(reloaded.record(for: a.id)?.reviewedBy == "tester")
+    }
+
     @Test("Clear wipes every record and survives a reload")
     func clearWipesAll() throws {
         let dir = try Self.makeBundle()
