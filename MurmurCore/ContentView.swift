@@ -818,9 +818,9 @@ public struct ContentView: View {
         guard context.hasUnsavedAnchoredNotes else { return }
         // Carried unsaved notes ARE analyst work, so the record joins the
         // save set by default (a default, not a lock — an explicit unflag
-        // stays unflagged, same as the X63-B bundle probe). Without this,
-        // Save Session after annotating three records would silently write
-        // only the open one.
+        // stays unflagged). Under X87 this is a backstop: selection already
+        // applied the default when the record imported, so this only
+        // matters for a path where notes exist without that having fired.
         SessionFlagStore.shared.applyDefaultFlag(for: id)
         presentCrashLossNoticeIfNeeded()
     }
@@ -887,9 +887,7 @@ public struct ContentView: View {
                 await MainActor.run {
                     importStates[filename] = .imported(directory: summary.directory, recording: summary.recording)
                     // X63-B: only an imported record can be saved, so this is
-                    // where it becomes flaggable. The pre-flag default fires
-                    // once — a record already carrying analyst work starts
-                    // flagged, and an analyst who unflags it stays unflagged.
+                    // where it becomes flaggable.
                     SessionFlagStore.shared.register(
                         FlaggedRecord(
                             id: filename,
@@ -897,9 +895,18 @@ public struct ContentView: View {
                             directory: summary.directory
                         )
                     )
-                    SessionFlagStore.shared.applyDefaultFlag(
-                        for: filename, directory: summary.directory
-                    )
+                    // X87: SELECTING a record for review includes it in the
+                    // save set by default — the analyst unflags to exclude.
+                    // Folder imports are lazy, driven by sidebar clicks, so
+                    // every record reaching this completion was selected;
+                    // applying the default here (rather than on the click)
+                    // also covers the record that finished importing after
+                    // the analyst moved on. Once-only, analyst-wins: an
+                    // explicit unflag survives revisits. This supersedes the
+                    // X63-B disk probe, which pre-flagged only records whose
+                    // bundle carried prior analyst work — a subset of
+                    // "selected", since import is what makes a bundle.
+                    SessionFlagStore.shared.applyDefaultFlag(for: filename)
                     // If this import corresponds to the record currently
                     // selected in the browsing sidebar, publish it as the
                     // current recording so ECG Metrics + friends light up.

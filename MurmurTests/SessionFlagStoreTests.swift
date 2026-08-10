@@ -78,96 +78,41 @@ struct SessionFlagStoreTests {
         #expect(store.available.isEmpty)
     }
 
-    // MARK: - The pre-flag default
+    // MARK: - The pre-flag default (X87: selection is the trigger)
 
-    @Test("A record carrying analyst work starts flagged")
-    func preflagsRecordWithAnalystWork() throws {
-        let dir = try tempDir("worked")
-        try Data(#"{"schemaVersion":1,"dispositions":[]}"#.utf8)
-            .write(to: dir.appendingPathComponent(DispositionFile.bundleFileName))
-
+    @Test("Selecting a record for review flags it by default")
+    func selectionPreflags() {
         let store = SessionFlagStore()
-        store.register(record("100.hea", directory: dir))
-        store.applyDefaultFlag(for: "100.hea", directory: dir)
+        store.applyDefaultFlag(for: "100.hea")
         #expect(store.isFlagged("100.hea"))
     }
 
     /// The default is a convenience, not a decision the app keeps re-making.
     @Test("Unflagging a pre-flagged record stays unflagged on a later visit")
-    func defaultDoesNotOverrideTheAnalyst() throws {
-        let dir = try tempDir("worked")
-        try Data(#"{"schemaVersion":1,"dispositions":[]}"#.utf8)
-            .write(to: dir.appendingPathComponent(DispositionFile.bundleFileName))
-
+    func defaultDoesNotOverrideTheAnalyst() {
         let store = SessionFlagStore()
-        store.applyDefaultFlag(for: "100.hea", directory: dir)
+        store.applyDefaultFlag(for: "100.hea")
         #expect(store.isFlagged("100.hea"))
 
-        store.toggle("100.hea")                                  // analyst says no
-        store.applyDefaultFlag(for: "100.hea", directory: dir)   // navigate away and back
+        store.toggle("100.hea")                  // analyst says no
+        store.applyDefaultFlag(for: "100.hea")   // navigate away and back
         #expect(!store.isFlagged("100.hea"), "a default must not overrule the analyst")
-    }
-
-    @Test("Flagging a record with no analyst work sticks too")
-    func explicitFlagOnUntouchedRecordSticks() throws {
-        let dir = try tempDir("clean")
-        let store = SessionFlagStore()
-        store.toggle("100.hea")
-        store.applyDefaultFlag(for: "100.hea", directory: dir)
-        #expect(store.isFlagged("100.hea"))
-    }
-
-    // MARK: - What counts as analyst work
-
-    /// THE case that decides whether pre-flagging is worth anything.
-    /// `WFDBImporter` writes annotations.json on EVERY import from the record's
-    /// own .atr, so treating "has findings" as analyst work would pre-flag the
-    /// entire folder and the default would mean nothing.
-    @Test("Imported findings are not analyst work")
-    func importedAnnotationsDoNotCount() throws {
-        let dir = try tempDir("imported")
-        let imported = Annotation(kind: .point, sampleIndex: 10, category: "V", source: "wfdb.atr")
-        try BundleAnnotationsFile.write([imported], to: dir)
-        #expect(!AnalystLayerProbe.hasAnalystWork(in: dir))
-    }
-
-    @Test("An annotation the analyst authored is analyst work")
-    func authoredAnnotationCounts() throws {
-        let dir = try tempDir("authored")
-        let authored = Annotation(kind: .range, sampleIndex: 10, category: "note",
-                                  source: Annotation.analystAuthoredSource)
-        try BundleAnnotationsFile.write([authored], to: dir)
-        #expect(AnalystLayerProbe.hasAnalystWork(in: dir))
-    }
-
-    @Test("A candidate adjudication is analyst work")
-    func candidateDispositionCounts() throws {
-        let dir = try tempDir("adjudicated")
-        try Data(#"{"schemaVersion":1,"dispositions":[]}"#.utf8)
-            .write(to: dir.appendingPathComponent(RegionDispositionFile.bundleFileName))
-        #expect(AnalystLayerProbe.hasAnalystWork(in: dir))
-    }
-
-    @Test("An untouched bundle is not analyst work")
-    func emptyBundleIsNotWork() throws {
-        #expect(!AnalystLayerProbe.hasAnalystWork(in: try tempDir("empty")))
     }
 
     /// X63-C: opening a session flags its records, because those records ARE
     /// the analyst's set. Without this, opening a 4-record session and hitting
     /// Save Session would write only the open record and drop three.
     @Test("Flagging outright also settles the pre-flag default")
-    func flagIsExplicitAndSticks() throws {
-        let dir = try tempDir("session-record")
+    func flagIsExplicitAndSticks() {
         let store = SessionFlagStore()
         store.flag("100.hea")
         #expect(store.isFlagged("100.hea"))
         // A later default pass must not un-flag it, and must not re-flag it
         // after the analyst clears it.
-        store.applyDefaultFlag(for: "100.hea", directory: dir)
+        store.applyDefaultFlag(for: "100.hea")
         #expect(store.isFlagged("100.hea"))
         store.toggle("100.hea")
-        store.applyDefaultFlag(for: "100.hea", directory: dir)
+        store.applyDefaultFlag(for: "100.hea")
         #expect(!store.isFlagged("100.hea"))
     }
 
@@ -260,20 +205,6 @@ struct SessionFlagStoreTests {
         // The OPEN record's live snapshot still outranks anything carried —
         // it is the same state, newer.
         #expect(payloads[1].sessionJSON == sessionJSON)
-    }
-
-    /// X86: unsaved notes carried across a switch are analyst work that the
-    /// disk probe can't see, so they pre-flag through the in-memory overload —
-    /// with the same once-only, analyst-wins contract.
-    @Test("Carried unsaved work pre-flags, and an explicit unflag still wins")
-    func carriedWorkPreflags() {
-        let store = SessionFlagStore()
-        store.applyDefaultFlag(for: "100.hea")
-        #expect(store.isFlagged("100.hea"))
-
-        store.toggle("100.hea")                 // analyst says no
-        store.applyDefaultFlag(for: "100.hea")  // switch away again
-        #expect(!store.isFlagged("100.hea"), "a default must not overrule the analyst")
     }
 
     /// An analyst can flag records without the open one being among them.

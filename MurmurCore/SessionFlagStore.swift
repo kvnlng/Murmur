@@ -100,21 +100,20 @@ public final class SessionFlagStore {
         }
     }
 
-    /// Apply the pre-flag default ONCE for a record: flag it when its bundle
-    /// carries analyst work. Does nothing if the analyst has already expressed
-    /// a preference for this record.
-    public func applyDefaultFlag(for id: String, directory: URL) {
-        guard !defaulted.contains(id) else { return }
-        defaulted.insert(id)
-        if AnalystLayerProbe.hasAnalystWork(in: directory) {
-            flaggedIDs.insert(id)
-        }
-    }
-
-    /// X86 — the same pre-flag default, for analyst work that exists only in
-    /// memory: unsaved notes being carried across a record switch never touch
-    /// the bundle, so the disk probe above cannot see them. Same contract —
-    /// fires once, and an analyst's explicit unflag stays unflagged.
+    /// Apply the pre-flag default ONCE for a record: flag it. X87 — the
+    /// default's trigger is SELECTING the record for review (applied when a
+    /// folder import completes, which only a selection causes), so the
+    /// analyst unflags to exclude rather than flags to include; X86 also
+    /// applies it as a backstop when unsaved notes are carried off a record.
+    /// Fires once, and an explicit analyst decision — either direction — is
+    /// never overruled.
+    ///
+    /// This replaced the X63-B disk probe (`AnalystLayerProbe`), which
+    /// pre-flagged only records whose bundle carried prior analyst work.
+    /// Every record the probe could reach had been selected (import is what
+    /// makes a bundle, and imports are selection-driven), so "selected"
+    /// strictly contains "probed positive" and the probe answered a question
+    /// no caller asks anymore.
     public func applyDefaultFlag(for id: String) {
         guard !defaulted.contains(id) else { return }
         defaulted.insert(id)
@@ -126,48 +125,6 @@ public final class SessionFlagStore {
         flaggedIDs.removeAll()
         available.removeAll()
         defaulted.removeAll()
-    }
-}
-
-/// Does this bundle carry evidence that the ANALYST worked this record?
-///
-/// X63-B: the spec says a record "carrying an analyst layer (findings, notes,
-/// or dispositions)" pre-flags. Taken literally that pre-flags everything,
-/// because:
-///
-///   - `WFDBImporter` writes `annotations.json` on EVERY import, from the
-///     record's own `.atr` / producer JSON. Those are the source's findings,
-///     not the analyst's.
-///   - It also copies any notes file out of the source folder, so a notes file
-///     is likewise evidence about the SOURCE, not about the analyst.
-///
-/// A default that fires for every record tells the analyst nothing, so this
-/// keys on artefacts only an analyst action can produce: a disposition (they
-/// confirmed or dismissed something) or an annotation they authored themselves.
-/// Narrower than the spec's wording and deliberately so — the flag is manual,
-/// and this only saves keystrokes in the unambiguous cases.
-public enum AnalystLayerProbe {
-
-    public static func hasAnalystWork(in directory: URL) -> Bool {
-        hasDispositions(in: directory) || hasAuthoredAnnotations(in: directory)
-    }
-
-    /// Confirm / dismiss on a finding, or an adjudicated VT/VF candidate.
-    /// Written only by analyst action.
-    static func hasDispositions(in directory: URL) -> Bool {
-        let fm = FileManager.default
-        for name in [DispositionFile.bundleFileName, RegionDispositionFile.bundleFileName]
-        where fm.fileExists(atPath: directory.appendingPathComponent(name).path) {
-            return true
-        }
-        return false
-    }
-
-    /// A range finding the analyst drew themselves, distinguished from imported
-    /// findings by its source tag.
-    static func hasAuthoredAnnotations(in directory: URL) -> Bool {
-        guard let annotations = BundleAnnotationsFile.read(from: directory) else { return false }
-        return annotations.contains { $0.source == Annotation.analystAuthoredSource }
     }
 }
 
