@@ -304,6 +304,14 @@ enum UITestSupport {
         ProcessInfo.processInfo.arguments.contains("--ui-test-crash-loss-notice")
     }
 
+    /// X99 (#164): `--ui-test-sample-rich[=seconds]` loads the ECGSYN-style
+    /// rich fixture (realistic P-QRS-T, spectral R–R variability, known truth)
+    /// instead of the 10 s demo; 180 s default keeps it test-budget friendly.
+    static var richSampleDurationSeconds: Double? {
+        if let raw = value(forFlag: "ui-test-sample-rich"), let secs = Double(raw), secs > 0 { return min(3600, secs) }
+        return ProcessInfo.processInfo.arguments.contains("--ui-test-sample-rich") ? 180 : nil
+    }
+
     /// True when `--ui-test-arrhythmia-candidates` is passed. Same bypass as
     /// `injectVTVFCandidates`, for the arrhythmia scan (A2): BedsideView
     /// publishes a fixed candidate set into `ArrhythmiaScanContext` so the

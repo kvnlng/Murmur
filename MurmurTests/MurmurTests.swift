@@ -6647,12 +6647,14 @@ struct RollingHRVAnalyticTests {
 /// and amplitudes are conventionally-shaped so BeatDelineator can
 /// find every fiducial without needing a fully-tuned ECGSYN.
 ///
-/// Not a substitute for real ECGSYN (McSharry/Clifford's coupled ODEs
-/// give realistic morphology + HRV coupling). This is enough to
-/// support "the delineator emitted fiducials near my known
-/// construction truth" — a Tier 2 sanity ratchet, not a fidelity
-/// oracle.
-struct SyntheticECG {
+/// Not a substitute for real ECGSYN — that now exists as
+/// `MurmurCore.SyntheticECG` (X99), which owns realistic morphology +
+/// HRV coupling and record-level ground truth. This one stays for what
+/// it is: a minimal, fixed-offset probe supporting "the delineator
+/// emitted fiducials near my known construction truth" — a Tier 2
+/// sanity ratchet, not a fidelity oracle. (Renamed from SyntheticECG
+/// when X99 claimed the canonical name.)
+struct DelineatorProbeECG {
 
     /// Sinus vs ectopic (PVC) — governs which fiducial checks a test
     /// should apply to the beat. Ectopic beats have no atrial P wave,
@@ -7004,7 +7006,7 @@ struct BeatDelineatorTier2Tests {
     /// beat it decides to fully annotate.
     @Test("Every fully-delineated beat has monotonic fiducial ordering")
     func monotonicOrderingWithinBeats() {
-        let ecg = SyntheticECG.cleanSinus(beatCount: 20)
+        let ecg = DelineatorProbeECG.cleanSinus(beatCount: 20)
         let store = BeatDelineator.delineate(
             samples: ecg.samples,
             sampleRate: ecg.sampleRate,
@@ -7042,7 +7044,7 @@ struct BeatDelineatorTier2Tests {
     /// memo; that ratchet is future work.
     @Test("Fiducials land within a loose neighborhood of construction truth")
     func neighborhoodTolerance() {
-        let ecg = SyntheticECG.cleanSinus(beatCount: 12)
+        let ecg = DelineatorProbeECG.cleanSinus(beatCount: 12)
         let store = BeatDelineator.delineate(
             samples: ecg.samples,
             sampleRate: ecg.sampleRate,
@@ -7102,7 +7104,7 @@ struct BeatDelineatorTier2Tests {
     /// fiducials.
     @Test("Delineator returns exactly the R-peaks passed in")
     func rPeaksRoundTrip() {
-        let ecg = SyntheticECG.cleanSinus(beatCount: 15)
+        let ecg = DelineatorProbeECG.cleanSinus(beatCount: 15)
         let store = BeatDelineator.delineate(
             samples: ecg.samples,
             sampleRate: ecg.sampleRate,
@@ -7125,7 +7127,7 @@ struct BeatDelineatorMetamorphicTests {
     /// Memo: metamorphic-gate #1 (project_ecg_testing_strategy.md).
     @Test("Amplitude scaling by 2x leaves every fiducial position unchanged")
     func amplitudeScalingLeavesFiducialsUnchanged() {
-        let base = SyntheticECG.cleanSinus(beatCount: 20)
+        let base = DelineatorProbeECG.cleanSinus(beatCount: 20)
         let scaled: [Float] = base.samples.map { $0 * 2.0 }
         let baseStore = BeatDelineator.delineate(
             samples: base.samples,
@@ -7158,7 +7160,7 @@ struct BeatDelineatorMetamorphicTests {
     /// Memo: metamorphic-gate #3.
     @Test("Baseline offset by +0.5 leaves QRS boundaries unchanged")
     func baselineOffsetLeavesQRSUnchanged() {
-        let base = SyntheticECG.cleanSinus(beatCount: 20)
+        let base = DelineatorProbeECG.cleanSinus(beatCount: 20)
         let shifted: [Float] = base.samples.map { $0 + 0.5 }
         let baseStore = BeatDelineator.delineate(
             samples: base.samples,
@@ -7198,7 +7200,7 @@ struct BeatDelineatorMetamorphicTests {
         // above the trend computer's 60 % confidence floor without
         // needing exotic bin sizes.
         let beatCount = 120
-        let ecg = SyntheticECG.qtRamp(
+        let ecg = DelineatorProbeECG.qtRamp(
             beatCount: beatCount,
             tCenterStartMs: 260,
             tCenterEndMs: 320
@@ -7306,8 +7308,8 @@ struct BeatDelineatorMetamorphicTests {
     func intervalDurationsAreSampleRateInvariant() {
         let beatCount = 20
         let rrMs = 800.0
-        let ecg360 = SyntheticECG.cleanSinus(beatCount: beatCount, rrMs: rrMs, sampleRate: 360)
-        let ecg250 = SyntheticECG.cleanSinus(beatCount: beatCount, rrMs: rrMs, sampleRate: 250)
+        let ecg360 = DelineatorProbeECG.cleanSinus(beatCount: beatCount, rrMs: rrMs, sampleRate: 360)
+        let ecg250 = DelineatorProbeECG.cleanSinus(beatCount: beatCount, rrMs: rrMs, sampleRate: 250)
 
         let store360 = BeatDelineator.delineate(
             samples: ecg360.samples,
@@ -7371,14 +7373,14 @@ struct BeatDelineatorMetamorphicTests {
     /// (feedback_randomized_test_strategy.md).
     ///
     /// Noise amplitude is 0.01 mV — under 1 % of the R-peak
-    /// amplitude in the SyntheticECG generator (R = 1.20), so
+    /// amplitude in the DelineatorProbeECG generator (R = 1.20), so
     /// derivative-threshold delineation should shrug it off. Any
     /// fiducial shift > the documented tolerance means the
     /// delineator has an unrobust threshold; catches the family of
     /// bugs where a small SNR change destroys the QRS window.
     @Test("Sub-threshold noise keeps fiducials within a documented ms range")
     func subThresholdNoiseKeepsFiducialsInRange() {
-        let base = SyntheticECG.cleanSinus(beatCount: 20)
+        let base = DelineatorProbeECG.cleanSinus(beatCount: 20)
         // Fixed-seed LCG so any regression is reproducible on any
         // machine — Swift's default RandomNumberGenerator is not
         // deterministic across runs.
@@ -7444,7 +7446,7 @@ struct BeatDelineatorMetamorphicTests {
     @Test("T-offset drift tracks a constructed QT-ramp")
     func tOffsetTracksQTRamp() {
         let beatCount = 60
-        let ecg = SyntheticECG.qtRamp(
+        let ecg = DelineatorProbeECG.qtRamp(
             beatCount: beatCount,
             tCenterStartMs: 260,
             tCenterEndMs: 320
@@ -7562,7 +7564,7 @@ struct BeatDelineatorPVCTests {
     /// as a deviation — has been lost.
     @Test("PVC beats' delineated QRS is markedly wider than sinus")
     func pvcQRSIsWiderThanSinus() {
-        let ecg = SyntheticECG.withPVCs(
+        let ecg = DelineatorProbeECG.withPVCs(
             beatCount: 40,
             pvcAfterSinusBeats: [10, 20, 30]
         )
@@ -7603,7 +7605,7 @@ struct BeatDelineatorPVCTests {
     ///     ranking.
     @Test("PVCs surface in the top decile of deviation ranking")
     func pvcRanksHighInDeviationOrder() {
-        let ecg = SyntheticECG.withPVCs(
+        let ecg = DelineatorProbeECG.withPVCs(
             beatCount: 40,
             pvcAfterSinusBeats: [10, 20, 30]
         )
@@ -7652,7 +7654,7 @@ struct BeatDelineatorPVCTests {
     /// masking a bug rather than surfacing a limitation.
     @Test("PVC PR interval is nil or far from sinus template median")
     func pvcPRIsUnreliable() {
-        let ecg = SyntheticECG.withPVCs(
+        let ecg = DelineatorProbeECG.withPVCs(
             beatCount: 40,
             pvcAfterSinusBeats: [10, 20, 30]
         )

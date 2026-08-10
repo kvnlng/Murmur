@@ -446,6 +446,25 @@ public struct ContentView: View {
         }
     }
 
+    /// X99 — same shape as `loadSampleFixture`, but generation + import of a
+    /// minutes-long record is real work, so it runs off-main behind a brief
+    /// empty state rather than blocking the first frame.
+    private func loadRichSampleFixture(durationSeconds: Double) {
+        Task { @MainActor in
+            do {
+                let directory = try await Task.detached(priority: .userInitiated) {
+                    try SyntheticRecording.makeRichFixture(
+                        parameters: SyntheticECG.Parameters(durationSeconds: durationSeconds)
+                    )
+                }.value
+                let recording = try RecordingStore.shared.loadManifest(at: directory)
+                setAppState(.directView(directory: directory, recording: recording))
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
     private func browseShell(source: RecordListSource, records: [RecordListEntry]) -> some View {
         // X63-B: the record navigator was not appearing when a folder opened —
         // no rows in the accessibility tree and no splitter in the window, on a
@@ -945,6 +964,12 @@ public struct ContentView: View {
 
     private func loadUITestSampleIfRequested() {
         let args = ProcessInfo.processInfo.arguments
+        // X99: the rich fixture outranks the plain one when both are passed —
+        // a test asking for realism means it.
+        if let seconds = UITestSupport.richSampleDurationSeconds {
+            loadRichSampleFixture(durationSeconds: seconds)
+            return
+        }
         if args.contains("--ui-test-sample") {
             loadSampleFixture()
             attachFindingsIfRequested()
