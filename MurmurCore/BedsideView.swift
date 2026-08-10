@@ -2101,10 +2101,6 @@ struct BedsideView: View {
                 qtcFormula: markingsContext.qtcFormula,
                 qualifiers: qualifyingContext.qualifiers(forBinSeconds: trendLaneContext.binSeconds),
                 recordingTimeRange: recordingTimeRange,
-                viewportTimeRange: viewportTimeRange,
-                band: IntervalTrendRepresentation.band(
-                    viewportWindowSeconds: viewport.durationSeconds
-                ),
                 showMode: trendLaneContext.showMode,
                 selectedBinPreset: trendLaneContext.binPreset,
                 guides: trendGuideStore.guides(for: trendLaneContext.metric),

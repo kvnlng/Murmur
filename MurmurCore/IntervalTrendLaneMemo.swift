@@ -12,7 +12,7 @@ import SwiftUI
 
 /// One-slot memo for the trend compute, keyed on ONLY the inputs the compute
 /// actually depends on — NOT the viewport. The memoized strip's `==` includes
-/// `viewportTimeRange` (it drives the window-band x-domain), so the strip body
+/// the compute inputs, so the strip body
 /// re-runs on every pan/zoom frame. Without this, `IntervalTrendComputer.compute`
 /// — O(N_beats) with a per-bin bootstrap CI — ran again on each of those frames
 /// and HUNG on a long recording (NSRDB is ~8 h → tens of thousands of beats over
@@ -83,11 +83,6 @@ struct IntervalTrendLaneMemoizedStrip: View, Equatable {
     /// marker + X46 gate. Empty in the free viewer.
     let qualifiers: [IntervalBinQualifier]
     let recordingTimeRange: ClosedRange<Double>
-    /// The ECG viewport's visible window (seconds). At `.window` band it
-    /// becomes the lane's x-domain so per-beat scatter is legible (X41).
-    let viewportTimeRange: ClosedRange<Double>
-    /// Zoom band derived from the viewport window — drives representation.
-    let band: IntervalTrendLaneBand
     let showMode: IntervalTrendShowMode
     let selectedBinPreset: IntervalTrendBinPreset
     let guides: [IntervalTrendGuide]
@@ -130,8 +125,6 @@ struct IntervalTrendLaneMemoizedStrip: View, Equatable {
             && lhs.qtcFormula == rhs.qtcFormula
             && lhs.qualifiers == rhs.qualifiers
             && lhs.recordingTimeRange == rhs.recordingTimeRange
-            && lhs.viewportTimeRange == rhs.viewportTimeRange
-            && lhs.band == rhs.band
             && lhs.showMode == rhs.showMode
             && lhs.selectedBinPreset == rhs.selectedBinPreset
             && lhs.guides == rhs.guides
@@ -181,13 +174,12 @@ struct IntervalTrendLaneMemoizedStrip: View, Equatable {
             )
         }
         IntervalTrendLane(
-            // Map band → whole recording ribbon; window band → the viewport
-            // window becomes the x-domain so per-beat scatter fills the lane.
-            timeRangeSeconds: band == .window ? viewportTimeRange : recordingTimeRange,
+            // X88: the lane is a location finder — its x-domain is ALWAYS
+            // the whole recording, never the viewport.
+            timeRangeSeconds: recordingTimeRange,
             data: data,
             metric: metric,
             showMode: showMode,
-            band: band,
             qtcFormula: qtcFormula,
             selectedBinPreset: selectedBinPreset,
             guides: guides,
