@@ -964,6 +964,44 @@ extension SnapshotTests {
         )
     }
 
+    // MARK: - X93: are the phase points visible ON the trace?
+
+    /// Crop the render to everything BELOW the top glyph band, where the
+    /// waveform actually lives. What X93 fixed is precisely "marks exist
+    /// but only in the top 28 pt": comparing whole images could never
+    /// catch a regression back to that state.
+    private func belowGlyphBand(_ tiff: Data?) -> Data? {
+        guard let tiff, let rep = NSBitmapImageRep(data: tiff) else { return nil }
+        let bandBottom = Int(28 * (CGFloat(rep.pixelsHigh) / 120))
+        guard let cg = rep.cgImage?.cropping(
+            to: CGRect(x: 0, y: bandBottom, width: rep.pixelsWide,
+                       height: rep.pixelsHigh - bandBottom)) else { return nil }
+        return NSBitmapImageRep(cgImage: cg).tiffRepresentation
+    }
+
+    /// X93 (#142): at full-fiducial zoom — the window where the Layers chip
+    /// claims "all" — enabled phase layers must change what is drawn BELOW
+    /// the glyph band, i.e. on the trace itself. Before the fix every
+    /// boundary mark lived in the top 28 pt and this assertion fails.
+    func testFiducialLayers_phaseMarksReachTheTraceAtFullFiducialZoom() {
+        let full = belowGlyphBand(fiducialPNG(detailLevel: .fullFiducials, layers: [.p, .qrs, .t]))
+        let none = belowGlyphBand(fiducialPNG(detailLevel: .fullFiducials, layers: []))
+        XCTAssertNotNil(full)
+        XCTAssertNotEqual(full, none,
+                          "Enabled phase layers must be visible in the trace's space, not only the top band")
+    }
+
+    /// The hairlines are a full-fiducial treatment only: at qrsOnly zoom
+    /// (3–30 s windows, too many beats for full-height lines) the space
+    /// below the glyph band stays clear whatever is toggled on.
+    func testFiducialLayers_noHairlinesAtQRSOnlyZoom() {
+        XCTAssertEqual(
+            belowGlyphBand(fiducialPNG(detailLevel: .qrsOnly, layers: [.p, .qrs, .t])),
+            belowGlyphBand(fiducialPNG(detailLevel: .qrsOnly, layers: [])),
+            "qrsOnly zoom keeps boundary marks in the glyph band — no hairlines"
+        )
+    }
+
     /// Same annotation set as `_lowZoomClusterBadge`, but at the Scan
     /// tier the rail collapses chips into short colored ticks and drops
     /// normal ("N") beats entirely. Locks in the
