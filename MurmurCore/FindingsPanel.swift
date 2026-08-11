@@ -1273,39 +1273,42 @@ struct FindingsPanel: View {
     /// Human-friendly label for common WFDB / producer category codes.
     /// Unknown categories pass through as-is so this layer stays open
     /// to whatever a producer emits.
+    /// Case-sensitive WFDB codes — case is MEANINGFUL in the standard, so
+    /// these match the raw symbol before the case-insensitive table below.
+    /// Verified against the WFDB ecgcodes table: `a` (4) aberrated atrial
+    /// premature ≠ `A` (8) atrial premature; `E` (10) ventricular escape;
+    /// `~` (14) signal-quality change. Uppercasing alone silently
+    /// conflated `a` into `A` and dropped the word "aberrated".
+    private static let caseSensitiveLabels: [String: String] = [
+        "a": "Aberrated atrial premature",
+        "E": "Ventricular escape",
+        "~": "Signal-quality change",
+    ]
+
+    private static let categoryLabels: [String: String] = [
+        "V":     "Ventricular ectopy",
+        "PVC":   "Ventricular ectopy — PVC",
+        "A":     "Atrial premature",
+        "APC":   "Atrial premature (APC)",
+        "N":     "Normal beat",
+        "+":     "Rhythm-change marker",
+        "|":     "Isolated QRS-like artifact",
+        "\"":    "Annotator comment",
+        "F":     "Fusion beat",
+        "L":     "LBBB beat",
+        "R":     "RBBB beat",
+        "QT-MANUAL": "Manual QT calipers",
+        "AFIB":  "Atrial fibrillation",
+        "VT":    "Ventricular tachycardia",
+        "VF":    "Ventricular fibrillation",
+        "NOISE": "Signal quality — noise",
+    ]
+
     private func humanLabel(for category: String) -> String {
         let raw = category.trimmingCharacters(in: .whitespaces)
-        // Case-sensitive WFDB codes — case is MEANINGFUL in the standard, so
-        // match the raw symbol before the case-insensitive fallback below.
-        // Verified against the WFDB ecgcodes table: `a` (4) aberrated atrial
-        // premature ≠ `A` (8) atrial premature; `E` (10) ventricular escape;
-        // `~` (14) signal-quality change. Uppercasing alone silently
-        // conflated `a` into `A` and dropped the word "aberrated".
-        switch raw {
-        case "a":  return "Aberrated atrial premature"
-        case "E":  return "Ventricular escape"
-        case "~":  return "Signal-quality change"
-        default:   break
-        }
-        let key = raw.uppercased()
-        switch key {
-        case "V":     return "Ventricular ectopy"
-        case "PVC":   return "Ventricular ectopy — PVC"
-        case "A":     return "Atrial premature"
-        case "APC":   return "Atrial premature (APC)"
-        case "N":     return "Normal beat"
-        case "+":     return "Rhythm-change marker"
-        case "|":     return "Isolated QRS-like artifact"
-        case "\"":    return "Annotator comment"
-        case "F":     return "Fusion beat"
-        case "L":     return "LBBB beat"
-        case "R":     return "RBBB beat"
-        case "AFIB":  return "Atrial fibrillation"
-        case "VT":    return "Ventricular tachycardia"
-        case "VF":    return "Ventricular fibrillation"
-        case "NOISE": return "Signal quality — noise"
-        default:      return category
-        }
+        return Self.caseSensitiveLabels[raw]
+            ?? Self.categoryLabels[raw.uppercased()]
+            ?? category
     }
 
     /// Optional sub-label under the group title. Explains what
@@ -1335,6 +1338,7 @@ struct FindingsPanel: View {
         case "+":         return "annotator rhythm transitions"
         case "|":         return "non-beat deflections flagged for exclusion"
         case "\"":        return "original database notes — verbatim"
+        case "QT-MANUAL": return "analyst-placed Q-onset → T-offset spans"
         case "NOISE":     return "interval stats suppressed inside"
         default:          return nil
         }

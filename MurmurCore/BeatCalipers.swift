@@ -65,6 +65,12 @@ struct BeatCalipers: View {
     /// callers that haven't wired classification yet.
     var kind: BeatCaliperKind = .unknown
 
+    /// X109 (§2.4): non-nil ⇒ automated QT was withheld for this whole
+    /// recording (no conventional lead). QT/QTc rows already read "—"
+    /// (their values are structurally nil); this states WHY beneath them,
+    /// as a status rather than an error.
+    var qtWithheldReason: String?
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             header
@@ -99,6 +105,15 @@ struct BeatCalipers: View {
             if showsJT {
                 row("JT",  value: beat.jtMs,  delta: nil)
                 row("JTc", value: beat.jtcMs, delta: nil)
+            }
+            // X109 (§2.4): the QT/QTc dashes above are a deliberate
+            // withholding, not a delineation failure — say so, plainly.
+            if let reason = qtWithheldReason {
+                Text(reason)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("beat-calipers-qt-withheld")
             }
             templateProvenanceFooter
         }
