@@ -1180,7 +1180,7 @@ struct BedsideView: View {
                 do {
                     try BundleAnnotationsFile.write(allAnnotations, to: recordingDirectory)
                 } catch {
-                    attachError = "Findings were attached for this session but could not be saved to the bundle: \(error.localizedDescription)"
+                    attachError = "Review-queue items were attached for this session but could not be saved to the bundle: \(error.localizedDescription)"
                 }
             } catch {
                 attachError = error.localizedDescription
