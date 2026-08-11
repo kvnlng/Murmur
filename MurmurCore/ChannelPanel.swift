@@ -973,6 +973,8 @@ struct ChannelPanel: View {
         let url = directory.appendingPathComponent(channel.storageFileName)
         let total = channel.sampleCount
         let clipGainFactor = channel.appliedGainFactor
+        let clipMin = Self.yMin / clipGainFactor
+        let clipMax = Self.yMax / clipGainFactor
         guard total > 0 else { return }
         struct ScanResult: Sendable {
             let clipped: [ClippedRange]
@@ -987,8 +989,8 @@ struct ChannelPanel: View {
             // stored samples compare against band ÷ factor.
             let clipped = ClippedRangeScanner.scan(
                 samples: samples,
-                clipMin: Float(Self.yMin / clipGainFactor),
-                clipMax: Float(Self.yMax / clipGainFactor)
+                clipMin: Float(clipMin),
+                clipMax: Float(clipMax)
             )
             let range = MinMaxScanner.scan(samples: samples)
             return ScanResult(clipped: clipped, range: range)
