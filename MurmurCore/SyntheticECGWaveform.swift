@@ -12,6 +12,34 @@
 import Foundation
 
 extension SyntheticECG {
+    // MARK: - Flat-line states (X105)
+
+    /// Zero the named leads over each disconnect span, and dropped leads
+    /// over the whole record. Runs AFTER lead projection so baseline wander
+    /// and noise are silenced too — a disconnected electrode records
+    /// nothing, not "signal minus QRS."
+    static func applyFlatline(_ p: Parameters, leads: inout [[Double]]) {
+        guard !leads.isEmpty else { return }
+        let sampleCount = leads[0].count
+
+        func indices(of names: [String]?) -> [Int] {
+            guard let names, !names.isEmpty else { return Array(leads.indices) }
+            return names.compactMap { leadNames.firstIndex(of: $0) }
+        }
+        for span in p.flatlineSpans {
+            let lo = max(0, Int(span.range.lowerBound * p.ecgSampleRate))
+            let hi = min(sampleCount - 1, Int(span.range.upperBound * p.ecgSampleRate))
+            guard lo <= hi else { continue }
+            for leadIndex in indices(of: span.leadNames) {
+                for s in lo...hi { leads[leadIndex][s] = 0 }
+            }
+        }
+        guard !p.droppedLeads.isEmpty else { return }
+        for leadIndex in indices(of: p.droppedLeads) {
+            leads[leadIndex] = [Double](repeating: 0, count: sampleCount)
+        }
+    }
+
     // MARK: - Ectopy (X104)
 
     /// X104: the PVC coupling — the premature beat arrives at this fraction
@@ -173,5 +201,34 @@ extension SyntheticECG {
             guard lo <= hi else { continue }
             for s in lo...hi { dipole[s] += rng.gaussian() * 0.15 }
         }
+    }
+
+    // MARK: - Trend channels
+
+    /// 0.02 clean baseline, 0.35 during a noise episode, 0.9 during a
+    /// flat-line span (X105: disconnect ≈ total artifact) — all comfortably
+    /// across the quality lane's 10% outline threshold. Dropped leads do not
+    /// elevate the lane: one dead lead is not whole-record artifact.
+    static func artifactSeries(_ p: Parameters) -> [Double] {
+        (0..<Int(p.durationSeconds)).map { second in
+            let t = Double(second)
+            let flat = p.flatlineSpans.contains { $0.range.lowerBound <= t + 1 && t <= $0.range.upperBound }
+            if flat { return 0.9 }
+            let noisy = p.noiseEpisodes.contains { $0.lowerBound <= t + 1 && t <= $0.upperBound }
+            return noisy ? 0.35 : 0.02
+        }
+    }
+
+    static func heartRateSeries(_ p: Parameters, beats: [Double]) -> [Double] {
+        var out = [Double](repeating: p.meanHeartRateBPM, count: Int(p.durationSeconds))
+        guard beats.count > 1 else { return out }
+        var beatIdx = 1
+        for second in 0..<out.count {
+            let t = Double(second)
+            while beatIdx < beats.count - 1, beats[beatIdx] < t { beatIdx += 1 }
+            let rr = beats[beatIdx] - beats[beatIdx - 1]
+            if rr > 0 { out[second] = 60.0 / rr }
+        }
+        return out
     }
 }

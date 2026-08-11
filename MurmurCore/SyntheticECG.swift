@@ -52,6 +52,20 @@ public enum SyntheticECG {
         /// suppressed P waves. Boundaries are exact truth for detectors that
         /// key on R–R irregularity.
         public var afEpisode: ClosedRange<Double>?
+        /// X105 (#176): electrode-disconnect spans — the SIGNAL goes to a
+        /// hard zero on the named leads while the heart keeps beating: truth
+        /// beats and the annotations sidecar are untouched, so a detector
+        /// re-reading the signal MISSES beats there (that residual is the
+        /// fixture's point) while the sidecar-driven pipeline still sees
+        /// them. The artifact lane goes to 0.9 over each span (disconnect ≈
+        /// total artifact; broadband noise is 0.35, clean 0.02).
+        public var flatlineSpans: [FlatlineSpan]
+        /// X105: leads flat for the WHOLE record while the others carry
+        /// signal — the lead-dropout state (overlay/legend + primary-lead
+        /// fallback surfaces). Names must be members of `leadNames`; a
+        /// dropped lead does NOT elevate the artifact lane (one dead lead is
+        /// not whole-record artifact).
+        public var droppedLeads: [String]
         /// X104: times (seconds) near which an isolated wide-complex
         /// premature beat REPLACES the nearest sinus beat: it arrives at
         /// `pvcCouplingFraction` of the local R–R (the short coupling) while
@@ -85,6 +99,8 @@ public enum SyntheticECG {
             seed: UInt64 = 0xEC6_5EED,
             noiseEpisodes: [ClosedRange<Double>] = [],
             afEpisode: ClosedRange<Double>? = nil,
+            flatlineSpans: [FlatlineSpan] = [],
+            droppedLeads: [String] = [],
             pvcTimesSeconds: [Double] = [],
             wideComplexRuns: [WideComplexRun] = [],
             rateEpisodes: [RateEpisode] = []
@@ -97,6 +113,8 @@ public enum SyntheticECG {
             self.seed = seed
             self.noiseEpisodes = noiseEpisodes
             self.afEpisode = afEpisode
+            self.flatlineSpans = flatlineSpans
+            self.droppedLeads = droppedLeads
             self.pvcTimesSeconds = pvcTimesSeconds
             self.wideComplexRuns = wideComplexRuns
             self.rateEpisodes = rateEpisodes
@@ -116,6 +134,20 @@ public enum SyntheticECG {
         public init(range: ClosedRange<Double>, bpm: Double) {
             self.range = range
             self.bpm = bpm
+        }
+    }
+
+    /// X105 (#176): one electrode-disconnect span.
+    public struct FlatlineSpan: Equatable, Sendable, Codable {
+        /// Seconds from record start; samples inside are exactly zero.
+        public var range: ClosedRange<Double>
+        /// Leads to flatten, by `leadNames` name; nil or empty = every lead
+        /// (a full disconnect).
+        public var leadNames: [String]?
+
+        public init(range: ClosedRange<Double>, leadNames: [String]? = nil) {
+            self.range = range
+            self.leadNames = leadNames
         }
     }
 
@@ -149,6 +181,10 @@ public enum SyntheticECG {
             /// X104: a constructed run of ≥ 3 wide-complex beats at elevated
             /// rate. Boundaries are the constructed range verbatim.
             case wideComplexRun
+            /// X105: an electrode-disconnect span (see `FlatlineSpan`).
+            /// Boundaries verbatim; recorded once per span regardless of
+            /// which leads it silences.
+            case flatline
         }
         public var kind: Kind
         public var startSeconds: Double
@@ -242,37 +278,11 @@ public enum SyntheticECG {
         addBaselineWander(p, into: &dipole)
         addNoiseEpisodes(p, into: &dipole, rng: &rng)
 
-        let leads = leadGains.map { gain in dipole.map { $0 * gain } }
+        var leads = leadGains.map { gain in dipole.map { $0 * gain } }
+        applyFlatline(p, leads: &leads)
 
         // 3. Truth + consistent trend channels.
-        var episodes: [TruthEpisode] = p.noiseEpisodes.map {
-            TruthEpisode(kind: .noise, startSeconds: $0.lowerBound, endSeconds: $0.upperBound)
-        }
-        if let af = p.afEpisode {
-            episodes.append(TruthEpisode(
-                kind: .atrialFibrillation, startSeconds: af.lowerBound, endSeconds: af.upperBound
-            ))
-        }
-        for run in p.wideComplexRuns {
-            episodes.append(TruthEpisode(
-                kind: .wideComplexRun,
-                startSeconds: run.range.lowerBound,
-                endSeconds: run.range.upperBound
-            ))
-        }
-        for episode in p.rateEpisodes {
-            // 60 / 100 are the definitional adult coordinates (see Kind doc);
-            // an in-band episode is deliberately unlabeled negative truth.
-            let kind: TruthEpisode.Kind? = episode.bpm < 60 ? .bradycardia
-                : episode.bpm > 100 ? .tachycardia : nil
-            if let kind {
-                episodes.append(TruthEpisode(
-                    kind: kind,
-                    startSeconds: episode.range.lowerBound,
-                    endSeconds: episode.range.upperBound
-                ))
-            }
-        }
+        let episodes = truthEpisodes(p)
         var rr: [Double] = []
         rr.reserveCapacity(max(0, beats.count - 1))
         for i in 1..<max(1, beats.count) {
@@ -291,6 +301,46 @@ public enum SyntheticECG {
             artifactRatioPerSecond: artifactSeries(p),
             heartRatePerSecond: heartRateSeries(p, beats: beats)
         )
+    }
+
+    /// Episode truth is a pure function of the parameters — every span is
+    /// recorded verbatim; rate episodes are classified at the definitional
+    /// 60 / 100 coordinates (in-band episodes stay unlabeled, deliberately).
+    private static func truthEpisodes(_ p: Parameters) -> [TruthEpisode] {
+        var episodes: [TruthEpisode] = p.noiseEpisodes.map {
+            TruthEpisode(kind: .noise, startSeconds: $0.lowerBound, endSeconds: $0.upperBound)
+        }
+        if let af = p.afEpisode {
+            episodes.append(TruthEpisode(
+                kind: .atrialFibrillation, startSeconds: af.lowerBound, endSeconds: af.upperBound
+            ))
+        }
+        for span in p.flatlineSpans {
+            episodes.append(TruthEpisode(
+                kind: .flatline,
+                startSeconds: span.range.lowerBound,
+                endSeconds: span.range.upperBound
+            ))
+        }
+        for run in p.wideComplexRuns {
+            episodes.append(TruthEpisode(
+                kind: .wideComplexRun,
+                startSeconds: run.range.lowerBound,
+                endSeconds: run.range.upperBound
+            ))
+        }
+        for episode in p.rateEpisodes {
+            let kind: TruthEpisode.Kind? = episode.bpm < 60 ? .bradycardia
+                : episode.bpm > 100 ? .tachycardia : nil
+            if let kind {
+                episodes.append(TruthEpisode(
+                    kind: kind,
+                    startSeconds: episode.range.lowerBound,
+                    endSeconds: episode.range.upperBound
+                ))
+            }
+        }
+        return episodes
     }
 
     // MARK: - R–R process
@@ -413,31 +463,6 @@ public enum SyntheticECG {
             t += rrMs / 1000
         }
         return (beats, kinds)
-    }
-
-    // MARK: - Trend channels
-
-    /// 0.02 clean baseline, 0.35 during a noise episode — comfortably across
-    /// the quality lane's 10% outline threshold in both directions.
-    private static func artifactSeries(_ p: Parameters) -> [Double] {
-        (0..<Int(p.durationSeconds)).map { second in
-            let t = Double(second)
-            let noisy = p.noiseEpisodes.contains { $0.lowerBound <= t + 1 && t <= $0.upperBound }
-            return noisy ? 0.35 : 0.02
-        }
-    }
-
-    private static func heartRateSeries(_ p: Parameters, beats: [Double]) -> [Double] {
-        var out = [Double](repeating: p.meanHeartRateBPM, count: Int(p.durationSeconds))
-        guard beats.count > 1 else { return out }
-        var beatIdx = 1
-        for second in 0..<out.count {
-            let t = Double(second)
-            while beatIdx < beats.count - 1, beats[beatIdx] < t { beatIdx += 1 }
-            let rr = beats[beatIdx] - beats[beatIdx - 1]
-            if rr > 0 { out[second] = 60.0 / rr }
-        }
-        return out
     }
 
     // MARK: - Seeded RNG
