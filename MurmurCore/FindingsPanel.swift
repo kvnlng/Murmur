@@ -1803,7 +1803,7 @@ struct FindingsPanel: View {
                     .frame(width: 9, height: 9)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        Text("Candidate arrhythmia events")
+                        Text("Candidate rhythm events")
                             .font(.callout.weight(.semibold))
                             .foregroundStyle(.primary)
                         ruoBadge(arrhythmiaRegulatoryNotice)
