@@ -53,7 +53,9 @@ extension SyntheticRecording {
                                           recordName: recordName, into: directory)
         heaLines.append("# Synthetic ECGSYN-style recording with known ground truth (X99)")
         heaLines.append("# Rhythm: sinus, LF/HF \(parameters.lfHfRatio)"
-            + (parameters.afEpisode != nil ? ", one simulated AF episode" : ""))
+            + (parameters.afEpisode != nil ? ", one simulated AF episode" : "")
+            + (parameters.rateEpisodes.isEmpty ? ""
+               : ", \(parameters.rateEpisodes.count) constructed rate episode(s)"))
         let heaURL = directory.appendingPathComponent("\(recordName).hea")
         try (heaLines.joined(separator: "\n") + "\n")
             .write(to: heaURL, atomically: true, encoding: .utf8)
