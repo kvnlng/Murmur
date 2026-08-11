@@ -120,6 +120,23 @@ public enum SyntheticECG {
         public var endSeconds: Double
     }
 
+    /// X103 (#174): per-beat fiducial truth, in the DELINEATOR'S vocabulary
+    /// (pOnset/pOffset/qrsOnset/rPeak/qrsOffset/tOnset/tOffset — no P/T peak
+    /// kinds exist downstream). Onset/offset convention: centre ±
+    /// `fiducialHalfWidthMultiplier` Gaussian widths of the constructed bump
+    /// (2σ — the point the wave has risen to ~13.5% of its peak). All in
+    /// seconds from record start; P fields are nil where the P wave is
+    /// suppressed (inside the AF span) — that absence IS truth.
+    public struct TruthBeatFiducials: Equatable, Sendable, Codable {
+        public var rPeakSeconds: Double
+        public var pOnsetSeconds: Double?
+        public var pOffsetSeconds: Double?
+        public var qrsOnsetSeconds: Double
+        public var qrsOffsetSeconds: Double
+        public var tOnsetSeconds: Double
+        public var tOffsetSeconds: Double
+    }
+
     /// What the record REALLY contains — written beside the signal so tests
     /// compare pipeline output against construction, not against another
     /// estimate.
@@ -132,6 +149,8 @@ public enum SyntheticECG {
         /// N beats → N−1 intervals).
         public var rrIntervalsMs: [Double]
         public var episodes: [TruthEpisode]
+        /// X103: one entry per beat, parallel to `beatTimesSeconds`.
+        public var beatFiducials: [TruthBeatFiducials]
 
         /// R-peak positions in ECG samples — what the annotations sidecar
         /// carries and `normalBeatSampleIndices()` returns.
@@ -166,10 +185,12 @@ public enum SyntheticECG {
         let grid = rrTachogramGrid(p, rng: &rng)
         let beats = placeBeats(p, grid: grid, rng: &rng)
 
-        // 2. The waveform laid along it.
+        // 2. The waveform laid along it — from per-beat layouts that the
+        // fiducial truth shares verbatim (X103).
+        let beatLayouts = layouts(p, beats: beats)
         let sampleCount = Int(p.durationSeconds * p.ecgSampleRate)
         var dipole = [Double](repeating: 0, count: sampleCount)
-        addBeatComplexes(p, beats: beats, into: &dipole)
+        addBeatComplexes(p, beats: beats, layouts: beatLayouts, into: &dipole)
         addBaselineWander(p, into: &dipole)
         addNoiseEpisodes(p, into: &dipole, rng: &rng)
 
@@ -206,7 +227,8 @@ public enum SyntheticECG {
             parameters: p,
             beatTimesSeconds: beats,
             rrIntervalsMs: rr,
-            episodes: episodes.sorted { $0.startSeconds < $1.startSeconds }
+            episodes: episodes.sorted { $0.startSeconds < $1.startSeconds },
+            beatFiducials: fiducialTruth(beats: beats, layouts: beatLayouts)
         )
         return Output(
             leads: leads,
@@ -328,65 +350,6 @@ public enum SyntheticECG {
             t += rrMs / 1000
         }
         return beats
-    }
-
-    // MARK: - Waveform
-
-    /// Gaussian event bumps per beat (amplitudes in mV, times in seconds
-    /// relative to the R peak). QT scales as √RR with QTc ≈ 410 ms — the
-    /// dependence the QTc lane exists to remove.
-    private static func addBeatComplexes(
-        _ p: Parameters, beats: [Double], into dipole: inout [Double]
-    ) {
-        let rate = p.ecgSampleRate
-        let meanRRs = 60.0 / p.meanHeartRateBPM
-        struct WaveBump {
-            let centre: Double
-            let width: Double
-            let amp: Double
-        }
-        for (i, beat) in beats.enumerated() {
-            let rrS = i + 1 < beats.count ? beats[i + 1] - beat : meanRRs
-            let qt = 0.410 * sqrt(max(0.3, min(1.5, rrS)))     // Bazett, QTc 410 ms
-            let tScale = sqrt(max(0.3, min(1.5, rrS)) / 0.8)
-            let pSuppressed = p.afEpisode?.contains(beat) == true
-            var bumps: [WaveBump] = [
-                WaveBump(centre: -0.030, width: 0.012, amp: -0.12),                      // Q
-                WaveBump(centre: 0.000, width: 0.014, amp: 1.10),                        // R
-                WaveBump(centre: 0.032, width: 0.014, amp: -0.22),                       // S
-                WaveBump(centre: -0.045 + qt - 0.070 * tScale, width: 0.055 * tScale, amp: 0.32), // T
-            ]
-            if !pSuppressed {
-                bumps.append(WaveBump(centre: -0.170, width: 0.045, amp: 0.12))          // P
-            }
-            for bump in bumps {
-                let lo = max(0, Int((beat + bump.centre - 4 * bump.width) * rate))
-                let hi = min(dipole.count - 1, Int((beat + bump.centre + 4 * bump.width) * rate))
-                guard lo <= hi else { continue }
-                for s in lo...hi {
-                    let dt = Double(s) / rate - (beat + bump.centre)
-                    dipole[s] += bump.amp * exp(-dt * dt / (2 * bump.width * bump.width))
-                }
-            }
-        }
-    }
-
-    private static func addBaselineWander(_ p: Parameters, into dipole: inout [Double]) {
-        for s in 0..<dipole.count {
-            let t = Double(s) / p.ecgSampleRate
-            dipole[s] += 0.04 * sin(2 * .pi * 0.18 * t) + 0.02 * sin(2 * .pi * 0.33 * t + 1.1)
-        }
-    }
-
-    private static func addNoiseEpisodes(
-        _ p: Parameters, into dipole: inout [Double], rng: inout SplitMix64
-    ) {
-        for episode in p.noiseEpisodes {
-            let lo = max(0, Int(episode.lowerBound * p.ecgSampleRate))
-            let hi = min(dipole.count - 1, Int(episode.upperBound * p.ecgSampleRate))
-            guard lo <= hi else { continue }
-            for s in lo...hi { dipole[s] += rng.gaussian() * 0.15 }
-        }
     }
 
     // MARK: - Trend channels
