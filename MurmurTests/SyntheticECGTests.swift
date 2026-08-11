@@ -440,6 +440,28 @@ struct SyntheticECGRateEpisodeScanTests {
                 "A window past the longest run must suppress every brady candidate, got \(over.count)")
     }
 
+    @Test("The minRunBeats gate rides the scan — beats' worth of span at the run's own rate (X106)")
+    func minRunBeatsGateThroughScan() throws {
+        // A 30 s @ 40 bpm episode carries ≈ 20 constructed beats (R–R 1.5 s),
+        // scanned at the review's screen band (45/120, §1.3). The gate needs
+        // (N−1) × 1.5 s of span: N = 15 asks 21 s of the ~30 s run — kept;
+        // N = 30 asks 43.5 s — killed. Margins ≥ 9 s absorb ramps and jitter;
+        // the beat arithmetic comes from construction, not a probe.
+        let p = SyntheticECG.Parameters(
+            durationSeconds: 180,
+            rateEpisodes: [.init(range: 70...100, bpm: 40)])
+        let screen = { (beats: Int) in
+            RhythmBandConfig(lowBpm: 45, highBpm: 120, minRunBeats: beats)
+        }
+        let kept = scanned(p, rhythmConfig: screen(15)).result.candidates
+            .filter { $0.kind == .bradycardia }
+        #expect(!kept.isEmpty, "20 constructed beats must clear a 15-beat minimum")
+        let killed = scanned(p, rhythmConfig: screen(30)).result.candidates
+            .filter { $0.kind == .bradycardia }
+        #expect(killed.isEmpty,
+                "A 30-beat minimum demands 43.5 s at 40 bpm — the 30 s episode cannot supply it")
+    }
+
     @Test("An in-band rate change gets no truth label and mints nothing SUSTAINED — negative truth")
     func inBandEpisodeStaysSilent() {
         // 90 bpm is 667 ms R–R; the default 45 ms SDNN jitter legitimately

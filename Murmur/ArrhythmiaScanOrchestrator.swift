@@ -19,8 +19,10 @@
 //  Pause and AFib operating points are data-derived defaults (AFDB pRR50
 //  bound, 2 s pause floor). The rate band is the analyst's own dials (X91,
 //  `ArrhythmiaScanSettings`): the app still never ARBITRATES a threshold —
-//  it defaults to the definitional 60/100 bands and echoes whatever the
-//  analyst set into the caption, rescanning on every change.
+//  it defaults to the cardiologist review's cited candidate-screen bounds
+//  (45/120 bpm, ≥ 5 beats; X106, cardiologist-review-packet.md §1.3) and
+//  echoes whatever the analyst set into the caption, rescanning on every
+//  change.
 //
 //  MurmurCore never imports MurmurMetrics — the detectors and the
 //  candidate→annotation minting all happen here.
@@ -46,6 +48,7 @@ struct ArrhythmiaScanOrchestrator: View {
         let lowBpm: Double
         let highBpm: Double
         let minDurationSeconds: Double
+        let minRunBeats: Double
     }
 
     var body: some View {
@@ -57,7 +60,8 @@ struct ArrhythmiaScanOrchestrator: View {
                 owned: store.hasStudio,
                 lowBpm: settings.lowBpm,
                 highBpm: settings.highBpm,
-                minDurationSeconds: settings.minDurationSeconds
+                minDurationSeconds: settings.minDurationSeconds,
+                minRunBeats: settings.minRunBeats
             )) {
                 await rescan()
             }
@@ -110,7 +114,8 @@ struct ArrhythmiaScanOrchestrator: View {
         let rhythmConfig = RhythmBandConfig(
             lowBpm: settings.lowBpm,
             highBpm: settings.highBpm,
-            minDurationSeconds: settings.minDurationSeconds
+            minDurationSeconds: settings.minDurationSeconds,
+            minRunBeats: Int(settings.minRunBeats)
         )
         let pauseConfig = PauseConfig()
         let afibConfig = AFibConfig()
@@ -208,7 +213,8 @@ struct ArrhythmiaScanOrchestrator: View {
         let operatingPoints = ArrhythmiaScanSettings.rhythmCaption(
             lowBpm: rhythmConfig.lowBpm,
             highBpm: rhythmConfig.highBpm,
-            minDurationSeconds: rhythmConfig.minDurationSeconds
+            minDurationSeconds: rhythmConfig.minDurationSeconds,
+            minRunBeats: Double(rhythmConfig.minRunBeats)
         ) + String(
             format: " · pause ≥ %.1f s · pRR50 ≥ %.3f (AFDB)",
             pauseConfig.minGapMs / 1000.0,

@@ -4,9 +4,10 @@
 //
 //  X91 (#140) — the analyst's rate-band dials, end to end through REAL
 //  detection: no injection flags anywhere. The rich fixture (X99) generates
-//  a seeded ~72 bpm sinus record, so at the default 60–100 band the rate
-//  detector finds nothing; raising the bradycardia threshold above the
-//  fixture's mean rate MUST mint candidates from a real rescan, and a time
+//  a seeded ~72 bpm sinus record, so at the default 45–120 screen band
+//  (X106) the rate detector finds nothing; raising the bradycardia
+//  threshold above the fixture's mean rate MUST mint candidates from a
+//  real rescan, and a time
 //  window longer than any run must take them away again. Same-seed
 //  generation makes both transitions deterministic.
 //
@@ -88,8 +89,8 @@ final class MurmurUIArrhythmiaDialsTests: XCTestCase {
         app.launch()
 
         // The group mounts because the scan RAN — the fixture's sinus rhythm
-        // sits inside the default 60–100 band, so this is the zero-candidate
-        // header the X91 render change exists for.
+        // sits inside the default 45–120 screen band (X106), so this is the
+        // zero-candidate header the X91 render change exists for.
         let header = app.descendants(matching: .any)
             .matching(identifier: "arrhythmia-candidate-group-header").firstMatch
         XCTAssertTrue(header.waitForExistence(timeout: 30),
@@ -120,7 +121,7 @@ final class MurmurUIArrhythmiaDialsTests: XCTestCase {
 
         // The caption echoes the dialed band (X58 discipline). The subtitle
         // folds into the header button's composed AX label, so read it there.
-        let echo = NSPredicate(format: "label CONTAINS 'outside 80–100 bpm'")
+        let echo = NSPredicate(format: "label CONTAINS 'outside 80–120 bpm'")
         let echoExp = XCTNSPredicateExpectation(predicate: echo, object: header)
         XCTAssertEqual(XCTWaiter.wait(for: [echoExp], timeout: 5), .completed,
                        "The group caption should cite the analyst's band, not the default")
