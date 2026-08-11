@@ -75,17 +75,36 @@ struct IntervalMarkingsOrchestrator: View {
             return
         }
         let beatSampleIndices = recording.normalBeatSampleIndices()
+        // X108 (cardiologist review §1.1): QT is measured on the CONVENTIONAL
+        // leads when the recording carries any — II, then V5, per-beat median
+        // across them when both exist. Before X108 the lead was whatever
+        // channel came first in the file (the packet's "II when present" was
+        // channel-order luck, not policy). With NO conventional lead the
+        // legacy first-channel path still runs — §2.4's principled
+        // abstention replaces it in X109.
+        let conventionalLeads = recording.conventionalQTLeads(inDirectory: directory)
+        let legacySamples = conventionalLeads.isEmpty
+            ? recording.primaryECGSamples(inDirectory: directory)
+            : nil
         guard !beatSampleIndices.isEmpty,
-              let samples = recording.primaryECGSamples(inDirectory: directory) else {
+              !(conventionalLeads.isEmpty && legacySamples == nil) else {
             await MainActor.run { markingsContext.clear() }
             return
         }
+        // Leads share the primary channel's sample rate (true for standard
+        // multi-lead records — the same assumption `ecgLeadSamples` documents).
         let sampleRate = ecgChannel.sampleRate
-        // Reproducibility provenance (C3/C4): the lead the intervals are
-        // measured in, and the sample span the template beats span. Captured
-        // here (the orchestrator chooses the lead + feeds the beats) so no
-        // MurmurMetrics change is needed.
-        let leadName = ecgChannel.name
+        // Reproducibility provenance (C3/C4): the lead(s) the intervals are
+        // measured in, and the sample span the template beats span. The
+        // multi-lead citation names the method, not just the leads.
+        let leadName: String = {
+            switch conventionalLeads.count {
+            case 0:  return ecgChannel.name
+            case 1:  return conventionalLeads[0].channel.name
+            default: return "median of "
+                + conventionalLeads.map(\.channel.name).joined(separator: ", ")
+            }
+        }()
         let spanStart = beatSampleIndices.min()
         let spanEnd = beatSampleIndices.max()
         let qtcFormula = await MainActor.run { markingsContext.qtcFormula }
@@ -101,102 +120,47 @@ struct IntervalMarkingsOrchestrator: View {
 
         // Delineate + measure + build template off the main actor.
         // Even a multi-hour recording (~100k beats) is a few hundred
-        // milliseconds; we don't want to jitter the canvas while it
-        // runs.
-        //
-        // Uses `WaveletBeatDelineator.delineateWithFeatures` (v2, the
-        // frozen tangent primitive validated end-to-end on ECGRDVQ +
-        // QTDB + LUDB per
-        // `project_external_validation_accepted_delineator_close.md`).
-        // The paired `features` array feeds the per-beat uncertainty
-        // pipeline: `tOffsetCensored` drives the "QT ≥ X ms" / open-top
-        // lane render; `tOffsetRiskScore` looks up the calibrated CI
-        // half-width from the built-in T-offset calibration table.
+        // milliseconds per lead; we don't want to jitter the canvas while
+        // it runs.
         let computed = await Task.detached(priority: .userInitiated) { () -> (
             beats: [MarkingsBeat],
-            template: MarkingsTemplate?
+            template: NormalTemplate
         ) in
-            let (store, features) = WaveletBeatDelineator.delineateWithFeatures(
-                samples: samples,
-                sampleRate: sampleRate,
-                rPeaks: beatSampleIndices
-            )
-            let readouts = IntervalMeasurement.measureAll(store: store)
-            // X53: exclude physically impossible beats from the template
-            // (noise cannot be allowed to poison the patient's own normal),
-            // and carry a per-beat implausibility flag for the trend lane and
-            // the inspector. Both key off the SAME Tier-A rule set so the
-            // template's excludedBeatCount and the beat flags never disagree.
-            //
-            // X58: ALSO exclude beats whose T-offset the delineator flagged as
-            // unreliable. This is the load-bearing half of the rec-212 fix —
-            // the 625 ms own-normal is false T-terminations (biased LONG)
-            // inflating the median, which a plausibility rule alone does not
-            // catch (Tier A passed them). Threshold defaults to the QTDB/LUDB
-            // -derived operating point; the app ships the default and never
-            // arbitrates the dial.
-            let template = NormalTemplateBuilder.build(
-                from: store,
-                qtcFormula: Self.metricsFormula(from: qtcFormula),
-                excluding: QTPlausibilityFilter.defaultRules,
-                features: features,
-                reliabilityThreshold: reliabilityThreshold
-            )
-            let implausibleMask = QTPlausibilityFilter.mask(for: store)
-            let calibration = CalibrationTable.builtInTOffset
-            let beats = store.beats.indices.map { i -> MarkingsBeat in
-                let bf = store.beats[i]
-                let ro = readouts[i]
-                let feat = i < features.count ? features[i] : .absent
-                let ciHalfWidth = calibration.bin(forScore: feat.tOffsetRiskScore)?.p95AbsErr
-                return MarkingsBeat(
-                    rPeakSampleIndex: bf.rPeakSampleIndex,
-                    rPeakConfidence: bf.rPeakConfidence,
-                    pOnset: bf.pOnset.map(Self.coreFiducial(_:)),
-                    pOffset: bf.pOffset.map(Self.coreFiducial(_:)),
-                    qrsOnset: bf.qrsOnset.map(Self.coreFiducial(_:)),
-                    qrsOffset: bf.qrsOffset.map(Self.coreFiducial(_:)),
-                    tOnset: bf.tOnset.map(Self.coreFiducial(_:)),
-                    tOffset: bf.tOffset.map(Self.coreFiducial(_:)),
-                    prMs: ro.prMs,
-                    qrsMs: ro.qrsMs,
-                    qtMs: ro.qtMs,
-                    qtcMs: ro.qtcMs(formula: Self.metricsFormula(from: qtcFormula)),
-                    precedingRRMs: ro.precedingRRMs,
-                    jtMs: ro.jtMs,
-                    jtcMs: ro.jtcMs(formula: Self.metricsFormula(from: qtcFormula)),
-                    tOffsetCensored: feat.tOffsetCensored,
-                    qtCalibratedHalfWidthMs: ciHalfWidth,
-                    tOffsetIsoelectricSampleIndex: feat.tOffsetIsoelectricSampleIndex,
-                    isImplausible: i < implausibleMask.count ? implausibleMask[i] : false,
-                    // X79: the SAME reliability call (and threshold) the
-                    // template builder applies, so what the template excluded
-                    // and what the bins/ranking withhold can never disagree.
-                    isUnreliable: !TOffsetReliability.isReliable(feat, threshold: reliabilityThreshold)
-                )
+            if conventionalLeads.isEmpty, let samples = legacySamples {
+                return Self.singleLeadComputed(
+                    samples: samples, sampleRate: sampleRate,
+                    beatSampleIndices: beatSampleIndices,
+                    qtcFormula: Self.metricsFormula(from: qtcFormula),
+                    reliabilityThreshold: reliabilityThreshold)
             }
-            let coreTemplate: MarkingsTemplate? = template.sampleCount > 0
-                ? MarkingsTemplate(
-                    sampleCount: template.sampleCount,
-                    medianPRMs: template.medianPRMs,
-                    iqrPRMs: template.iqrPRMs,
-                    medianQRSMs: template.medianQRSMs,
-                    iqrQRSMs: template.iqrQRSMs,
-                    medianQTMs: template.medianQTMs,
-                    iqrQTMs: template.iqrQTMs,
-                    qtcFormulaName: template.qtcFormula.displayName,
-                    medianQTcMs: template.medianQTcMs,
-                    iqrQTcMs: template.iqrQTcMs,
-                    sourceLead: leadName,
-                    spanStartSample: spanStart,
-                    spanEndSample: spanEnd,
-                    excludedBeatCount: template.excludedBeatCount,
-                    excludedImplausibleCount: template.excludedImplausibleCount,
-                    excludedUnreliableCount: template.excludedUnreliableCount
-                )
-                : nil
-            return (beats, coreTemplate)
+            return Self.conventionalComputed(
+                leadSamples: conventionalLeads.map(\.samples),
+                sampleRate: sampleRate,
+                beatSampleIndices: beatSampleIndices,
+                qtcFormula: Self.metricsFormula(from: qtcFormula),
+                reliabilityThreshold: reliabilityThreshold)
         }.value
+
+        let coreTemplate: MarkingsTemplate? = computed.template.sampleCount > 0
+            ? MarkingsTemplate(
+                sampleCount: computed.template.sampleCount,
+                medianPRMs: computed.template.medianPRMs,
+                iqrPRMs: computed.template.iqrPRMs,
+                medianQRSMs: computed.template.medianQRSMs,
+                iqrQRSMs: computed.template.iqrQRSMs,
+                medianQTMs: computed.template.medianQTMs,
+                iqrQTMs: computed.template.iqrQTMs,
+                qtcFormulaName: computed.template.qtcFormula.displayName,
+                medianQTcMs: computed.template.medianQTcMs,
+                iqrQTcMs: computed.template.iqrQTcMs,
+                sourceLead: leadName,
+                spanStartSample: spanStart,
+                spanEndSample: spanEnd,
+                excludedBeatCount: computed.template.excludedBeatCount,
+                excludedImplausibleCount: computed.template.excludedImplausibleCount,
+                excludedUnreliableCount: computed.template.excludedUnreliableCount
+            )
+            : nil
 
         await MainActor.run {
             if computed.beats.isEmpty {
@@ -205,10 +169,183 @@ struct IntervalMarkingsOrchestrator: View {
                 markingsContext.set(
                     beats: computed.beats,
                     sampleRate: sampleRate,
-                    template: computed.template
+                    template: coreTemplate
                 )
             }
         }
+    }
+
+    // MARK: - Compute paths
+
+    /// The pre-X108 single-lead pipeline, unchanged: runs only when the
+    /// recording has NO conventional QT lead (first-channel fallback —
+    /// X109 replaces this with §2.4's principled abstention).
+    ///
+    /// Uses `WaveletBeatDelineator.delineateWithFeatures` (v2, the frozen
+    /// tangent primitive validated end-to-end on ECGRDVQ + QTDB + LUDB).
+    /// `features` feeds the per-beat uncertainty pipeline: `tOffsetCensored`
+    /// drives the "QT ≥ X ms" render; `tOffsetRiskScore` looks up the
+    /// calibrated CI half-width.
+    private static func singleLeadComputed(
+        samples: [Float],
+        sampleRate: Double,
+        beatSampleIndices: [Int64],
+        qtcFormula: QTcFormula,
+        reliabilityThreshold: Int
+    ) -> (beats: [MarkingsBeat], template: NormalTemplate) {
+        let (store, features) = WaveletBeatDelineator.delineateWithFeatures(
+            samples: samples,
+            sampleRate: sampleRate,
+            rPeaks: beatSampleIndices
+        )
+        let readouts = IntervalMeasurement.measureAll(store: store)
+        // X53: exclude physically impossible beats from the template; X58:
+        // also exclude unreliable T-offsets. Same rules, same threshold as
+        // the per-beat flags below, so they can never disagree.
+        let template = NormalTemplateBuilder.build(
+            from: store,
+            qtcFormula: qtcFormula,
+            excluding: QTPlausibilityFilter.defaultRules,
+            features: features,
+            reliabilityThreshold: reliabilityThreshold
+        )
+        let implausibleMask = QTPlausibilityFilter.mask(for: store)
+        let calibration = CalibrationTable.builtInTOffset
+        let beats = store.beats.indices.map { i -> MarkingsBeat in
+            let bf = store.beats[i]
+            let ro = readouts[i]
+            let feat = i < features.count ? features[i] : .absent
+            return Self.markingsBeat(bf: bf, feat: feat, values: BeatValues(
+                prMs: ro.prMs, qrsMs: ro.qrsMs,
+                qtMs: ro.qtMs,
+                qtcMs: ro.qtcMs(formula: qtcFormula),
+                precedingRRMs: ro.precedingRRMs,
+                jtMs: ro.jtMs,
+                jtcMs: ro.jtcMs(formula: qtcFormula),
+                tOffsetCensored: feat.tOffsetCensored,
+                ciHalfWidthMs: calibration.bin(forScore: feat.tOffsetRiskScore)?.p95AbsErr,
+                isImplausible: i < implausibleMask.count ? implausibleMask[i] : false,
+                isUnreliable: !TOffsetReliability.isReliable(feat, threshold: reliabilityThreshold)
+            ))
+        }
+        return (beats, template)
+    }
+
+    /// X108: the conventional-lead path — II, then V5, delineated
+    /// independently by the same validated pipeline; the per-beat QT (and
+    /// everything downstream of it: QTc, JT, JTc, censoring, CI) is the
+    /// cross-lead composite from `MultiLeadQT`. Fiducial overlays and the
+    /// depolarization intervals (PR/QRS) stay the DISPLAY lead's — index 0,
+    /// lead II when present. With one conventional lead the composite
+    /// degenerates to that lead's own gated measurement.
+    private static func conventionalComputed(
+        leadSamples: [[Float]],
+        sampleRate: Double,
+        beatSampleIndices: [Int64],
+        qtcFormula: QTcFormula,
+        reliabilityThreshold: Int
+    ) -> (beats: [MarkingsBeat], template: NormalTemplate) {
+        let delineated = leadSamples.map {
+            WaveletBeatDelineator.delineateWithFeatures(
+                samples: $0, sampleRate: sampleRate, rPeaks: beatSampleIndices)
+        }
+        let (primaryStore, primaryFeatures) = delineated[0]
+        let perLead = delineated.map {
+            MultiLeadQT.perLeadBeats(
+                store: $0.0, features: $0.1,
+                reliabilityThreshold: reliabilityThreshold)
+        }
+        let composites = primaryStore.beats.indices.map { i in
+            MultiLeadQT.compose(perLead.map { $0[i] })
+        }
+        let template = MultiLeadQT.template(
+            primaryStore: primaryStore, composites: composites, qtcFormula: qtcFormula)
+        let readouts = IntervalMeasurement.measureAll(store: primaryStore)
+        let calibration = CalibrationTable.builtInTOffset
+        let beats = primaryStore.beats.indices.map { i -> MarkingsBeat in
+            let bf = primaryStore.beats[i]
+            let ro = readouts[i]
+            let feat = i < primaryFeatures.count ? primaryFeatures[i] : .absent
+            let comp = composites[i]
+            // Value provenance: the composite when any lead measured; the
+            // display lead's raw readout (flagged) when none did — the same
+            // show-but-flag contract the single-lead path keeps.
+            let qtMs = comp.qtMs ?? ro.qtMs
+            let qtcMs: Double?
+            let jtMs: Double?
+            let jtcMs: Double?
+            if let compositeQT = comp.qtMs {
+                qtcMs = ro.precedingRRMs.map {
+                    QTcFormula.corrected(qtMs: compositeQT, rrMs: $0, formula: qtcFormula)
+                }
+                jtMs = ro.qrsMs.map { compositeQT - $0 }
+                jtcMs = qtcMs.flatMap { qtc in ro.qrsMs.map { qtc - $0 } }
+            } else {
+                qtcMs = ro.qtcMs(formula: qtcFormula)
+                jtMs = ro.jtMs
+                jtcMs = ro.jtcMs(formula: qtcFormula)
+            }
+            return Self.markingsBeat(bf: bf, feat: feat, values: BeatValues(
+                prMs: ro.prMs, qrsMs: ro.qrsMs,
+                qtMs: qtMs, qtcMs: qtcMs,
+                precedingRRMs: ro.precedingRRMs,
+                jtMs: jtMs, jtcMs: jtcMs,
+                tOffsetCensored: comp.qtMs != nil ? comp.censored : feat.tOffsetCensored,
+                ciHalfWidthMs: comp.ciHalfWidthMs
+                    ?? calibration.bin(forScore: feat.tOffsetRiskScore)?.p95AbsErr,
+                isImplausible: comp.excludedImplausible,
+                isUnreliable: comp.excludedUnreliable || comp.censored
+            ))
+        }
+        return (beats, template)
+    }
+
+    /// The measured values + flags one beat carries, from whichever
+    /// compute path produced them — bundled so the shared assembly below
+    /// has a single provenance-bearing argument.
+    private struct BeatValues {
+        let prMs: Double?
+        let qrsMs: Double?
+        let qtMs: Double?
+        let qtcMs: Double?
+        let precedingRRMs: Double?
+        let jtMs: Double?
+        let jtcMs: Double?
+        let tOffsetCensored: Bool
+        let ciHalfWidthMs: Double?
+        let isImplausible: Bool
+        let isUnreliable: Bool
+    }
+
+    /// Shared `MarkingsBeat` assembly — fiducials from the display lead's
+    /// store, values from whichever path computed them.
+    private static func markingsBeat(
+        bf: BeatFiducials,
+        feat: BeatConfidenceFeatures,
+        values v: BeatValues
+    ) -> MarkingsBeat {
+        MarkingsBeat(
+            rPeakSampleIndex: bf.rPeakSampleIndex,
+            rPeakConfidence: bf.rPeakConfidence,
+            pOnset: bf.pOnset.map(Self.coreFiducial(_:)),
+            pOffset: bf.pOffset.map(Self.coreFiducial(_:)),
+            qrsOnset: bf.qrsOnset.map(Self.coreFiducial(_:)),
+            qrsOffset: bf.qrsOffset.map(Self.coreFiducial(_:)),
+            tOnset: bf.tOnset.map(Self.coreFiducial(_:)),
+            tOffset: bf.tOffset.map(Self.coreFiducial(_:)),
+            prMs: v.prMs,
+            qrsMs: v.qrsMs,
+            qtMs: v.qtMs,
+            qtcMs: v.qtcMs,
+            precedingRRMs: v.precedingRRMs,
+            jtMs: v.jtMs,
+            jtcMs: v.jtcMs,
+            tOffsetCensored: v.tOffsetCensored,
+            qtCalibratedHalfWidthMs: v.ciHalfWidthMs,
+            tOffsetIsoelectricSampleIndex: feat.tOffsetIsoelectricSampleIndex,
+            isImplausible: v.isImplausible,
+            isUnreliable: v.isUnreliable
+        )
     }
 
     // MARK: - Enum bridging
