@@ -4496,6 +4496,60 @@ struct EctopyAnalyzerTests {
         #expect(s.ectopicBeatCount == 1)     // only V is ventricular ectopy
         #expect(s.isolatedCount == 1)
     }
+
+    // MARK: X110 (#186, review §1.5): the run's own rate beside the count
+
+    @Test("A run's rate is the median of ITS OWN intervals, converted at the sample rate")
+    func runRateFromOwnIntervals() throws {
+        // 250 Hz. Couplet: one 100-sample interval = 0.4 s = 150 bpm.
+        // Run of 4: intervals 150/160/400 samples — median 160 = 93.75 bpm,
+        // robust to the one long (aberrant) interval a mean would absorb.
+        let anns = [
+            beat("V", at: 1000), beat("V", at: 1100), beat("N", at: 1400),
+            beat("V", at: 2000), beat("V", at: 2150), beat("V", at: 2310), beat("V", at: 2710),
+        ]
+        let s = EctopyAnalyzer.summarize(anns)
+        let couplet = try #require(s.runs.first { $0.length == 2 })
+        #expect(couplet.rateBpm(sampleRate: 250) == 150)
+        let long = try #require(s.runs.first { $0.length == 4 })
+        #expect(long.medianRRSamples == 160)
+        #expect(abs((long.rateBpm(sampleRate: 250) ?? 0) - 93.75) < 1e-9)
+        #expect(long.rateBpm(sampleRate: 0) == nil,
+                "No sample rate → no rate; never a wrong number")
+    }
+
+    @Test("Run clauses carry the rate beside every count — §1.5's NSVT/AIVR disambiguation")
+    func runClausesCarryRates() {
+        // 250 Hz. One couplet at 150 bpm; two runs of 4 at ~94 and 150 bpm —
+        // long runs list INDIVIDUALLY so the analyst sees which is which.
+        let anns = [
+            beat("V", at: 1000), beat("V", at: 1100), beat("N", at: 1400),
+            beat("V", at: 2000), beat("V", at: 2160), beat("V", at: 2320), beat("V", at: 2480),
+            beat("N", at: 3000),
+            beat("V", at: 4000), beat("V", at: 4100), beat("V", at: 4200), beat("V", at: 4300),
+        ]
+        let s = EctopyAnalyzer.summarize(anns)
+        let clauses = s.runClauses(sampleRate: 250)
+        #expect(clauses == ["1 couplet · 150 bpm", "run of 4 · 94 bpm", "run of 4 · 150 bpm"])
+    }
+
+    @Test("Many long runs collapse to a count with a rate RANGE — bounded, still rate-bearing")
+    func manyLongRunsCollapse() {
+        // Five runs of 4: individual listing would sprawl, so the clause
+        // becomes a count + range. 100-sample RR = 150 bpm … 200-sample = 75.
+        var anns: [Annotation] = []
+        for (i, rr) in [100, 125, 150, 175, 200].enumerated() {
+            let base = Int64(10_000 * (i + 1))
+            for k in 0..<4 {
+                anns.append(beat("V", at: base + Int64(k * rr)))
+            }
+            anns.append(beat("N", at: base + 5000))
+        }
+        let s = EctopyAnalyzer.summarize(anns)
+        #expect(s.longRunCount == 5)
+        let clauses = s.runClauses(sampleRate: 250)
+        #expect(clauses == ["5 runs of ≥4 · 75–150 bpm"])
+    }
 }
 
 // MARK: - Annotation clustering
