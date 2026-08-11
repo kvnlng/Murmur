@@ -100,6 +100,72 @@ struct MurSessionPackageTests {
         #expect(merged.scanScopeWholeRecording == true)
     }
 
+    /// X96 (#146): the overlay list round-trips through a package in saved
+    /// order, and the dual-field schema resolves the way the restore site
+    /// relies on — plural preferred, singular the legacy fallback, neither
+    /// restoring nothing.
+    @Test("Overlay lead names round-trip in order; restore resolution prefers the plural")
+    func overlayLeadNamesRoundTripAndResolve() throws {
+        let (dir, recording, _) = try makeBundle()
+        let state = MurSessionState(
+            focusedChannelName: "V1",
+            focusedChannelNames: ["V1", "I", "MLII"]
+        )
+        let pkg = try tempDir("pkg-overlay").appendingPathComponent("Overlay.mur")
+        _ = try MurSessionPackage.write(
+            recording: recording, recordingDirectory: dir,
+            sessionJSON: try JSONEncoder().encode(state), to: pkg
+        )
+        let opened = try MurSessionPackage.read(packageURL: pkg, into: try tempDir("open-overlay"))
+        let decoded = try JSONDecoder().decode(
+            MurSessionState.self, from: try #require(opened.records[0].sessionJSON))
+        // Order is load-bearing: X64-C assigns trace inks by selection rank.
+        #expect(decoded.focusedChannelNames == ["V1", "I", "MLII"])
+        #expect(decoded.restoredLeadNames == ["V1", "I", "MLII"])
+    }
+
+    @Test("Restore resolution: plural wins, singular is the legacy fallback, neither is empty")
+    func restoredLeadNamesResolution() {
+        #expect(MurSessionState(
+            focusedChannelName: "II",
+            focusedChannelNames: ["V1", "I"]).restoredLeadNames == ["V1", "I"])
+        #expect(MurSessionState(focusedChannelName: "II").restoredLeadNames == ["II"])
+        // An empty plural list is treated as absent, not as "no leads" —
+        // the singular still speaks for the package.
+        #expect(MurSessionState(
+            focusedChannelName: "II",
+            focusedChannelNames: []).restoredLeadNames == ["II"])
+        #expect(MurSessionState().restoredLeadNames.isEmpty)
+    }
+
+    /// A pre-X96 package — session JSON with only the singular field —
+    /// decodes with the plural absent and restores single-lead exactly as
+    /// it always did.
+    @Test("Legacy session JSON (singular only) decodes with the plural absent")
+    func legacySessionJSONDecodes() throws {
+        let legacy = Data(#"{"focusedChannelName":"MLII"}"#.utf8)
+        let decoded = try JSONDecoder().decode(MurSessionState.self, from: legacy)
+        #expect(decoded.focusedChannelName == "MLII")
+        #expect(decoded.focusedChannelNames == nil)
+        #expect(decoded.restoredLeadNames == ["MLII"])
+    }
+
+    /// The X11 wipe guard, extended: the bedside view republishes on every
+    /// viewport change, and the overlay list is view-owned — a merge that
+    /// dropped it would silently unstage the analyst's leads on first pan.
+    @Test("Republishing view state carries the overlay list")
+    func viewRepublishCarriesOverlayList() {
+        let live = MurSessionState(focusedChannelNames: ["I", "V1"], tau: 0.42)
+        let fromView = MurSessionState(focusedChannelNames: ["V1", "I", "MLII"])
+        let merged = live.replacingViewState(with: fromView)
+        #expect(merged.focusedChannelNames == ["V1", "I", "MLII"])
+        #expect(merged.tau == 0.42)
+        // And a view republish with the overlay dissolved clears it — nil
+        // must overwrite, not "keep the old list".
+        let dissolved = live.replacingViewState(with: MurSessionState(focusedChannelName: "I"))
+        #expect(dissolved.focusedChannelNames == nil)
+    }
+
     /// X50(b): the saved paper round-trips, and — the part that matters — a
     /// session saved WITHOUT a resolved gain reads back nil, so the open falls
     /// back to Standard View exactly as a raw import does (X50(a) preserved).

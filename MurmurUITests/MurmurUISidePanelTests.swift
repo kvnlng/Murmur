@@ -19,6 +19,28 @@ final class MurmurUISidePanelTests: XCTestCase {
         continueAfterFailure = false
     }
 
+    /// Click a toolbar item that may be clipped into the toolbar's
+    /// overflow ("more toolbar items") popup at narrow widths.
+    @MainActor
+    private func clickPossiblyClippedToolbarItem(
+        identifier: String, menuLabel: String, in app: XCUIApplication
+    ) {
+        let direct = app.descendants(matching: .any)
+            .matching(identifier: identifier).firstMatch
+        if direct.waitForExistence(timeout: 2), direct.isHittable {
+            direct.click()
+            return
+        }
+        let overflow = app.popUpButtons["more toolbar items"]
+        XCTAssertTrue(overflow.waitForExistence(timeout: 5),
+                      "Neither \(identifier) nor the toolbar overflow is on screen")
+        overflow.click()
+        let item = app.menuItems[menuLabel]
+        XCTAssertTrue(item.waitForExistence(timeout: 3),
+                      "The overflow menu should carry \(menuLabel)")
+        item.click()
+    }
+
     /// Whole-or-nothing at a width that cannot hold both panels.
     @MainActor
     func testNarrowWindowShowsOneWholePanelAtATime() throws {
@@ -55,11 +77,13 @@ final class MurmurUISidePanelTests: XCTestCase {
         XCTAssertTrue(window.frame.contains(search.frame),
                       "The navigator must render whole (window \(window.frame), search \(search.frame))")
 
-        // Request the queue back: the win moves again.
-        let queueToggle = app.descendants(matching: .any)
-            .matching(identifier: "findings-toggle").firstMatch
-        XCTAssertTrue(queueToggle.waitForExistence(timeout: 5))
-        queueToggle.click()
+        // Request the queue back: the win moves again. With the navigator
+        // open at 1100 pt the full toolbar clips its trailing items into
+        // the overflow popup — standard AppKit behaviour once the fresh
+        // `.mur` open publishes the recording context (X96), so the
+        // Review-queue toggle is followed to wherever AppKit put it.
+        clickPossiblyClippedToolbarItem(identifier: "findings-toggle",
+                                        menuLabel: "Review queue", in: app)
         XCTAssertTrue(findings.waitForExistence(timeout: 5))
         XCTAssertTrue(MurmurUITests.waitForElementToDisappear(search, timeout: 5),
                       "The navigator yields when the queue takes the win back")

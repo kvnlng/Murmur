@@ -385,11 +385,19 @@ public struct ContentView: View {
             }
             setAppState(.browsing(source: .session(url), records: plan.records.map(\.entry)))
 
-            // Land on the record the analyst had open when they saved. Setting
-            // `selection` drives `handleSelectionChanged`, which publishes the
-            // recording and stages that record's own saved paper — one path,
-            // whether the analyst arrives here or clicks a row later.
+            // Land on the record the analyst had open when they saved.
             selection = plan.activeID
+            // X96: publish + stage EXPLICITLY. The comment that used to sit
+            // here claimed setting `selection` drives `handleSelectionChanged`
+            // — it does not on THIS path: the browsing view mounts with the
+            // selection already set, so its `.onChange(of: selection)` sees
+            // no change and never fires for the record the package opens on.
+            // Every restore of the active record's saved state (viewport,
+            // paper, lead, notes) silently depended on that never-firing
+            // handler; clicking any other row and coming back was the only
+            // thing that made it work. Found while giving the lead overlay a
+            // round-trip test — the first end-to-end coverage this seam had.
+            handleSelectionChanged(plan.activeID, source: .session(url))
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -1019,13 +1027,29 @@ public struct ContentView: View {
     }
 
     private func openUITestSessionIfRequested() {
-        guard ProcessInfo.processInfo.arguments.contains("--ui-test-open-sample-session") else { return }
+        // Bare flag: a package with no session state, as always. X96:
+        // `--ui-test-open-sample-session=overlay` writes one whose session
+        // state stages V1 (primary) + I overlaid — the NSSavePanel side is
+        // XCUI-hostile, so the restore half is what the UI test drives.
+        let overlayVariant = UITestSupport.value(forFlag: "ui-test-open-sample-session") == "overlay"
+        guard overlayVariant
+            || ProcessInfo.processInfo.arguments.contains("--ui-test-open-sample-session") else { return }
         do {
             let fixtureDir = try SyntheticRecording.makeFixture()
             let recording = try RecordingStore.shared.loadManifest(at: fixtureDir)
             let packageURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("ui-test-\(UUID().uuidString).mur")
-            try MurSessionPackage.write(recording: recording, recordingDirectory: fixtureDir, to: packageURL)
+            var sessionJSON: Data?
+            if overlayVariant {
+                sessionJSON = try JSONEncoder().encode(MurSessionState(
+                    focusedChannelName: "V1",
+                    focusedChannelNames: ["V1", "I"]
+                ))
+            }
+            try MurSessionPackage.write(
+                recording: recording, recordingDirectory: fixtureDir,
+                sessionJSON: sessionJSON, to: packageURL
+            )
             openMurPackage(packageURL)
         } catch {
             errorMessage = error.localizedDescription

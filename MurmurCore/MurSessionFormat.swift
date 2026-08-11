@@ -194,6 +194,18 @@ public struct MurSessionState: Codable, Equatable, Sendable {
     public var viewportStartSample: Int64?
     public var viewportEndSample: Int64?
     public var focusedChannelName: String?
+    /// X96 (#146) — the full lead overlay, in selection order, first name
+    /// primary. `focusedChannelName` is singular, so a save used to drop
+    /// every overlaid lead on the floor. Dual-field by design:
+    ///   - SAVE writes this only when the selection is multi-lead (a
+    ///     single-lead package stays byte-identical to pre-X96), and always
+    ///     writes the singular alongside it, so an older app version
+    ///     restores the primary exactly as before.
+    ///   - RESTORE prefers this list when present (`restoredLeadNames`);
+    ///     the singular is the legacy fallback.
+    /// Order is load-bearing: X64-C assigns trace inks by selection rank,
+    /// so a reordered restore would silently recolor traces.
+    public var focusedChannelNames: [String]?
     public var windowLockedTo10s: Bool?
     public var selectedTrendMetric: String?
     public var selectedBinPreset: String?
@@ -217,6 +229,7 @@ public struct MurSessionState: Codable, Equatable, Sendable {
         viewportStartSample: Int64? = nil,
         viewportEndSample: Int64? = nil,
         focusedChannelName: String? = nil,
+        focusedChannelNames: [String]? = nil,
         windowLockedTo10s: Bool? = nil,
         selectedTrendMetric: String? = nil,
         selectedBinPreset: String? = nil,
@@ -230,6 +243,7 @@ public struct MurSessionState: Codable, Equatable, Sendable {
         self.viewportStartSample = viewportStartSample
         self.viewportEndSample = viewportEndSample
         self.focusedChannelName = focusedChannelName
+        self.focusedChannelNames = focusedChannelNames
         self.windowLockedTo10s = windowLockedTo10s
         self.selectedTrendMetric = selectedTrendMetric
         self.selectedBinPreset = selectedBinPreset
@@ -239,6 +253,18 @@ public struct MurSessionState: Codable, Equatable, Sendable {
         self.mergeGapSeconds = mergeGapSeconds
         self.scanScopeWholeRecording = scanScopeWholeRecording
         self.anchoredNotes = anchoredNotes
+    }
+
+    /// X96 — the ordered lead names a restore should stage, resolving the
+    /// dual-field schema: the plural list wins when present and non-empty
+    /// (first name primary); the legacy singular is the fallback; a package
+    /// carrying neither restores no lead state at all. Pure, so the
+    /// preference order is pinned by unit tests rather than re-derived at
+    /// the restore site.
+    public var restoredLeadNames: [String] {
+        if let names = focusedChannelNames, !names.isEmpty { return names }
+        if let single = focusedChannelName { return [single] }
+        return []
     }
 
     /// X59/X11 — replace only the fields the bedside view owns, preserving the
@@ -253,6 +279,10 @@ public struct MurSessionState: Codable, Equatable, Sendable {
         copy.viewportStartSample = other.viewportStartSample
         copy.viewportEndSample = other.viewportEndSample
         copy.focusedChannelName = other.focusedChannelName
+        // X96: the overlay list is view-owned exactly like the singular —
+        // dropping it here would wipe the staged leads on the first pan
+        // (the X11 failure mode, again).
+        copy.focusedChannelNames = other.focusedChannelNames
         copy.windowLockedTo10s = other.windowLockedTo10s
         copy.gainMillimetersPerMillivolt = other.gainMillimetersPerMillivolt
         // X72: anchored notes are drawn and edited in the bedside view, so
