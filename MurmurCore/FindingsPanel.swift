@@ -396,19 +396,12 @@ struct FindingsPanel: View {
         // X56 §4: name the population — a denominator without one can't be
         // reconciled against the other beat counts on screen (annotations,
         // template, QT-excluded), which are genuinely different populations.
+        // X110 (§1.5): every run clause carries its rate — the count alone
+        // can't separate NSVT-range from AIVR-range, and the analyst should
+        // never have to compute what the intervals already say.
         var parts = [String(format: "Ventricular ectopy: %.1f%% of %d annotated beats",
                             summary.burdenPercent, summary.totalBeatCount)]
-        var runs: [String] = []
-        if summary.coupletCount > 0 {
-            runs.append("\(summary.coupletCount) couplet\(summary.coupletCount == 1 ? "" : "s")")
-        }
-        if summary.tripletCount > 0 {
-            runs.append("\(summary.tripletCount) triplet\(summary.tripletCount == 1 ? "" : "s")")
-        }
-        if summary.longRunCount > 0 {
-            runs.append("\(summary.longRunCount) run\(summary.longRunCount == 1 ? "" : "s") of ≥4")
-        }
-        if !runs.isEmpty { parts.append(runs.joined(separator: " · ")) }
+        parts.append(contentsOf: summary.runClauses(sampleRate: sampleRate))
         return parts.joined(separator: " · ")
     }
 

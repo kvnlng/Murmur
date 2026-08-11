@@ -39,6 +39,12 @@ struct EctopyRunSummary: Equatable {
         var id: Int64 { startSampleIndex }
         let startSampleIndex: Int64
         let length: Int
+        /// Median R–R interval WITHIN the run, in samples (a run of N beats
+        /// bounds N−1 intervals). X110 (§1.5): a "run of 4" could be
+        /// NSVT-range or AIVR-range — the count alone doesn't say, so the
+        /// run's own rate travels with it. Median, not mean: robust to one
+        /// aberrant interval, same policy as every other rate on screen.
+        let medianRRSamples: Int64
 
         /// Factual, non-verdict descriptor. Never "NSVT" / "salvo".
         var kindLabel: String {
@@ -47,6 +53,13 @@ struct EctopyRunSummary: Equatable {
             case 3:  return "triplet"
             default: return "run of \(length)"
             }
+        }
+
+        /// The run's own rate (bpm) from its median internal R–R. Nil when
+        /// the sample rate is unknown — no rate is better than a wrong one.
+        func rateBpm(sampleRate: Double) -> Double? {
+            guard sampleRate > 0, medianRRSamples > 0 else { return nil }
+            return 60.0 * sampleRate / Double(medianRRSamples)
         }
     }
 
@@ -60,6 +73,57 @@ struct EctopyRunSummary: Equatable {
         ectopicBeatCount: 0, totalBeatCount: 0, burdenFraction: 0,
         isolatedCount: 0, runs: []
     )
+}
+
+extension EctopyRunSummary {
+    /// X110 (§1.5): the run clauses for the burden line, each carrying its
+    /// class's rate — "1 couplet · 150 bpm", "3 triplets · 132–161 bpm" —
+    /// and runs of ≥ 4 (the NSVT-vs-AIVR ambiguity the review names) listed
+    /// INDIVIDUALLY with their own rates while few, collapsing to a
+    /// count + range only past four. Facts beside counts, never a verdict.
+    func runClauses(sampleRate: Double) -> [String] {
+        var clauses: [String] = []
+        if let clause = Self.classClause(
+            runs.filter { $0.length == 2 }, singular: "couplet",
+            plural: "couplets", sampleRate: sampleRate) {
+            clauses.append(clause)
+        }
+        if let clause = Self.classClause(
+            runs.filter { $0.length == 3 }, singular: "triplet",
+            plural: "triplets", sampleRate: sampleRate) {
+            clauses.append(clause)
+        }
+        let long = runs.filter { $0.length >= 4 }
+        if long.count > 4 {
+            if let clause = Self.classClause(
+                long, singular: "run of ≥4", plural: "runs of ≥4",
+                sampleRate: sampleRate) {
+                clauses.append(clause)
+            }
+        } else {
+            for run in long {
+                clauses.append(run.rateBpm(sampleRate: sampleRate)
+                    .map { String(format: "%@ · %.0f bpm", run.kindLabel, $0) }
+                    ?? run.kindLabel)
+            }
+        }
+        return clauses
+    }
+
+    private static func classClause(
+        _ classRuns: [Run], singular: String, plural: String, sampleRate: Double
+    ) -> String? {
+        guard !classRuns.isEmpty else { return nil }
+        let count = classRuns.count
+        var clause = count == 1 ? "1 \(singular)" : "\(count) \(plural)"
+        let rates = classRuns.compactMap { $0.rateBpm(sampleRate: sampleRate) }
+        if let lo = rates.min(), let hi = rates.max() {
+            clause += lo.rounded() == hi.rounded()
+                ? String(format: " · %.0f bpm", lo)
+                : String(format: " · %.0f–%.0f bpm", lo, hi)
+        }
+        return clause
+    }
 }
 
 enum EctopyAnalyzer {
@@ -105,7 +169,16 @@ enum EctopyAnalyzer {
             if length == 1 {
                 isolated += 1
             } else {
-                runs.append(.init(startSampleIndex: beats[i].sampleIndex, length: length))
+                let intervals = (i + 1..<j)
+                    .map { beats[$0].sampleIndex - beats[$0 - 1].sampleIndex }
+                    .sorted()
+                let mid = intervals.count / 2
+                let median = intervals.count % 2 == 1
+                    ? intervals[mid]
+                    : (intervals[mid - 1] + intervals[mid]) / 2
+                runs.append(.init(startSampleIndex: beats[i].sampleIndex,
+                                  length: length,
+                                  medianRRSamples: median))
             }
             i = j
         }
