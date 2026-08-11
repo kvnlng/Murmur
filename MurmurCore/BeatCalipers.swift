@@ -57,6 +57,17 @@ struct BeatCalipers: View {
     /// nil, deltas are suppressed.
     let template: MarkingsTemplate?
 
+    /// X112c — the endorsed morphology modes (empty unless the analyst
+    /// endorsed ≥ 2). Deltas then run against the beat's OWN mode's
+    /// template, and the comparison is named ("vs mode B") so a number is
+    /// never silently measured against the wrong conduction's baseline.
+    var modes: [MarkingsMode] = []
+
+    /// The baseline this beat's deltas actually compare against.
+    private var deltaTemplate: MarkingsTemplate? {
+        IntervalMarkingsContext.deltaTemplate(for: beat, modes: modes, fallback: template)
+    }
+
     /// QTc formula in use — echoed into the QTc row's label.
     let qtcFormula: MarkingsQTcFormula
 
@@ -88,7 +99,7 @@ struct BeatCalipers: View {
             row("PR",  value: prValueForRendering, delta: prDeltaForRendering,
                 undefined: suppressRepolarisationIntervals)
             row("QRS", value: beat.isImplausible ? nil : beat.qrsMs,
-                delta: beat.isImplausible ? nil : delta(beat.qrsMs, vs: template?.medianQRSMs),
+                delta: beat.isImplausible ? nil : delta(beat.qrsMs, vs: deltaTemplate?.medianQRSMs),
                 undefined: beat.isImplausible)
             row("QT",  value: qtValueForRendering, delta: qtDeltaForRendering,
                 undefined: suppressRepolarisationIntervals,
@@ -105,6 +116,14 @@ struct BeatCalipers: View {
             if showsJT {
                 row("JT",  value: beat.jtMs,  delta: nil)
                 row("JTc", value: beat.jtcMs, delta: nil)
+            }
+            // X112c §6: with ≥ 2 endorsed modes, name the baseline these
+            // deltas compare against — the beat's own conduction mode.
+            if modes.count > 1, let modeName = beat.nearestModeName {
+                Text("Δ vs mode \(modeName)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("beat-calipers-mode-basis")
             }
             // X109 (§2.4): the QT/QTc dashes above are a deliberate
             // withholding, not a delineation failure — say so, plainly.
@@ -152,11 +171,11 @@ struct BeatCalipers: View {
     /// Internal (not private) so the wording — methods provenance the
     /// analyst reads against the template — is pinned by unit tests.
     static func templateProvenanceText(_ t: MarkingsTemplate, sampleRate: Double) -> String {
-        // X112 §2: the baseline rests on the ANNOTATOR's classification until
-        // an analyst adjudicates it — say so, rather than presenting the
-        // default as an endorsed judgement. (Endorsed rebuilds switch this to
-        // analyst-endorsed provenance in X112c.)
-        var text = "Patient normal (unadjudicated — annotator-coded): \(t.sampleCount) beats"
+        // X112 §2: the baseline names its adjudication state — the
+        // annotator-coded default until an analyst endorses (X112b), the
+        // endorsement provenance once one has (X112c).
+        let basis = t.adjudicationBasis ?? "unadjudicated — annotator-coded"
+        var text = "Patient normal (\(basis)): \(t.sampleCount) beats"
         // X25: disclose the lead the intervals were measured in. Convention is
         // to measure where the T offset is clearest (II / V5 commonly), so
         // which lead was used is reproducibility-relevant.
@@ -251,9 +270,9 @@ struct BeatCalipers: View {
     private var prValueForRendering: Double?  { suppressRepolarisationIntervals ? nil : beat.prMs }
     private var qtValueForRendering: Double?  { suppressRepolarisationIntervals ? nil : beat.qtMs }
     private var qtcValueForRendering: Double? { suppressRepolarisationIntervals ? nil : beat.qtcMs }
-    private var prDeltaForRendering: Double?  { suppressRepolarisationIntervals ? nil : delta(beat.prMs, vs: template?.medianPRMs) }
-    private var qtDeltaForRendering: Double?  { suppressRepolarisationIntervals ? nil : delta(beat.qtMs, vs: template?.medianQTMs) }
-    private var qtcDeltaForRendering: Double? { suppressRepolarisationIntervals ? nil : delta(beat.qtcMs, vs: template?.medianQTcMs) }
+    private var prDeltaForRendering: Double?  { suppressRepolarisationIntervals ? nil : delta(beat.prMs, vs: deltaTemplate?.medianPRMs) }
+    private var qtDeltaForRendering: Double?  { suppressRepolarisationIntervals ? nil : delta(beat.qtMs, vs: deltaTemplate?.medianQTMs) }
+    private var qtcDeltaForRendering: Double? { suppressRepolarisationIntervals ? nil : delta(beat.qtcMs, vs: deltaTemplate?.medianQTcMs) }
 
     // MARK: - Header
 

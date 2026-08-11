@@ -160,6 +160,13 @@ public struct MarkingsBeat: Sendable, Equatable, Codable, Identifiable {
     /// consumers cannot drift. Default false (free viewer: no delineation).
     public let isUnreliable: Bool
 
+    /// X112c — the endorsed morphology mode this beat belongs to ("A", "B"),
+    /// per the drawer's cluster letters. Set ONLY when the analyst has
+    /// endorsed ≥ 2 modes: the inspector then names the comparison baseline
+    /// ("vs mode B") and deltas run against THAT mode's template. nil in the
+    /// unendorsed / single-mode states, where naming a mode is noise.
+    public let nearestModeName: String?
+
     public init(
         rPeakSampleIndex: Int64,
         rPeakConfidence: Double = 1.0,
@@ -180,7 +187,8 @@ public struct MarkingsBeat: Sendable, Equatable, Codable, Identifiable {
         qtCalibratedHalfWidthMs: Double? = nil,
         tOffsetIsoelectricSampleIndex: Int64? = nil,
         isImplausible: Bool = false,
-        isUnreliable: Bool = false
+        isUnreliable: Bool = false,
+        nearestModeName: String? = nil
     ) {
         self.rPeakSampleIndex = rPeakSampleIndex
         self.rPeakConfidence = min(1.0, max(0.0, rPeakConfidence))
@@ -202,9 +210,31 @@ public struct MarkingsBeat: Sendable, Equatable, Codable, Identifiable {
         self.tOffsetIsoelectricSampleIndex = tOffsetIsoelectricSampleIndex
         self.isImplausible = isImplausible
         self.isUnreliable = isUnreliable
+        self.nearestModeName = nearestModeName
     }
 
     public var id: Int64 { rPeakSampleIndex }
+
+    /// X112c — the same beat, tagged with its endorsed mode. One place
+    /// rebuilds the field list so the orchestrator doesn't restate twenty
+    /// fields at the call site.
+    public func named(mode: String?) -> MarkingsBeat {
+        MarkingsBeat(
+            rPeakSampleIndex: rPeakSampleIndex,
+            rPeakConfidence: rPeakConfidence,
+            pOnset: pOnset, pOffset: pOffset,
+            qrsOnset: qrsOnset, qrsOffset: qrsOffset,
+            tOnset: tOnset, tOffset: tOffset,
+            prMs: prMs, qrsMs: qrsMs, qtMs: qtMs, qtcMs: qtcMs,
+            precedingRRMs: precedingRRMs,
+            jtMs: jtMs, jtcMs: jtcMs,
+            tOffsetCensored: tOffsetCensored,
+            qtCalibratedHalfWidthMs: qtCalibratedHalfWidthMs,
+            tOffsetIsoelectricSampleIndex: tOffsetIsoelectricSampleIndex,
+            isImplausible: isImplausible,
+            isUnreliable: isUnreliable,
+            nearestModeName: mode)
+    }
 
     /// Fetch a specific fiducial by kind, returning a synthesized
     /// R-peak fiducial for `.rPeak`.
@@ -272,6 +302,12 @@ public struct MarkingsTemplate: Sendable, Equatable, Codable {
     /// reconciles against the total (the X48 arithmetic-closes discipline).
     public let excludedUnreliableCount: Int
 
+    /// X112c — the template's adjudication provenance, when an analyst has
+    /// endorsed the baseline ("analyst-endorsed · 2 modes · 2026-08-11").
+    /// nil = the unadjudicated annotator-normal default; surfaces render
+    /// the X112b "unadjudicated — annotator-coded" wording for it.
+    public let adjudicationBasis: String?
+
     public init(
         sampleCount: Int,
         medianPRMs: Double?,
@@ -288,7 +324,8 @@ public struct MarkingsTemplate: Sendable, Equatable, Codable {
         spanEndSample: Int64? = nil,
         excludedBeatCount: Int = 0,
         excludedImplausibleCount: Int = 0,
-        excludedUnreliableCount: Int = 0
+        excludedUnreliableCount: Int = 0,
+        adjudicationBasis: String? = nil
     ) {
         self.sampleCount = sampleCount
         self.medianPRMs = medianPRMs
@@ -306,6 +343,24 @@ public struct MarkingsTemplate: Sendable, Equatable, Codable {
         self.excludedBeatCount = excludedBeatCount
         self.excludedImplausibleCount = excludedImplausibleCount
         self.excludedUnreliableCount = excludedUnreliableCount
+        self.adjudicationBasis = adjudicationBasis
+    }
+}
+
+/// X112c — one analyst-endorsed morphology mode's interval baselines. The
+/// mode letter is the drawer's cluster letter (the analyst's vocabulary);
+/// the template is built from THAT mode's beats through the same X53/X58
+/// gated pipeline as the single-template case — exclude-and-count applies
+/// per mode.
+public struct MarkingsMode: Sendable, Equatable {
+    public let name: String
+    public let beatCount: Int
+    public let template: MarkingsTemplate
+
+    public init(name: String, beatCount: Int, template: MarkingsTemplate) {
+        self.name = name
+        self.beatCount = beatCount
+        self.template = template
     }
 }
 
@@ -496,19 +551,67 @@ public final class IntervalMarkingsContext {
     /// the sanctioned override.
     public private(set) var qtWithheldReason: String?
 
+    /// X112c — the analyst-endorsed morphology modes, majority first. Empty
+    /// in the unendorsed state (the single annotator-normal template). When
+    /// ≥ 2 modes exist, `template` is the MAJORITY mode's baseline (the
+    /// trend band renders one band, per the settled §8.2 decision) and
+    /// per-beat deltas run against each beat's own mode.
+    public private(set) var modes: [MarkingsMode] = []
+
+    /// X112c §5 — the adjudication basis for an endorsed baseline, stated
+    /// everywhere the unadjudicated qualifier used to sit. Pure so the
+    /// wording is pinned by unit tests.
+    ///
+    ///   1 mode:  "analyst-endorsed · 2026-08-11"
+    ///   2 modes: "analyst-endorsed · 2 modes · 2026-08-11 · band: mode A ·
+    ///             off-band: mode B 312 beats"
+    ///
+    /// The off-band clause is §6's honesty requirement: one band renders,
+    /// so the caption counts the beats it does NOT cover.
+    public nonisolated static func endorsedBasis(
+        modes: [(name: String, beatCount: Int)],
+        endorsedAt: Date
+    ) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate]
+        let date = formatter.string(from: endorsedAt)
+        guard modes.count > 1 else { return "analyst-endorsed · \(date)" }
+        let offBand = modes.dropFirst()
+            .map { "mode \($0.name) \($0.beatCount) beats" }
+            .joined(separator: " · ")
+        return "analyst-endorsed · \(modes.count) modes · \(date)"
+            + " · band: mode \(modes[0].name) · off-band: \(offBand)"
+    }
+
+    /// The mode template a beat's deltas compare against: its own endorsed
+    /// mode when one is named, the published (majority) template otherwise.
+    /// Pure lookup, pinned by tests so the inspector and the lane cannot
+    /// disagree about which baseline a number is "vs".
+    public nonisolated static func deltaTemplate(
+        for beat: MarkingsBeat,
+        modes: [MarkingsMode],
+        fallback: MarkingsTemplate?
+    ) -> MarkingsTemplate? {
+        guard let name = beat.nearestModeName,
+              let mode = modes.first(where: { $0.name == name }) else { return fallback }
+        return mode.template
+    }
+
     // MARK: - Writes (orchestrator)
 
     public func set(
         beats: [MarkingsBeat],
         sampleRate: Double,
         template: MarkingsTemplate?,
-        qtWithheldReason: String? = nil
+        qtWithheldReason: String? = nil,
+        modes: [MarkingsMode] = []
     ) {
         // Defensive sort — reader relies on ascending R-peak order.
         self.beats = beats.sorted { $0.rPeakSampleIndex < $1.rPeakSampleIndex }
         self.sampleRate = sampleRate
         self.template = template
         self.qtWithheldReason = qtWithheldReason
+        self.modes = modes
     }
 
     public func clear() {
@@ -517,6 +620,7 @@ public final class IntervalMarkingsContext {
         template = nil
         focusedBeatSampleIndex = nil
         qtWithheldReason = nil
+        modes = []
     }
 
     /// Publish what the overlay is drawing for the current viewport. Written

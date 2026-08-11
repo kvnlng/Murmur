@@ -88,7 +88,7 @@ public struct MorphologySummary: Sendable, Equatable {
 
 /// An analyst's endorsement of one morphology cluster as a patient
 /// baseline. Session work product — persisted in `MurSessionState`.
-public struct MorphologyEndorsement: Codable, Equatable, Sendable {
+public struct MorphologyEndorsement: Codable, Equatable, Hashable, Sendable {
     /// The endorsed cluster's representative at endorsement time.
     public var representative: [Float]
     /// When the analyst endorsed it — provenance for the caption
@@ -113,14 +113,27 @@ public final class MorphologyContext {
     /// no entitlement, no recording, or no annotated beats.
     public private(set) var summary: MorphologySummary?
 
+    /// X112c — mirror of the bedside view's endorsements, republished here
+    /// so the App target's markings orchestrator (which cannot reach view
+    /// `@State`) can rebuild the baseline from the endorsed clusters. The
+    /// view remains the owner (session save/restore); this is transport,
+    /// same as `CurrentRecordingContext.liveSessionState`.
+    public private(set) var endorsements: [MorphologyEndorsement] = []
+
     public init() {}
 
     public func set(summary: MorphologySummary?) {
         self.summary = summary
     }
 
+    public func setEndorsements(_ endorsements: [MorphologyEndorsement]) {
+        guard endorsements != self.endorsements else { return }
+        self.endorsements = endorsements
+    }
+
     public func clear() {
         self.summary = nil
+        self.endorsements = []
     }
 
     // MARK: - Endorsement re-attachment

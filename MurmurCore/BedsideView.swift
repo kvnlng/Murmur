@@ -765,6 +765,13 @@ struct BedsideView: View {
             context.liveSessionState = context.liveSessionState
                 .replacingViewState(with: snapshot)
         }
+        // X112c: mirror the endorsements to the shared context so the
+        // markings orchestrator (App target — can't reach this @State) can
+        // rebuild the baseline from the endorsed clusters. The view stays
+        // the owner; this is transport, like the live snapshot above.
+        .onChange(of: morphologyEndorsements, initial: true) { _, endorsements in
+            MorphologyContext.shared.setEndorsements(endorsements)
+        }
         #if DEBUG
         .task { applyUITestHooks() }
         #endif
@@ -2107,6 +2114,7 @@ struct BedsideView: View {
                 beat: beat,
                 sampleRate: markingsContext.sampleRate,
                 template: markingsContext.template,
+                modes: markingsContext.modes,
                 qtcFormula: markingsContext.qtcFormula,
                 kind: caliperKind(for: beat),
                 qtWithheldReason: markingsContext.qtWithheldReason

@@ -174,10 +174,12 @@ struct IntervalTrendLaneMemoizedStrip: View, Equatable {
                 // code (Recording.normalBeatSampleIndices), NOT an app-computed
                 // morphology cluster — state that selection basis in the caption.
                 // X112 §2 adds the adjudication state: the annotator-normal
-                // default is TODAY'S behaviour, named — no analyst has
-                // endorsed it.
-                templateSelectionBasis: template != nil
-                    ? "unadjudicated — annotator-coded normal (N)" : nil,
+                // default is TODAY'S behaviour, named (X112b) — and an
+                // endorsed baseline states its analyst provenance instead,
+                // including the §6 off-band count for a second mode (X112c).
+                templateSelectionBasis: template.map {
+                    $0.adjudicationBasis ?? "unadjudicated — annotator-coded normal (N)"
+                },
                 qualifiers: qualifiers,
                 tOffsetGateCaption: gateCaption
             )

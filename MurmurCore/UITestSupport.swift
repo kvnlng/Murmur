@@ -307,6 +307,11 @@ enum UITestSupport {
         /// X109: lead II written as telemetry-style MCL1 — no conventional
         /// QT lead, so §2.4 abstention + the manual-caliper override run.
         case noConventional = "no-qt-leads"
+        /// X112c: a record with a genuine second conduction — enough
+        /// wide-complex beats (X104 machinery, coded "V") to form a second
+        /// MAJOR morphology cluster, so the dual-mode endorsement flow has
+        /// real ground truth to run against.
+        case twoMorphology = "two-morphology"
     }
 
     static var richSampleVariant: RichSampleVariant? {
