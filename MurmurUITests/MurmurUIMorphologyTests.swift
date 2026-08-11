@@ -42,7 +42,7 @@ final class MurmurUIMorphologyTests: XCTestCase {
         // and the context bar must stay on-screen rather than past a fold
         // that keeps moving while async lanes arrive.
         app.launchArguments += ["--ui-test-sample-rich", "--ui-test-grant-studio",
-                                "--ui-test-window=1600x1100"]
+                                "--ui-test-window=max"]
         app.launch()
 
         // Wait for the collapsed bar to ANNOUNCE the clusters before touching
@@ -115,7 +115,7 @@ final class MurmurUIMorphologyTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments += ["--ui-test-sample-rich=two-morphology",
                                 "--ui-test-grant-studio",
-                                "--ui-test-window=1600x1100"]
+                                "--ui-test-window=max"]
         app.launch()
 
         let contextBar = app.descendants(matching: .any)

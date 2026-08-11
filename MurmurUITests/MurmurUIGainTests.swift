@@ -19,8 +19,11 @@ final class MurmurUIGainTests: XCTestCase {
     @MainActor
     func testInterpretGainFlow() throws {
         let app = XCUIApplication()
+        // `max`, not a pinned size: a pin larger than the runner's screen
+        // (Cloud VMs are 1024×768) is clamped anyway, and `max` is the
+        // sanctioned biggest-window-this-runner-can-give.
         app.launchArguments += ["--ui-test-sample", "--ui-test-grant-studio",
-                                "--ui-test-window=1600x1100"]
+                                "--ui-test-window=max"]
         app.launch()
 
         let panel = app.descendants(matching: .any)

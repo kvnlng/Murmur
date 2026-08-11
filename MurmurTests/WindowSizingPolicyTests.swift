@@ -17,15 +17,44 @@ struct WindowSizingPolicyTests {
     private let bigScreen = CGSize(width: 2560, height: 1415)
     private let cloudVM = CGSize(width: 1024, height: 743)  // 1024×768 minus menu bar
 
-    @Test("A pinned WxH wins verbatim — the short-display regime must reproduce exactly")
+    @Test("A pinned WxH that fits wins verbatim — the short-display regime must reproduce exactly")
     func pinnedWinsVerbatim() {
         let size = WindowSizing.testWindowContentSize(
             pinned: CGSize(width: 1000, height: 600), maximized: false, visible: bigScreen)
         #expect(size == CGSize(width: 1000, height: 600))
-        // Even against a tiny screen: pinning means the test author owns it.
+        // On the small screen too: a short-display pin fits by definition.
         let onSmall = WindowSizing.testWindowContentSize(
             pinned: CGSize(width: 1000, height: 600), maximized: true, visible: cloudVM)
         #expect(onSmall == CGSize(width: 1000, height: 600))
+    }
+
+    @Test("A pin larger than the screen clamps to the largest window that fits")
+    func oversizedPinClamps() {
+        // The 2026-08-11 Cloud failure: 1600×1100 pinned on the 1024×768 VM
+        // built an off-screen window whose persisted frame poisoned six
+        // later suites. A pin must never exceed the visible frame.
+        let size = WindowSizing.testWindowContentSize(
+            pinned: CGSize(width: 1600, height: 1100), maximized: false, visible: cloudVM)
+        // Width caps at the FULL visible width (chrome is vertical — the
+        // window is exactly as wide as its content); height leaves the
+        // chrome allowance for the title bar.
+        #expect(size.width == cloudVM.width)
+        #expect(size.height == cloudVM.height - WindowSizing.chromeAllowance)
+    }
+
+    @Test("The clamp is per-axis — a pin oversized in one dimension keeps the other verbatim")
+    func oversizedPinClampsPerAxis() {
+        let size = WindowSizing.testWindowContentSize(
+            pinned: CGSize(width: 900, height: 1100), maximized: false, visible: cloudVM)
+        #expect(size.width == 900)
+        #expect(size.height == cloudVM.height - WindowSizing.chromeAllowance)
+    }
+
+    @Test("No visible frame leaves a pin verbatim — nothing to clamp against")
+    func pinWithoutScreenStaysVerbatim() {
+        let size = WindowSizing.testWindowContentSize(
+            pinned: CGSize(width: 1600, height: 1100), maximized: false, visible: nil)
+        #expect(size == CGSize(width: 1600, height: 1100))
     }
 
     @Test("`max` fills the visible frame minus chrome allowance")
