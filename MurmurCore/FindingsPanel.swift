@@ -1877,14 +1877,23 @@ struct FindingsPanel: View {
                 identifier: "arrhythmia-dial-high"
             )
             arrhythmiaDialRow(
+                label: "Run of at least",
+                value: $settings.minRunBeats,
+                unit: "beats",
+                step: 1,
+                identifier: "arrhythmia-dial-beats"
+            )
+            arrhythmiaDialRow(
                 label: "Sustained at least",
                 value: $settings.minDurationSeconds,
                 unit: "s",
                 step: 5,
                 identifier: "arrhythmia-dial-window"
             )
-            Text("0 s = every in-band run. Thresholds define candidates, "
-                + "not diagnoses; changing them rescans the recording.")
+            Text("The beat minimum is time at the run's own rate — beats are "
+                + "never counted. 0 = no minimum. Thresholds define "
+                + "candidates, not diagnoses; changing them rescans the "
+                + "recording.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1905,7 +1914,7 @@ struct FindingsPanel: View {
             }
             HStack {
                 Spacer()
-                Button("Reset to 60–100 bpm, any duration") {
+                Button("Reset to 45–120 bpm, ≥ 5 beats") {
                     settings.resetToDefaults()
                 }
                 .disabled(settings.isDefault)
