@@ -141,7 +141,12 @@ enum WFDBImporter {
                 startTimeUnixMS: startMS,
                 sampleCount: sampleCount,
                 storageFileName: storageFileName,
-                pyramid: pyramid
+                pyramid: pyramid,
+                // X16: keep the header's claimed counts/mV — it was consumed
+                // by the sample conversion above and would otherwise be
+                // unrecoverable (the source .hea never enters the bundle).
+                // A gain reinterpretation cites it as provenance.
+                headerGainCountsPerUnit: signal.gain
             ))
 
             // Report progress as fraction of signals processed.

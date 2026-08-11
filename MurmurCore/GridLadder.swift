@@ -80,6 +80,29 @@ public struct GridLadder: Equatable, Sendable {
     /// draw over a neutral surface once time is no longer calibrated.
     public let redPresence: Double
 
+    /// X16 — the same ladder with amplitude-family spacings mapped into the
+    /// renderer's STORED-unit data space (spacing ÷ factor). The renderer
+    /// bakes red amplitude rules in the same coordinate space as its
+    /// yMin/yMax uniforms; with a gain reinterpretation those uniforms are
+    /// stored units while the ladder's tiers are TRUE millivolts, so the
+    /// rules must be converted at the same boundary or a "0.5 mV square"
+    /// would silently be 0.5 × factor mV tall. Alphas and on-screen spacings
+    /// are geometry facts and stay put; time families are untouched.
+    public func amplitudeSpacingScaled(dividedBy factor: Double) -> GridLadder {
+        guard factor.isFinite, factor > 0, factor != 1 else { return self }
+        return GridLadder(
+            tiers: tiers.map { tier in
+                guard tier.family == .redAmplitude else { return tier }
+                return Tier(family: tier.family,
+                            spacing: tier.spacing / factor,
+                            onScreenPoints: tier.onScreenPoints,
+                            alpha: tier.alpha,
+                            isMajor: tier.isMajor)
+            },
+            majorNeutralSeconds: majorNeutralSeconds,
+            redPresence: redPresence)
+    }
+
     // MARK: - Ladder definition
 
     /// A tier is culled below this on-screen spacing (points)…

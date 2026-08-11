@@ -107,8 +107,28 @@ final class RecordingStore {
             channels: recording.channels,
             annotations: sidecar,
             headerComments: recording.headerComments,
-            notesFileName: recording.notesFileName
+            notesFileName: recording.notesFileName,
+            // X16 incidental fix: this rebuild silently dropped the X32 flag,
+            // so a sidecar-carrying record lost its absolute time base on load.
+            hasAbsoluteStartTime: recording.hasAbsoluteStartTime
         )
+    }
+
+    /// X16 — persist a mutated manifest back to the bundle. Same encoder
+    /// settings as the importer's write, so a rewrite is diff-stable against
+    /// the original. The one sanctioned post-import manifest mutation is the
+    /// analyst's per-channel gain reinterpretation; annotations keep flowing
+    /// through their sidecar, never through this.
+    ///
+    /// NOTE: `loadManifest` overrides inline annotations with the sidecar
+    /// when one exists — encode the recording as loaded and the sidecar
+    /// simply wins again on the next load, so no annotation state is lost.
+    func writeManifest(_ recording: Recording, at directory: URL) throws {
+        let manifestURL = directory.appendingPathComponent("recording.json")
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(recording).write(to: manifestURL, options: .atomic)
     }
 
     /// Lists every recording directory currently in the store.

@@ -18,6 +18,11 @@ import UniformTypeIdentifiers
 struct BedsideView: View {
     let recording: Recording
     let recordingDirectory: URL
+    /// X16: called after a gain reinterpretation is persisted to the bundle
+    /// manifest, with the updated recording — the owner of the `recording`
+    /// value adopts it so every panel re-renders against the new factor.
+    /// nil (previews/tests) means mutations render only after a reload.
+    var onRecordingMutated: ((Recording) -> Void)?
 
     @State private var viewport: RecordingViewport
     /// Shared amplitude/timebase calibration (X40). Gain is shared across
@@ -161,9 +166,14 @@ struct BedsideView: View {
 
     static let initialDurationSeconds: Double = 10
 
-    init(recording: Recording, recordingDirectory: URL) {
+    init(
+        recording: Recording,
+        recordingDirectory: URL,
+        onRecordingMutated: ((Recording) -> Void)? = nil
+    ) {
         self.recording = recording
         self.recordingDirectory = recordingDirectory
+        self.onRecordingMutated = onRecordingMutated
         // Viewport + focus mode key off the first *ECG* channel — trend
         // channels (1/60 Hz vitals, GMM states) live in their own strip and
         // shouldn't drive viewport math.
@@ -733,6 +743,15 @@ struct BedsideView: View {
                 handleProducerOutput(findings)
             }
             .environment(\.activeRecording, recording)
+        }
+        // X16: the gain-reinterpretation sheet. `item:` so each channel's
+        // sheet opens pre-filled with THAT channel's standing factor.
+        .sheet(item: $gainSheetChannel) { channel in
+            GainInterpretationSheet(
+                channel: channel,
+                onApply: { factor in applyGainInterpretation(channel: channel, factor: factor) },
+                onCancel: { gainSheetChannel = nil }
+            )
         }
         .alert(
             "Couldn't attach findings",
@@ -2037,7 +2056,13 @@ struct BedsideView: View {
             canvasWidthPoints: calibration.canvasSize.width,
             canvasHeightPoints: calibration.canvasSize.height,
             visibleMillivoltSpan: calibration.visibleMillivoltSpan,
-            millimetersPerPoint: DisplayMetrics.millimetersPerPoint()
+            millimetersPerPoint: DisplayMetrics.millimetersPerPoint(),
+            // X16: the readout's mm/mV maps TRUE millivolts — when the
+            // focused lead is reinterpreted, the correction travels with
+            // the claim.
+            gainAnnotation: (focusedChannel?.appliedGainFactor).flatMap { factor in
+                factor == 1 ? nil : String(format: "gain ×%g — analyst", factor)
+            }
         )
     }
 
@@ -2569,6 +2594,26 @@ struct BedsideView: View {
     /// pending. Cleared on completion, cancellation, or recording swap.
     @State private var pendingQTCaliperStart: (sample: Int64, leadName: String?)?
 
+    // X16: the channel whose gain-reinterpretation sheet is open.
+    @State private var gainSheetChannel: Channel?
+
+    /// X16: persist the analyst's factor to the bundle manifest and hand the
+    /// updated recording to the owner. `nil` clears the correction. Failures
+    /// surface in the attach-error alert path — same class of bundle-write
+    /// failure, same disclosure.
+    private func applyGainInterpretation(channel: Channel, factor: Double?) {
+        gainSheetChannel = nil
+        var updated = channel
+        updated.analystGainFactor = factor
+        let mutated = recording.replacingChannel(updated)
+        do {
+            try RecordingStore.shared.writeManifest(mutated, at: recordingDirectory)
+            onRecordingMutated?(mutated)
+        } catch {
+            attachError = "The gain interpretation could not be saved to the bundle: \(error.localizedDescription)"
+        }
+    }
+
     private var noteAuthoringHooks: NoteAuthoringHooks {
         NoteAuthoringHooks(
             isEditing: isEditing,
@@ -2582,7 +2627,8 @@ struct BedsideView: View {
                 pendingQTCaliperStart = (sample, focusedChannel?.name)
             },
             completeQTCaliper: { sample in completeQTCalipers(atSample: sample) },
-            cancelQTCaliper: { pendingQTCaliperStart = nil }
+            cancelQTCaliper: { pendingQTCaliperStart = nil },
+            interpretGain: { channel in gainSheetChannel = channel }
         )
     }
 

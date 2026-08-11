@@ -120,7 +120,8 @@ struct CalibrationReading: Equatable {
         canvasWidthPoints: Double,
         canvasHeightPoints: Double,
         visibleMillivoltSpan: Double,
-        millimetersPerPoint: Double?
+        millimetersPerPoint: Double?,
+        gainAnnotation: String? = nil
     ) -> CalibrationReading {
         // Degenerate geometry (pre-layout, empty channel) — say nothing false.
         guard windowSeconds > 0, canvasWidthPoints > 0,
@@ -130,11 +131,16 @@ struct CalibrationReading: Equatable {
 
         let pointsPerSecond = canvasWidthPoints / windowSeconds
         let pointsPerMillivolt = canvasHeightPoints / visibleMillivoltSpan
+        // X16: a gain reinterpretation travels with every mm/mV claim — the
+        // paper maps TRUE millivolts, and the annotation says where true mV
+        // came from ("gain ×2 — analyst"). Appended in every non-degenerate
+        // branch, including the points fallback.
+        let suffix = gainAnnotation.map { " · \($0)" } ?? ""
 
         guard let mmPerPoint = millimetersPerPoint, mmPerPoint > 0 else {
             // Honesty rule: no trustworthy physical size → print points, and
             // never claim "standard" (we can't verify mm precision).
-            let text = "\(fmt(pointsPerSecond)) pt/s · \(fmt(pointsPerMillivolt)) pt/mV · display size unavailable"
+            let text = "\(fmt(pointsPerSecond)) pt/s · \(fmt(pointsPerMillivolt)) pt/mV · display size unavailable" + suffix
             return CalibrationReading(text: text, isStandard: false, usesPointFallback: true)
         }
 
@@ -145,7 +151,7 @@ struct CalibrationReading: Equatable {
 
         var text = "\(fmt(mmPerSecond)) mm/s · \(fmt(mmPerMillivolt)) mm/mV"
         if !standard { text += " · non-standard" }
-        return CalibrationReading(text: text, isStandard: standard, usesPointFallback: false)
+        return CalibrationReading(text: text + suffix, isStandard: standard, usesPointFallback: false)
     }
 
     /// Round to 0.1 and drop a trailing ".0" so clinical values read as

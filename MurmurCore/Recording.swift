@@ -90,6 +90,19 @@ public struct Recording: Codable, Equatable, Sendable {
         // absolute start for records saved before the distinction existed).
         self.hasAbsoluteStartTime = (try? c.decodeIfPresent(Bool.self, forKey: .hasAbsoluteStartTime)) ?? false
     }
+
+    /// X16 — the same recording with one channel replaced (matched by `id`).
+    /// The manifest write path persists the result; sample data untouched.
+    public func replacingChannel(_ channel: Channel) -> Recording {
+        Recording(
+            version: version, id: id, device: device, createdAt: createdAt,
+            sourceFileName: sourceFileName,
+            channels: channels.map { $0.id == channel.id ? channel : $0 },
+            annotations: annotations,
+            headerComments: headerComments,
+            notesFileName: notesFileName,
+            hasAbsoluteStartTime: hasAbsoluteStartTime)
+    }
 }
 
 public struct Channel: Codable, Equatable, Identifiable, Sendable {
@@ -102,6 +115,22 @@ public struct Channel: Codable, Equatable, Identifiable, Sendable {
     public let storageFileName: String      // Path relative to the recording directory.
     public let pyramid: [PyramidLevel]
 
+    /// X16 — the analyst's gain reinterpretation: TRUE mV = stored × this.
+    /// Stored samples are physical mV as the header's gain converted them at
+    /// import; when that header gain was wrong (mis-set counts/mV), the
+    /// stored values are off by a constant factor, and this records the
+    /// analyst's correction WITHOUT rewriting a byte of sample data. nil =
+    /// no reinterpretation (factor 1). A data-layer fact, persisted in the
+    /// bundle manifest — not a session preference.
+    public var analystGainFactor: Double?
+
+    /// X16 — the source header's ADC gain (counts per physical unit, e.g.
+    /// 200 counts/mV), kept for provenance: the correction caption states
+    /// what the header CLAIMED so the reinterpretation is auditable. nil on
+    /// bundles imported before X16 (the value was consumed at conversion
+    /// and discarded).
+    public let headerGainCountsPerUnit: Double?
+
     public init(
         id: UUID = UUID(),
         name: String,
@@ -110,7 +139,9 @@ public struct Channel: Codable, Equatable, Identifiable, Sendable {
         startTimeUnixMS: Int64,
         sampleCount: Int64,
         storageFileName: String,
-        pyramid: [PyramidLevel] = []
+        pyramid: [PyramidLevel] = [],
+        analystGainFactor: Double? = nil,
+        headerGainCountsPerUnit: Double? = nil
     ) {
         self.id = id
         self.name = name
@@ -120,6 +151,16 @@ public struct Channel: Codable, Equatable, Identifiable, Sendable {
         self.sampleCount = sampleCount
         self.storageFileName = storageFileName
         self.pyramid = pyramid
+        self.analystGainFactor = analystGainFactor
+        self.headerGainCountsPerUnit = headerGainCountsPerUnit
+    }
+
+    /// The factor every amplitude assertion applies: 1 when unreinterpreted.
+    /// Guarded against a zero/negative/non-finite factor ever reaching the
+    /// render math — an invalid persisted value reads as "no correction".
+    public var appliedGainFactor: Double {
+        guard let factor = analystGainFactor, factor.isFinite, factor > 0 else { return 1 }
+        return factor
     }
 
     public var startDate: Date {
