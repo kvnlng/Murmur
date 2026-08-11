@@ -28,6 +28,7 @@ struct IntervalMarkingsOrchestrator: View {
     @State private var recordingContext = CurrentRecordingContext.shared
     @State private var markingsContext = IntervalMarkingsContext.shared
     @State private var store = PurchaseStore.shared
+    @State private var morphologyContext = MorphologyContext.shared
 
     /// Task key changes whenever recompute is warranted.
     private struct Key: Hashable {
@@ -38,6 +39,9 @@ struct IntervalMarkingsOrchestrator: View {
         // per-beat unreliable flags — moving the dial is a recompute.
         let tOffsetExclusionEnabled: Bool
         let tOffsetExclusionScore: Int
+        // X112c: endorsing or withdrawing a morphology baseline rebuilds
+        // the template from the endorsed beats.
+        let endorsements: [MorphologyEndorsement]
     }
 
     var body: some View {
@@ -49,7 +53,8 @@ struct IntervalMarkingsOrchestrator: View {
                 owned: store.hasStudio,
                 qtcFormula: markingsContext.qtcFormula,
                 tOffsetExclusionEnabled: markingsContext.tOffsetExclusionEnabled,
-                tOffsetExclusionScore: markingsContext.tOffsetExclusionScore
+                tOffsetExclusionScore: markingsContext.tOffsetExclusionScore,
+                endorsements: morphologyContext.endorsements
             )) {
                 await recompute()
             }
@@ -118,6 +123,47 @@ struct IntervalMarkingsOrchestrator: View {
                 : Int.max
         }
 
+        let qtWithheldReason = conventionalLeads.isEmpty
+            ? "QT: Conventional leads (II, V5) absent."
+            : nil
+
+        // X112c: with endorsements on record, the baseline(s) rebuild from
+        // the endorsed clusters' beats — same pipeline, per mode. Falls
+        // through to the unadjudicated default when nothing re-attaches
+        // (orphaned endorsements — the drawer surfaces those).
+        let endorsements = await MainActor.run { morphologyContext.endorsements }
+        if !endorsements.isEmpty {
+            let annotatedBeats = recording.annotatedBeats()
+            let clusterSamples = conventionalLeads.first?.samples ?? legacySamples
+            if let clusterSamples, !annotatedBeats.isEmpty {
+                let input = EndorsedComputeInput(
+                    conventionalLeadSamples: conventionalLeads.map(\.samples),
+                    legacySamples: legacySamples,
+                    clusterSamples: clusterSamples,
+                    sampleRate: sampleRate,
+                    annotatedBeats: annotatedBeats,
+                    endorsements: endorsements,
+                    qtcFormula: Self.metricsFormula(from: qtcFormula),
+                    reliabilityThreshold: reliabilityThreshold,
+                    leadName: leadName)
+                let published = await Task.detached(priority: .userInitiated) {
+                    Self.endorsedComputed(input)
+                }.value
+                guard !Task.isCancelled else { return }
+                if let published {
+                    await MainActor.run {
+                        markingsContext.set(
+                            beats: published.beats,
+                            sampleRate: sampleRate,
+                            template: published.template,
+                            qtWithheldReason: qtWithheldReason,
+                            modes: published.modes)
+                    }
+                    return
+                }
+            }
+        }
+
         // Delineate + measure + build template off the main actor.
         // Even a multi-hour recording (~100k beats) is a few hundred
         // milliseconds per lead; we don't want to jitter the canvas while
@@ -146,30 +192,9 @@ struct IntervalMarkingsOrchestrator: View {
                 reliabilityThreshold: reliabilityThreshold)
         }.value
 
-        let coreTemplate: MarkingsTemplate? = computed.template.sampleCount > 0
-            ? MarkingsTemplate(
-                sampleCount: computed.template.sampleCount,
-                medianPRMs: computed.template.medianPRMs,
-                iqrPRMs: computed.template.iqrPRMs,
-                medianQRSMs: computed.template.medianQRSMs,
-                iqrQRSMs: computed.template.iqrQRSMs,
-                medianQTMs: computed.template.medianQTMs,
-                iqrQTMs: computed.template.iqrQTMs,
-                qtcFormulaName: computed.template.qtcFormula.displayName,
-                medianQTcMs: computed.template.medianQTcMs,
-                iqrQTcMs: computed.template.iqrQTcMs,
-                sourceLead: leadName,
-                spanStartSample: spanStart,
-                spanEndSample: spanEnd,
-                excludedBeatCount: computed.template.excludedBeatCount,
-                excludedImplausibleCount: computed.template.excludedImplausibleCount,
-                excludedUnreliableCount: computed.template.excludedUnreliableCount
-            )
-            : nil
-
-        let qtWithheldReason = conventionalLeads.isEmpty
-            ? "QT: Conventional leads (II, V5) absent."
-            : nil
+        let coreTemplate = Self.coreTemplate(
+            from: computed.template, leadName: leadName,
+            spanStart: spanStart, spanEnd: spanEnd, adjudicationBasis: nil)
 
         await MainActor.run {
             if computed.beats.isEmpty {
@@ -439,5 +464,189 @@ private extension BeatFiducials {
             tOnset: nil,
             tOffset: nil
         )
+    }
+}
+
+// MARK: - X112c endorsed-baseline rebuild
+
+private extension IntervalMarkingsOrchestrator {
+
+    /// One endorsed mode, resolved to its member beats. `name` is the
+    /// drawer's cluster letter — the analyst's vocabulary, kept identical so
+    /// "mode B" in a readout is the card the analyst endorsed.
+    struct ModeSpec {
+        let name: String
+        let beatSampleIndices: [Int64]
+    }
+
+    /// NormalTemplate → MarkingsTemplate mirror (primitive types across the
+    /// module boundary), shared by the default and per-mode builds.
+    static func coreTemplate(
+        from template: NormalTemplate,
+        leadName: String,
+        spanStart: Int64?,
+        spanEnd: Int64?,
+        adjudicationBasis: String?
+    ) -> MarkingsTemplate? {
+        guard template.sampleCount > 0 else { return nil }
+        return MarkingsTemplate(
+            sampleCount: template.sampleCount,
+            medianPRMs: template.medianPRMs,
+            iqrPRMs: template.iqrPRMs,
+            medianQRSMs: template.medianQRSMs,
+            iqrQRSMs: template.iqrQRSMs,
+            medianQTMs: template.medianQTMs,
+            iqrQTMs: template.iqrQTMs,
+            qtcFormulaName: template.qtcFormula.displayName,
+            medianQTcMs: template.medianQTcMs,
+            iqrQTcMs: template.iqrQTcMs,
+            sourceLead: leadName,
+            spanStartSample: spanStart,
+            spanEndSample: spanEnd,
+            excludedBeatCount: template.excludedBeatCount,
+            excludedImplausibleCount: template.excludedImplausibleCount,
+            excludedUnreliableCount: template.excludedUnreliableCount,
+            adjudicationBasis: adjudicationBasis
+        )
+    }
+
+    /// Re-attach the endorsements to the record's recomputed clusters —
+    /// the same deterministic clustering, fold rule, and letters as the
+    /// drawer panel, so the rebuild and the cards can never disagree about
+    /// which cluster "B" is. Empty when nothing re-attaches (orphans only).
+    static func endorsedModeSpecs(
+        clusterSamples: [Float],
+        sampleRate: Double,
+        annotatedBeats: [(sampleIndex: Int64, symbol: String)],
+        endorsements: [MorphologyEndorsement]
+    ) -> [ModeSpec] {
+        let parameters = MorphologyClustering.Parameters()
+        let clustering = MorphologyClustering.summarize(
+            samples: clusterSamples, sampleRate: sampleRate,
+            rPeaks: annotatedBeats.map(\.sampleIndex),
+            parameters: parameters)
+        let total = clustering.totalBeats
+        let majors = clustering.clusters.filter {
+            !($0.count < 30 && Double($0.count) < 0.01 * Double(total))
+        }
+        var endorsedRanks = Set<Int>()
+        for endorsement in endorsements {
+            var best: (rank: Int, distance: Double)?
+            for (rank, cluster) in majors.enumerated() {
+                guard cluster.representative.count == endorsement.representative.count
+                else { continue }
+                let d = MorphologyClustering.distance(
+                    endorsement.representative, cluster.representative)
+                if best == nil || d < best!.distance { best = (rank, d) }
+            }
+            if let best, best.distance <= parameters.distanceThreshold {
+                endorsedRanks.insert(best.rank)
+            }
+        }
+        return endorsedRanks.sorted().map { rank in
+            ModeSpec(
+                name: String(UnicodeScalar(UInt8(65 + min(rank, 25)))),
+                beatSampleIndices: majors[rank].memberBeatIndices
+                    .map { annotatedBeats[$0].sampleIndex }
+                    .sorted())
+        }
+    }
+
+    /// The endorsed rebuild: each endorsed mode's beats run through the SAME
+    /// pipeline as the single-template case (X53/X58 exclude-and-count per
+    /// mode), majority mode first. The published template is the majority
+    /// mode's, carrying the §5 endorsement provenance; with ≥ 2 modes every
+    /// beat is tagged with its mode so the inspector names its baseline.
+    /// nil when no endorsement re-attaches — caller falls back to the
+    /// unadjudicated default.
+    /// Inputs for the endorsed rebuild, bundled (SwiftLint parameter budget —
+    /// same medicine as `BeatValues`).
+    struct EndorsedComputeInput: Sendable {
+        let conventionalLeadSamples: [[Float]]
+        let legacySamples: [Float]?
+        let clusterSamples: [Float]
+        let sampleRate: Double
+        let annotatedBeats: [(sampleIndex: Int64, symbol: String)]
+        let endorsements: [MorphologyEndorsement]
+        let qtcFormula: QTcFormula
+        let reliabilityThreshold: Int
+        let leadName: String
+    }
+
+    /// What the endorsed rebuild publishes.
+    struct EndorsedBaseline {
+        let beats: [MarkingsBeat]
+        let template: MarkingsTemplate?
+        let modes: [MarkingsMode]
+    }
+
+    /// One mode's pipeline output, before the majority sort.
+    private struct BuiltMode {
+        let name: String
+        let beats: [MarkingsBeat]
+        let template: NormalTemplate
+        let spanStart: Int64?
+        let spanEnd: Int64?
+    }
+
+    static func endorsedComputed(_ input: EndorsedComputeInput) -> EndorsedBaseline? {
+        let specs = endorsedModeSpecs(
+            clusterSamples: input.clusterSamples, sampleRate: input.sampleRate,
+            annotatedBeats: input.annotatedBeats, endorsements: input.endorsements)
+        guard !specs.isEmpty else { return nil }
+
+        var built: [BuiltMode] = []
+        for spec in specs {
+            let result: (beats: [MarkingsBeat], template: NormalTemplate)
+            if input.conventionalLeadSamples.isEmpty {
+                guard let samples = input.legacySamples else { continue }
+                // X109: no conventional lead → T-boundary claims withheld,
+                // endorsed or not.
+                result = singleLeadComputed(
+                    samples: samples, sampleRate: input.sampleRate,
+                    beatSampleIndices: spec.beatSampleIndices,
+                    qtcFormula: input.qtcFormula,
+                    reliabilityThreshold: input.reliabilityThreshold,
+                    withholdQT: true)
+            } else {
+                result = conventionalComputed(
+                    leadSamples: input.conventionalLeadSamples,
+                    sampleRate: input.sampleRate,
+                    beatSampleIndices: spec.beatSampleIndices,
+                    qtcFormula: input.qtcFormula,
+                    reliabilityThreshold: input.reliabilityThreshold)
+            }
+            built.append(BuiltMode(
+                name: spec.name, beats: result.beats, template: result.template,
+                spanStart: spec.beatSampleIndices.min(),
+                spanEnd: spec.beatSampleIndices.max()))
+        }
+        guard !built.isEmpty else { return nil }
+        // Majority first (§8.2: one band renders — the majority mode's);
+        // letter order breaks ties so the outcome is deterministic.
+        built.sort { ($0.beats.count, $1.name) > ($1.beats.count, $0.name) }
+
+        // The provenance date is the LATEST endorsement — the moment the
+        // current baseline configuration came to exist.
+        let endorsedAt = input.endorsements.map(\.endorsedAt).max() ?? .distantPast
+        let basis = IntervalMarkingsContext.endorsedBasis(
+            modes: built.map { ($0.name, $0.beats.count) },
+            endorsedAt: endorsedAt)
+
+        let leadName = input.leadName
+        let modes: [MarkingsMode] = built.compactMap { mode in
+            coreTemplate(from: mode.template, leadName: leadName,
+                         spanStart: mode.spanStart, spanEnd: mode.spanEnd,
+                         adjudicationBasis: nil)
+                .map { MarkingsMode(name: mode.name, beatCount: mode.beats.count, template: $0) }
+        }
+        let published = coreTemplate(
+            from: built[0].template, leadName: leadName,
+            spanStart: built[0].spanStart, spanEnd: built[0].spanEnd,
+            adjudicationBasis: basis)
+        let tagged = built.count > 1
+            ? built.flatMap { mode in mode.beats.map { $0.named(mode: mode.name) } }
+            : built.flatMap(\.beats)
+        return EndorsedBaseline(beats: tagged, template: published, modes: modes)
     }
 }

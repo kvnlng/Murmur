@@ -105,4 +105,66 @@ final class MurmurUIMorphologyTests: XCTestCase {
         XCTAssertTrue(withdraw.waitForExistence(timeout: 3),
                       "An endorsed card should offer withdrawal, not a second endorsement")
     }
+
+    /// X112c end to end on the two-morphology fixture (X104 wide-complex
+    /// machinery): endorsing both clusters rebuilds the baseline from the
+    /// endorsed beats and every caption switches to analyst-endorsed
+    /// provenance with the §6 off-band count.
+    @MainActor
+    func testDualModeEndorsementRebuildsBaseline() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-sample-rich=two-morphology",
+                                "--ui-test-grant-studio",
+                                "--ui-test-window=1600x1100"]
+        app.launch()
+
+        let contextBar = app.descendants(matching: .any)
+            .matching(identifier: "context-bar").firstMatch
+        XCTAssertTrue(contextBar.waitForExistence(timeout: 30))
+        let announced = NSPredicate(format: "label CONTAINS %@", "morphology cluster")
+        XCTAssertEqual(XCTWaiter.wait(
+            for: [XCTNSPredicateExpectation(predicate: announced, object: contextBar)],
+            timeout: 90), .completed)
+        let panel = app.descendants(matching: .any)
+            .matching(identifier: "context-panel").firstMatch
+        if !panel.exists {
+            scrollIntoViewAndClick(contextBar, within: app, timeout: 30, "Context disclosure bar")
+        }
+        scrollIntoViewAndClick(
+            app.descendants(matching: .any).matching(identifier: "note-row-morphology").firstMatch,
+            within: app, timeout: 30, "Morphology row")
+
+        // The constructed second conduction must surface as a second MAJOR
+        // cluster — that is the fixture's ground truth.
+        let cardB = app.descendants(matching: .any)
+            .matching(identifier: "morphology-cluster-row-1").firstMatch
+        XCTAssertTrue(cardB.waitForExistence(timeout: 10),
+                      "The wide-complex beats should form a second major cluster")
+
+        scrollIntoViewAndClick(
+            app.descendants(matching: .any).matching(identifier: "edit-mode-toggle").firstMatch,
+            within: app, "Edit-mode toggle")
+        scrollIntoViewAndClick(
+            app.descendants(matching: .any).matching(identifier: "morphology-endorse-0").firstMatch,
+            within: app, "Endorse cluster A")
+        scrollIntoViewAndClick(
+            app.descendants(matching: .any).matching(identifier: "morphology-endorse-1").firstMatch,
+            within: app, "Endorse cluster B")
+
+        // The rebuild is async (clustering + per-mode delineation). The QTc
+        // lane's summary composes the repro caption into its AX label (the
+        // surface the QTc-lane tests read) — it must state the endorsement,
+        // the mode count, and count the off-band mode's beats.
+        let summary = app.descendants(matching: .any)
+            .matching(identifier: "interval-trend-lane-summary").firstMatch
+        XCTAssertTrue(summary.waitForExistence(timeout: 60),
+                      "The QTc lane should render its summary")
+        let endorsedCaption = NSPredicate(
+            format: "label CONTAINS %@ AND label CONTAINS %@ AND label CONTAINS %@",
+            "analyst-endorsed", "2 modes", "off-band")
+        XCTAssertEqual(XCTWaiter.wait(
+            for: [XCTNSPredicateExpectation(predicate: endorsedCaption, object: summary)],
+            timeout: 90), .completed,
+            "Endorsing both modes should switch the caption to endorsed provenance; got: \(summary.label)")
+    }
 }

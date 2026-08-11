@@ -477,6 +477,13 @@ public struct ContentView: View {
             // QT abstains and the manual-caliper override is the only path
             // to a QT number.
             return (SyntheticECG.Parameters(), ["II": "MCL1"])
+        case .twoMorphology:
+            // X112c: two wide-complex runs (X104 machinery, beats coded "V")
+            // long enough that the second shape clears the panel's fold rule
+            // (≥ 30 beats and ≥ 1% burden) — a genuine second conduction the
+            // analyst can endorse as a second baseline mode.
+            return (SyntheticECG.Parameters(
+                wideComplexRuns: [.init(range: 40...55), .init(range: 100...115)]), [:])
         }
     }
 
