@@ -152,7 +152,11 @@ struct BeatCalipers: View {
     /// Internal (not private) so the wording — methods provenance the
     /// analyst reads against the template — is pinned by unit tests.
     static func templateProvenanceText(_ t: MarkingsTemplate, sampleRate: Double) -> String {
-        var text = "Patient normal: \(t.sampleCount) beats"
+        // X112 §2: the baseline rests on the ANNOTATOR's classification until
+        // an analyst adjudicates it — say so, rather than presenting the
+        // default as an endorsed judgement. (Endorsed rebuilds switch this to
+        // analyst-endorsed provenance in X112c.)
+        var text = "Patient normal (unadjudicated — annotator-coded): \(t.sampleCount) beats"
         // X25: disclose the lead the intervals were measured in. Convention is
         // to measure where the T offset is clearest (II / V5 commonly), so
         // which lead was used is reproducibility-relevant.

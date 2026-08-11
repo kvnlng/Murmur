@@ -176,6 +176,27 @@ public extension Recording {
             .sorted()
     }
 
+    /// X112 — every annotator-coded BEAT (any symbol, not only "N"), in
+    /// time order: `(sampleIndex, symbol)` pairs from the WFDB `.atr`
+    /// annotations. The morphology clustering deliberately takes all beats —
+    /// a second conduction is exactly the population the annotator coded
+    /// away from "N" — and the symbol travels along as verbatim provenance
+    /// for the cluster cards ("annotator codes: N 96% · R 4%").
+    /// Symbol set is the shared beat-vs-event vocabulary
+    /// (`EctopyAnalyzer.beatSymbols`); non-beat events (rhythm `+`,
+    /// artifacts) are excluded. Empty when no beat data is present.
+    func annotatedBeats() -> [(sampleIndex: Int64, symbol: String)] {
+        annotations
+            .filter { $0.source.hasPrefix("wfdb.atr") }
+            .compactMap { annotation -> (Int64, String)? in
+                let symbol = annotation.category.trimmingCharacters(in: .whitespaces)
+                guard EctopyAnalyzer.beatSymbols.contains(symbol) else { return nil }
+                return (annotation.sampleIndex, symbol)
+            }
+            .sorted { $0.0 < $1.0 }
+            .map { (sampleIndex: $0.0, symbol: $0.1) }
+    }
+
     /// Read the entire sample buffer of the primary ECG channel from
     /// its on-disk file inside `directory`. Returns nil when the
     /// recording has no ECG channels or the file is unreadable.
