@@ -26,8 +26,12 @@
 //  previous test left behind (verified during X86: an inherited ~1100 pt
 //  frame dropped below the 1160 pt side-panel coexistence width and failed a
 //  record-switch test on unmodified main). Now every XCUI launch resolves a
-//  content size: the pinned `WxH` verbatim, `max` to fill the visible frame,
-//  and NO flag to a generous default clamped to the visible frame.
+//  content size: the pinned `WxH` verbatim up to what the screen can hold,
+//  `max` to fill the visible frame, and NO flag to a generous default
+//  clamped to the visible frame. Nothing may exceed the visible frame: an
+//  oversized window gets its origin pushed off-screen by AppKit, that frame
+//  is PERSISTED, and because `setContentSize` never moves the origin, every
+//  later suite inherits a window whose bottom band is unreachable.
 //
 
 import Foundation
@@ -97,18 +101,34 @@ public enum WindowSizing {
 
     /// Pure resolution of the X100 policy — what CONTENT size this XCUI
     /// launch should get. Split from the applier so unit tests can pin the
-    /// table: pinned `WxH` wins verbatim (the short-display regime must
-    /// reproduce exactly), `max` fills the visible frame, no flag takes the
-    /// generous default clamped to the visible frame.
+    /// table: pinned `WxH` wins verbatim UP TO what the screen can hold
+    /// (the short-display regime must reproduce exactly, and a short-display
+    /// pin by definition fits; a pin LARGER than the screen can never be a
+    /// legitimate repro — it builds a window whose bottom band is off-screen
+    /// and whose persisted frame poisons every later launch, which is how
+    /// 1600×1100 pins took down six unrelated suites on Cloud's 1024×768
+    /// VMs), `max` fills the visible frame, no flag takes the generous
+    /// default clamped to the visible frame.
     static func testWindowContentSize(
         pinned: CGSize?,
         maximized: Bool,
         visible: CGSize?
     ) -> CGSize {
-        if let pinned { return pinned }
-        guard let visible else { return defaultTestWindowSize }
-        let fill = CGSize(width: visible.width - chromeAllowance,
-                          height: visible.height - chromeAllowance)
+        let fill = visible.map {
+            CGSize(width: $0.width - chromeAllowance,
+                   height: $0.height - chromeAllowance)
+        }
+        if let pinned {
+            // The cap is asymmetric because chrome is vertical: a window is
+            // exactly as wide as its content, but the title bar rides on top
+            // of it — so width clamps to the full visible width (Cloud's
+            // standing 1000×600 pins must keep reproducing 1000 exactly on
+            // the 1024-wide VM) while height leaves the chrome allowance.
+            guard let visible else { return pinned }
+            return CGSize(width: min(pinned.width, visible.width),
+                          height: min(pinned.height, visible.height - chromeAllowance))
+        }
+        guard let fill else { return defaultTestWindowSize }
         if maximized { return fill }
         return CGSize(width: min(defaultTestWindowSize.width, fill.width),
                       height: min(defaultTestWindowSize.height, fill.height))
@@ -148,14 +168,44 @@ public enum WindowSizing {
         }
         for _ in 0..<15 {
             let content = window.contentRect(forFrameRect: window.frame).size
-            if abs(content.width - size.width) < 1, abs(content.height - size.height) < 1 {
+            if abs(content.width - size.width) < 1, abs(content.height - size.height) < 1,
+               isPlacedOnScreen(window) {
                 break
             }
             window.setContentSize(size)
+            constrainOntoScreen(window)
             try? await Task.sleep(nanoseconds: 200_000_000)
         }
         let final = window.contentRect(forFrameRect: window.frame).size
-        NSLog("WindowSizing: policy content \(size) → final \(final)")
+        NSLog("WindowSizing: policy content \(size) → final \(final) at \(window.frame.origin)")
         #endif
     }
+
+    #if DEBUG
+    /// `setContentSize` resizes around a FIXED origin — so a frame that
+    /// state restoration placed partly off-screen (AppKit pushes an
+    /// oversized window's origin below the screen bottom) stays off-screen
+    /// after the policy shrinks it, and every bottom-band control keeps
+    /// reporting "not hittable". Size and placement must both be corrected.
+    @MainActor
+    private static func isPlacedOnScreen(_ window: NSWindow) -> Bool {
+        guard let visible = (window.screen ?? NSScreen.main)?.visibleFrame else {
+            return true
+        }
+        return visible.contains(window.frame)
+    }
+
+    @MainActor
+    private static func constrainOntoScreen(_ window: NSWindow) {
+        guard let visible = (window.screen ?? NSScreen.main)?.visibleFrame else {
+            return
+        }
+        var origin = window.frame.origin
+        origin.x = min(max(origin.x, visible.minX),
+                       max(visible.minX, visible.maxX - window.frame.width))
+        origin.y = min(max(origin.y, visible.minY),
+                       max(visible.minY, visible.maxY - window.frame.height))
+        if origin != window.frame.origin { window.setFrameOrigin(origin) }
+    }
+    #endif
 }
