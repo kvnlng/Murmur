@@ -454,6 +454,12 @@ public struct ContentView: View {
         }
     }
 
+    #if DEBUG
+    // Test-fixture plumbing only — `UITestSupport` (and these two helpers'
+    // sole callers in `applyUITestHooks`) exist only in DEBUG, so a Release
+    // ARCHIVE must not compile them. The PR test suites build Debug, which
+    // is why an unguarded reference here survives every green Cloud test
+    // run and fails only at archive time.
     /// X105 (#176): the canned edge-state fixtures behind
     /// `--ui-test-sample-rich=<variant>`. Constructed states, not inject
     /// flags — each is an ordinary record the app opens through the real
@@ -507,6 +513,7 @@ public struct ContentView: View {
             }
         }
     }
+    #endif
 
     private func browseShell(source: RecordListSource, records: [RecordListEntry]) -> some View {
         // X63-B: the record navigator was not appearing when a folder opened —
