@@ -40,6 +40,29 @@ final class MurmurUIQTcLaneTests: XCTestCase {
                       "The lane should render the computed median (\(knownQTc)); label=\"\(label)\" value=\"\(value)\"")
     }
 
+    /// X111 (§2.1): the R–R CV instability bound ships exposed at the
+    /// review's 15% default — the chip is on the QTc lane, adjustable, and
+    /// the steady-sinus fixture (CV ≈ 5%) flags nothing, so no instability
+    /// note renders on clean ground.
+    @MainActor
+    func testCVFlagChipShipsAtTheCitedDefault() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-sample", "--ui-test-inject-qtc-lane=455"]
+        app.launch()
+
+        let chip = app.descendants(matching: .any)
+            .matching(identifier: "interval-trend-lane-cv-flag-picker").firstMatch
+        XCTAssertTrue(chip.waitForExistence(timeout: 15),
+                      "The CV-bound chip should sit on the QTc lane's caption row")
+        XCTAssertTrue(spokenName(of: chip).contains("15"),
+                      "The exposed bound must default to the review's 15%, got: \(spokenName(of: chip))")
+
+        let note = app.descendants(matching: .any)
+            .matching(identifier: "interval-trend-lane-cv-instability-note").firstMatch
+        XCTAssertFalse(note.exists,
+                       "Steady sinus must not carry an instability note — no vacuous flags")
+    }
+
     /// X58: the analyst's T-offset gate chip ships at the derived default
     /// (exclude, score ≥ 1) and the citation caption states the gate and the
     /// per-reason exclusion split from the injected template.

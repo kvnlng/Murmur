@@ -103,6 +103,8 @@ struct IntervalTrendLaneMemoizedStrip: View, Equatable {
     /// X58: the T-offset gate in effect + its setter. In the fingerprint so a
     /// dial change re-renders the chip and recomputes the caption.
     let qtWithheldReason: String?
+    let rrCVFlagPercent: Double
+    let onPickRRCVFlag: ((Double) -> Void)?
     let tOffsetGateEnabled: Bool
     let tOffsetGateScore: Int
     let onSetTOffsetGate: (Bool, Int) -> Void
@@ -134,6 +136,7 @@ struct IntervalTrendLaneMemoizedStrip: View, Equatable {
             && lhs.rangeFindings == rhs.rangeFindings
             && lhs.authoringEnabled == rhs.authoringEnabled
             && lhs.qtWithheldReason == rhs.qtWithheldReason
+            && lhs.rrCVFlagPercent == rhs.rrCVFlagPercent
             && lhs.tOffsetGateEnabled == rhs.tOffsetGateEnabled
             && lhs.tOffsetGateScore == rhs.tOffsetGateScore
     }
@@ -195,6 +198,8 @@ struct IntervalTrendLaneMemoizedStrip: View, Equatable {
             onPickShowMode: onPickShowMode,
             onPickFormula: onPickFormula,
             qtWithheldReason: qtWithheldReason,
+            rrCVFlagPercent: rrCVFlagPercent,
+            onPickRRCVFlag: onPickRRCVFlag,
             tOffsetGateEnabled: tOffsetGateEnabled,
             tOffsetGateScore: tOffsetGateScore,
             onSetTOffsetGate: onSetTOffsetGate,

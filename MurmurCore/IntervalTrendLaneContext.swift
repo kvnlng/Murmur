@@ -74,6 +74,20 @@ public final class IntervalTrendLaneContext {
         didSet { persist() }
     }
 
+    /// X111 (cardiologist review §2.1): the R–R CV bound above which a QTc
+    /// bin carries the rate-instability marker. Exposed and adjustable —
+    /// never a verdict, never withholds the value. Default 15% (the bound
+    /// the review calls "universally considered unreliable in clinical
+    /// research"); the conservative 10% is one menu choice away; 0 = off.
+    public var rrCVFlagPercent: Double {
+        didSet {
+            rrCVFlagPercent = min(max(rrCVFlagPercent, 0), 100)
+            persist()
+        }
+    }
+
+    public static let defaultRRCVFlagPercent: Double = 15
+
     public var binSeconds: Double { binPreset.seconds }
 
     public init() {
@@ -86,6 +100,9 @@ public final class IntervalTrendLaneContext {
         // location-finder lanes; the ribbons live behind "median + IQR".
         let modeRaw = defaults.string(forKey: Keys.showMode) ?? IntervalTrendShowMode.medianOnly.rawValue
         self.showMode = IntervalTrendShowMode(rawValue: modeRaw) ?? .medianOnly
+        let cv = defaults.object(forKey: Keys.rrCVFlag) as? Double
+            ?? Self.defaultRRCVFlagPercent
+        self.rrCVFlagPercent = min(max(cv, 0), 100)
     }
 
     private func persist() {
@@ -93,11 +110,13 @@ public final class IntervalTrendLaneContext {
         defaults.set(metric.rawValue, forKey: Keys.metric)
         defaults.set(binPreset.rawValue, forKey: Keys.bin)
         defaults.set(showMode.rawValue, forKey: Keys.showMode)
+        defaults.set(rrCVFlagPercent, forKey: Keys.rrCVFlag)
     }
 
     private enum Keys {
         static let metric = "murmur.intervalTrendLane.metric"
         static let bin = "murmur.intervalTrendLane.binPreset"
+        static let rrCVFlag = "murmur.intervalTrendLane.rrCVFlagPercent"
         static let showMode = "murmur.intervalTrendLane.showMode"
     }
 }

@@ -133,6 +133,12 @@ struct IntervalTrendLane: View {
     /// lead). The QTc lane renders THIS string as its null state instead of
     /// the generic no-fiducials message; PR/QRS lanes ignore it.
     let qtWithheldReason: String?
+    /// X111 (§2.1): the exposed R–R CV bound (percent) above which a QTc
+    /// bin carries the rate-instability marker. 0 = off. Never withholds
+    /// the value; the marker + note cite the mechanism, not a verdict.
+    let rrCVFlagPercent: Double
+    /// Set the CV bound. Nil hides the chip (non-QTc lanes, previews).
+    let onPickRRCVFlag: ((Double) -> Void)?
     let tOffsetGateEnabled: Bool
     let tOffsetGateScore: Int
     /// Change the gate (enabled, score). Nil hides the gate chip.
@@ -217,6 +223,8 @@ struct IntervalTrendLane: View {
         onPickShowMode: ((IntervalTrendShowMode) -> Void)? = nil,
         onPickFormula: ((MarkingsQTcFormula) -> Void)? = nil,
         qtWithheldReason: String? = nil,
+        rrCVFlagPercent: Double = 0,
+        onPickRRCVFlag: ((Double) -> Void)? = nil,
         tOffsetGateEnabled: Bool = true,
         tOffsetGateScore: Int = IntervalMarkingsContext.defaultTOffsetExclusionScore,
         onSetTOffsetGate: ((Bool, Int) -> Void)? = nil,
@@ -232,6 +240,8 @@ struct IntervalTrendLane: View {
         self.qtcFormula = qtcFormula
         self.onPickFormula = onPickFormula
         self.qtWithheldReason = qtWithheldReason
+        self.rrCVFlagPercent = rrCVFlagPercent
+        self.onPickRRCVFlag = onPickRRCVFlag
         self.tOffsetGateEnabled = tOffsetGateEnabled
         self.tOffsetGateScore = tOffsetGateScore
         self.onSetTOffsetGate = onSetTOffsetGate
@@ -320,6 +330,7 @@ struct IntervalTrendLane: View {
             metricPicker
             formulaPicker
             tOffsetGateChip
+            cvFlagMenu
             binPicker
             showModePicker
             addGuideChip
@@ -392,6 +403,30 @@ struct IntervalTrendLane: View {
                     .menuStyle(.borderlessButton)
                     .fixedSize()
                 }
+            }
+        }
+    }
+
+    /// X111: the CV-bound chip — QTc only. A preset menu, not a free field:
+    /// the review supplies exactly two cited bounds (10% conservative, 15%
+    /// universal) and Off; 20% is headroom, not a citation.
+    @ViewBuilder
+    private var cvFlagMenu: some View {
+        if metric == .qtc, let onPick = onPickRRCVFlag {
+            let label = rrCVFlagPercent > 0
+                ? String(format: "CV flag %.0f%%", rrCVFlagPercent)
+                : "CV flag off"
+            controlChip(label: label, identifier: "interval-trend-lane-cv-flag-picker") {
+                Menu {
+                    Button("Off") { onPick(0) }
+                    ForEach([10.0, 15.0, 20.0], id: \.self) { bound in
+                        Button(String(format: "%.0f%%", bound)) { onPick(bound) }
+                    }
+                } label: {
+                    chipContent(text: label)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
             }
         }
     }
@@ -552,7 +587,35 @@ struct IntervalTrendLane: View {
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("interval-trend-lane-rr-assumption-note")
+            // X111 (§2.1): when bins exceed the exposed bound, say so and
+            // cite the mechanism — the formula's failure, never the
+            // patient's. The QTc values stay rendered.
+            if let note = Self.rrInstabilityNote(
+                flaggedBins: flaggedCVBins.count, thresholdPercent: rrCVFlagPercent) {
+                Text(note)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("interval-trend-lane-cv-instability-note")
+            }
         }
+    }
+
+    /// X111: bins over the exposed CV bound (QTc lane only; empty when off).
+    private var flaggedCVBins: [IntervalTrendBin] {
+        guard metric == .qtc, rrCVFlagPercent > 0 else { return [] }
+        return data.bins.filter { ($0.rrCVPercent ?? 0) > rrCVFlagPercent }
+    }
+
+    /// Static so the wording is unit-testable. Nil when the flag is off or
+    /// nothing exceeded it — no note is better than a vacuous one.
+    static func rrInstabilityNote(flaggedBins: Int, thresholdPercent: Double) -> String? {
+        guard thresholdPercent > 0, flaggedBins > 0 else { return nil }
+        let plural = flaggedBins == 1 ? "bin exceeds" : "bins exceed"
+        return String(
+            format: "%d %@ R–R CV %.0f%% — steady-state rate correction is "
+                + "unreliable above that bound (exposed threshold; values still shown).",
+            flaggedBins, plural, thresholdPercent)
     }
 
     private func hoverValueString(_ bin: IntervalTrendBin) -> String {
@@ -565,6 +628,9 @@ struct IntervalTrendLane: View {
         // factual measurement, no verdict, no threshold.
         if metric == .qtc, let cv = bin.rrCVPercent {
             text += String(format: " · RR CV %.0f%%", cv)
+            if rrCVFlagPercent > 0, cv > rrCVFlagPercent {
+                text += String(format: " (> %.0f%% bound)", rrCVFlagPercent)
+            }
         }
         // X43: flag that the preceding-2-min rate wasn't stable — the rate
         // correction's own input assumption. A property of the input, not a
@@ -680,6 +746,20 @@ struct IntervalTrendLane: View {
                 // never caution-hued — a departure past the band is
                 // just information at this layer; only the analyst's
                 // authored findings carry the amber accent.
+                // X111: rate-instability markers — a dashed neutral rule
+                // across each bin whose R–R CV exceeds the exposed bound.
+                // Marks the INPUT assumption failing; the median below
+                // stays plotted (§2.1: flag, never withhold).
+                ForEach(flaggedCVBins, id: \.startSeconds) { bin in
+                    RuleMark(
+                        xStart: .value("cv-t0", bin.startSeconds),
+                        xEnd: .value("cv-t1", bin.endSeconds),
+                        y: .value("cv-y", yDomain.upperBound)
+                    )
+                    .lineStyle(StrokeStyle(lineWidth: 2, dash: [3, 2]))
+                    .foregroundStyle(Color.secondary.opacity(0.7))
+                }
+
                 if let band = data.baselineBand {
                     RectangleMark(
                         xStart: .value("t0", timeRangeSeconds.lowerBound),
