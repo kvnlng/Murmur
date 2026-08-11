@@ -239,3 +239,39 @@ final class MurmurUILeadOverlayTests: XCTestCase {
                        "With one lead there is nothing to disambiguate; the note would be noise")
     }
 }
+
+// MARK: - X96 (#146): the overlay survives a session round-trip
+
+extension MurmurUILeadOverlayTests {
+    /// Opens a `.mur` whose session state stages V1 (primary) + I overlaid —
+    /// written by the `=overlay` variant of the session seam, because the
+    /// NSSavePanel half is XCUI-hostile (same split as every session test).
+    /// Before X96 this restored single-lead V1 and silently dropped I.
+    ///
+    /// V1-as-primary is deliberate: the fixture's default focus is lead I,
+    /// so a pass proves the restore APPLIED the saved order rather than
+    /// happening to match the default.
+    @MainActor
+    func testSessionRestoreRebuildsTheStagedOverlay() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-open-sample-session=overlay"]
+        app.launch()
+
+        // The saved primary owns the panel…
+        let panelV1 = app.descendants(matching: .any)
+            .matching(identifier: "channel-panel-V1").firstMatch
+        XCTAssertTrue(panelV1.waitForExistence(timeout: 10),
+                      "The saved session's primary (V1) should own the focus panel")
+
+        // …and the overlaid lead is back on the stage, labelled.
+        let legendI = app.descendants(matching: .any)
+            .matching(identifier: "lead-legend-I").firstMatch
+        XCTAssertTrue(legendI.waitForExistence(timeout: 5),
+                      "The overlaid lead (I) must survive the round-trip — this is the X96 regression")
+
+        let panelI = app.descendants(matching: .any)
+            .matching(identifier: "channel-panel-I").firstMatch
+        XCTAssertFalse(panelI.exists,
+                       "I is an overlay, not the primary — it contributes a trace, not a panel")
+    }
+}

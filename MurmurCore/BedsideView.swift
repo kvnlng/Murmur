@@ -809,6 +809,11 @@ struct BedsideView: View {
             viewportStartSample: viewport.startSample,
             viewportEndSample: viewport.endSample,
             focusedChannelName: focusedChannel?.name,
+            // X96: the full overlay, in selection order — nil for a
+            // single-lead stage, so a package saved without an overlay is
+            // byte-identical to a pre-X96 one. The singular above always
+            // carries the primary for older readers.
+            focusedChannelNames: overlaySessionLeadNames,
             windowLockedTo10s: windowLockedTo10s,
             // X50(b): the analyst's paper. Still `nil` before the open snap
             // resolves a gain, which is exactly right — a package saved in that
@@ -819,6 +824,20 @@ struct BedsideView: View {
             // `replacingViewState` — omitting it there is the X11 wipe.
             anchoredNotes: anchoredNotes.isEmpty ? nil : anchoredNotes
         )
+    }
+
+    /// X96: the overlay as session state — every staged lead's NAME in
+    /// selection order (names, not IDs: channel IDs are per-import). nil
+    /// unless the stage actually carries an overlay. A staged lead whose
+    /// name can't be resolved is dropped rather than guessed.
+    private var overlaySessionLeadNames: [String]? {
+        guard let selection = layoutMode.leadSelection, !selection.isSingle else { return nil }
+        let namesByID = Dictionary(
+            ecgChannels.map { ($0.id, $0.name) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let names = selection.ordered.compactMap { namesByID[$0] }
+        return names.count > 1 ? names : nil
     }
 
     /// X50(b) — restore the saved paper, and ONLY the paper, before
@@ -872,13 +891,22 @@ struct BedsideView: View {
         if let locked = restore.windowLockedTo10s {
             windowLockedTo10s = locked
         }
-        if let name = restore.focusedChannelName,
-           let channel = ecgChannels.first(where: { $0.name == name }) {
-            // A saved session records ONE focused lead name, so a restore is
-            // always single-lead. Persisting the overlay is a `.mur` schema
-            // change and belongs with the rendering that makes it visible,
-            // not here.
-            layoutMode = .focus(only: channel.id)
+        // X96: restore the whole staged overlay, in the saved selection
+        // order — order is what X64-C assigns trace inks by, so preserving
+        // it is what keeps a reopened session's traces the same colours.
+        // Names missing from the record (renamed/absent channel) drop out;
+        // if nothing resolves, the default focus stands rather than a
+        // fabricated one. Old packages carry only the singular field and
+        // restore single-lead exactly as before (`restoredLeadNames`).
+        let restoredNames = restore.restoredLeadNames
+        if !restoredNames.isEmpty {
+            let idsByName = Dictionary(
+                ecgChannels.map { ($0.name, $0.id) },
+                uniquingKeysWith: { first, _ in first }
+            )
+            if let selection = LeadSelection(ordered: restoredNames.compactMap { idsByName[$0] }) {
+                layoutMode = .focus(selection)
+            }
         }
         // X72: anchored notes ride the same restore. Absent stays absent —
         // a package saved before notes existed restores none, never a
