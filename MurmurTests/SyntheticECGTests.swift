@@ -269,6 +269,52 @@ struct SyntheticRichFixtureTests {
     }
 }
 
+/// X101 (#172): the constructed rate profile and its truth labels — checked
+/// against construction only, no detector involved.
+@Suite("Synthetic ECG rate episodes (X101)")
+struct SyntheticECGRateEpisodeTests {
+    @Test("Out-of-band episodes are labeled at the definitional 60/100 edges; an in-band episode is unlabeled")
+    func truthLabeling() {
+        let output = SyntheticECG.generate(.init(
+            durationSeconds: 180,
+            rateEpisodes: [
+                .init(range: 30...55, bpm: 45),    // < 60 → bradycardia
+                .init(range: 80...100, bpm: 90),   // inside the band → negative truth, no label
+                .init(range: 130...160, bpm: 130), // > 100 → tachycardia
+            ]))
+        let rate = output.truth.episodes
+        #expect(rate.map(\.kind) == [.bradycardia, .tachycardia],
+                "Exactly the two out-of-band episodes get labels, got \(rate.map(\.kind))")
+        #expect(rate.first?.startSeconds == 30 && rate.first?.endSeconds == 55,
+                "The truth boundary is the constructed range verbatim")
+        #expect(rate.last?.startSeconds == 130 && rate.last?.endSeconds == 160)
+    }
+
+    @Test("The tachogram actually holds the target rate over the plateau and the baseline elsewhere")
+    func profileIsRealized() {
+        let p = SyntheticECG.Parameters(
+            durationSeconds: 180,
+            rateEpisodes: [.init(range: 70...110, bpm: 45)])
+        let beats = SyntheticECG.generate(p).truth.beatTimesSeconds
+
+        func meanRRMs(over range: ClosedRange<Double>) -> Double {
+            var intervals: [Double] = []
+            for i in 1..<beats.count where range.contains(beats[i - 1]) && range.contains(beats[i]) {
+                intervals.append((beats[i] - beats[i - 1]) * 1000)
+            }
+            return intervals.reduce(0, +) / Double(intervals.count)
+        }
+        // HRV deviations average out over spans this long; ±25 ms is the
+        // same statistical tolerance the X99 mean-rate test uses.
+        #expect(abs(meanRRMs(over: 70...110) - 60_000 / 45) < 25,
+                "Plateau must sit at the target R–R, got \(meanRRMs(over: 70...110))")
+        #expect(abs(meanRRMs(over: 0...68) - 60_000 / p.meanHeartRateBPM) < 25,
+                "Before the ramp the baseline rate must hold, got \(meanRRMs(over: 0...68))")
+        #expect(abs(meanRRMs(over: 113...180) - 60_000 / p.meanHeartRateBPM) < 25,
+                "After the exit ramp the baseline rate must return, got \(meanRRMs(over: 113...180))")
+    }
+}
+
 #if canImport(MurmurMetrics)
 /// X91: the arrhythmia scan service over the generated record — the dials'
 /// detection path with constructed truth. The fixture's ~72 bpm sinus sits
@@ -303,6 +349,116 @@ struct SyntheticECGArrhythmiaScanTests {
             rhythmConfig: .init(lowBpm: 80, minDurationSeconds: 175))
         #expect(windowed.candidates.filter { $0.kind == .bradycardia }.isEmpty,
                 "A 175 s window over a 180 s record suppresses every run")
+    }
+}
+
+/// X101 (#172): rate-episode truth turns the X91 directional checks into
+/// known-answer tests — detected boundaries against constructed boundaries,
+/// at the DEFAULT band, with a mechanism-derived tolerance:
+/// ramp (1.5 s, band-edge crossing happens inside it) + two R–R of start/end
+/// quantization at the slowest constructed rate (2 × 60/45 ≈ 2.7 s) → 4.5 s.
+/// Never loosened to pass — a failure beyond it is a boundary bug.
+@Suite("Synthetic ECG rate episodes → arrhythmia scan (X101)")
+struct SyntheticECGRateEpisodeScanTests {
+    private static let edgeSlopSeconds = 4.5
+
+    private func scanned(
+        _ p: SyntheticECG.Parameters,
+        rhythmConfig: RhythmBandConfig = .init()
+    ) -> (truth: SyntheticECG.Truth, result: ArrhythmiaScanResult) {
+        let output = SyntheticECG.generate(p)
+        let leads = output.leads.map { $0.map(Float.init) }
+        return (output.truth,
+                ArrhythmiaScanService.scan(leads: leads, sampleRate: p.ecgSampleRate,
+                                           rhythmConfig: rhythmConfig))
+    }
+
+    @Test("A constructed bradycardia episode is found AT DEFAULTS with boundary-exact truth")
+    func bradyBoundariesKnownAnswer() throws {
+        let (truth, result) = scanned(.init(
+            durationSeconds: 180,
+            rateEpisodes: [.init(range: 70...110, bpm: 45)]))
+        let expected = try #require(truth.episodes.first { $0.kind == .bradycardia })
+
+        let brady = result.candidates.filter { $0.kind == .bradycardia }
+        let longest = try #require(
+            brady.max { ($0.endSeconds - $0.startSeconds) < ($1.endSeconds - $1.startSeconds) },
+            "The 40 s @ 45 bpm episode must mint a candidate at the 60–100 default")
+        #expect(abs(longest.startSeconds - expected.startSeconds) < Self.edgeSlopSeconds,
+                "Start \(longest.startSeconds) vs truth \(expected.startSeconds)")
+        #expect(abs(longest.endSeconds - expected.endSeconds) < Self.edgeSlopSeconds,
+                "End \(longest.endSeconds) vs truth \(expected.endSeconds)")
+        // Every brady candidate (ramp fragments included) lives at the
+        // episode — a candidate elsewhere is a false positive, full stop.
+        for candidate in brady {
+            #expect(candidate.endSeconds > expected.startSeconds - Self.edgeSlopSeconds
+                    && candidate.startSeconds < expected.endSeconds + Self.edgeSlopSeconds,
+                    "Brady candidate at \(candidate.startSeconds)–\(candidate.endSeconds) is outside the constructed episode")
+        }
+        #expect(result.candidates.filter { $0.kind == .tachycardia }.isEmpty,
+                "Nothing tachycardic was constructed")
+    }
+
+    @Test("A constructed tachycardia episode is found at defaults with boundary-exact truth")
+    func tachyBoundariesKnownAnswer() throws {
+        let (truth, result) = scanned(.init(
+            durationSeconds: 180,
+            rateEpisodes: [.init(range: 40...80, bpm: 130)]))
+        let expected = try #require(truth.episodes.first { $0.kind == .tachycardia })
+
+        let tachy = result.candidates.filter { $0.kind == .tachycardia }
+        let longest = try #require(
+            tachy.max { ($0.endSeconds - $0.startSeconds) < ($1.endSeconds - $1.startSeconds) },
+            "The 40 s @ 130 bpm episode must mint a candidate at the 60–100 default")
+        #expect(abs(longest.startSeconds - expected.startSeconds) < Self.edgeSlopSeconds,
+                "Start \(longest.startSeconds) vs truth \(expected.startSeconds)")
+        #expect(abs(longest.endSeconds - expected.endSeconds) < Self.edgeSlopSeconds,
+                "End \(longest.endSeconds) vs truth \(expected.endSeconds)")
+        #expect(result.candidates.filter { $0.kind == .bradycardia }.isEmpty,
+                "Nothing bradycardic was constructed")
+    }
+
+    @Test("The minDurationSeconds gate is exact at the run's own boundary")
+    func minDurationGateIsExact() throws {
+        let p = SyntheticECG.Parameters(
+            durationSeconds: 180,
+            rateEpisodes: [.init(range: 70...110, bpm: 45)])
+        let open = scanned(p).result.candidates.filter { $0.kind == .bradycardia }
+        let longest = try #require(
+            open.max { ($0.endSeconds - $0.startSeconds) < ($1.endSeconds - $1.startSeconds) })
+        let runSeconds = longest.endSeconds - longest.startSeconds
+
+        // Gate is `span >= window`: a window 0.1 s under the measured run
+        // keeps it, 0.1 s over kills it — and nothing longer exists to survive.
+        let under = scanned(p, rhythmConfig: .init(minDurationSeconds: runSeconds - 0.1))
+            .result.candidates.filter { $0.kind == .bradycardia }
+        #expect(under.contains { abs(($0.endSeconds - $0.startSeconds) - runSeconds) < 0.001 },
+                "The \(runSeconds) s run must survive a \(runSeconds - 0.1) s window")
+        let over = scanned(p, rhythmConfig: .init(minDurationSeconds: runSeconds + 0.1))
+            .result.candidates.filter { $0.kind == .bradycardia }
+        #expect(over.isEmpty,
+                "A window past the longest run must suppress every brady candidate, got \(over.count)")
+    }
+
+    @Test("An in-band rate change gets no truth label and mints nothing SUSTAINED — negative truth")
+    func inBandEpisodeStaysSilent() {
+        // 90 bpm is 667 ms R–R; the default 45 ms SDNN jitter legitimately
+        // pushes single intervals under 600 ms (> 100 bpm), so the policy-free
+        // core (minRun 1) factually reports momentary grazes — those are
+        // constructed reality, not false positives. The negative-truth claim
+        // is that nothing SUSTAINED exists: a 5 s time-in-band window (the
+        // X91 dial, far below the 40 s plateau, far above any jitter
+        // excursion's fraction of the ~10 s LF cycle) must leave silence.
+        let p = SyntheticECG.Parameters(
+            durationSeconds: 180,
+            rateEpisodes: [.init(range: 70...110, bpm: 90)])
+        let (truth, windowed) = scanned(p, rhythmConfig: .init(minDurationSeconds: 5))
+        #expect(truth.episodes.isEmpty, "An in-band episode gets no truth label")
+        let rateKinds = windowed.candidates.filter {
+            $0.kind == .bradycardia || $0.kind == .tachycardia
+        }
+        #expect(rateKinds.isEmpty,
+                "A 72→90→72 bpm record sustains nothing outside 60–100; got \(rateKinds)")
     }
 }
 #endif

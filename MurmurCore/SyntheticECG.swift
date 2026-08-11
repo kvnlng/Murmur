@@ -15,8 +15,9 @@
 //
 //  Because the truth is generated before the signal, every record carries an
 //  exact oracle: the R–R series the variability metrics must recover, the
-//  beat times the detector must find, and the episode boundaries (AF, noise)
-//  a detector's sensitivity is measured against. Fixed seed → bit-identical
+//  beat times the detector must find, and the episode boundaries (AF, noise,
+//  X101 rate) a detector's sensitivity is measured against. Fixed seed →
+//  bit-identical
 //  record; varied seed at fixed parameters → statistically equivalent
 //  families for detection-rate measurement.
 //
@@ -51,6 +52,14 @@ public enum SyntheticECG {
         /// suppressed P waves. Boundaries are exact truth for detectors that
         /// key on R–R irregularity.
         public var afEpisode: ClosedRange<Double>?
+        /// X101: spans where the constructed rate holds a target bpm. The
+        /// profile sits at `bpm` EXACTLY over each range — that range is the
+        /// truth boundary — with short linear ramps immediately OUTSIDE it
+        /// (`rateRampSeconds` per side), so band-edge crossing happens within
+        /// one ramp of the truth boundary, never inside it. Episodes must be
+        /// disjoint with ≥ 2×`rateRampSeconds` between them; bpm outside
+        /// ~(30, 170) hits the physiological R–R clamps and flattens.
+        public var rateEpisodes: [RateEpisode]
 
         public init(
             durationSeconds: Double = 180,
@@ -60,7 +69,8 @@ public enum SyntheticECG {
             lfHfRatio: Double = 1.5,
             seed: UInt64 = 0xEC6_5EED,
             noiseEpisodes: [ClosedRange<Double>] = [],
-            afEpisode: ClosedRange<Double>? = nil
+            afEpisode: ClosedRange<Double>? = nil,
+            rateEpisodes: [RateEpisode] = []
         ) {
             self.durationSeconds = durationSeconds
             self.ecgSampleRate = ecgSampleRate
@@ -70,6 +80,23 @@ public enum SyntheticECG {
             self.seed = seed
             self.noiseEpisodes = noiseEpisodes
             self.afEpisode = afEpisode
+            self.rateEpisodes = rateEpisodes
+        }
+    }
+
+    /// X101 (#172): one constructed rate episode. HRV deviations from the
+    /// spectral tachogram ride ON TOP of the episode's mean R–R, so the span
+    /// is a rate change, not a variability change — SDNN-sized jitter around
+    /// a bpm this far out of band never crosses back across a band edge
+    /// inside the plateau.
+    public struct RateEpisode: Equatable, Sendable, Codable {
+        /// Seconds from record start; the profile is at `bpm` exactly here.
+        public var range: ClosedRange<Double>
+        public var bpm: Double
+
+        public init(range: ClosedRange<Double>, bpm: Double) {
+            self.range = range
+            self.bpm = bpm
         }
     }
 
@@ -79,6 +106,14 @@ public enum SyntheticECG {
         public enum Kind: String, Sendable, Codable {
             case atrialFibrillation
             case noise
+            /// X101: rate episodes are labeled against the standard adult
+            /// definitional coordinates (60 / 100 bpm — the same definitional
+            /// edges `RhythmBandConfig` defaults to, not an app-chosen
+            /// severity). A constructed rate episode INSIDE 60–100 gets no
+            /// truth label at all: it is negative-truth material, a real rate
+            /// change a default-band detector must stay silent about.
+            case bradycardia
+            case tachycardia
         }
         public var kind: Kind
         public var startSeconds: Double
@@ -148,6 +183,19 @@ public enum SyntheticECG {
             episodes.append(TruthEpisode(
                 kind: .atrialFibrillation, startSeconds: af.lowerBound, endSeconds: af.upperBound
             ))
+        }
+        for episode in p.rateEpisodes {
+            // 60 / 100 are the definitional adult coordinates (see Kind doc);
+            // an in-band episode is deliberately unlabeled negative truth.
+            let kind: TruthEpisode.Kind? = episode.bpm < 60 ? .bradycardia
+                : episode.bpm > 100 ? .tachycardia : nil
+            if let kind {
+                episodes.append(TruthEpisode(
+                    kind: kind,
+                    startSeconds: episode.range.lowerBound,
+                    endSeconds: episode.range.upperBound
+                ))
+            }
         }
         var rr: [Double] = []
         rr.reserveCapacity(max(0, beats.count - 1))
@@ -224,10 +272,39 @@ public enum SyntheticECG {
         return x.map { meanRRMs + ($0 - mean) * scale }
     }
 
+    /// X101: ramp length OUTSIDE each rate-episode edge. Short enough that a
+    /// detector's band-entry point lands within a couple of R–R of the truth
+    /// boundary; the plateau itself never contains ramp samples, so the
+    /// episode range IS the at-target span.
+    static let rateRampSeconds = 1.5
+
+    /// The constructed instantaneous heart rate at `t`: baseline mean
+    /// everywhere, the episode's target inside its range, linear blend on
+    /// the ramps just outside. This — not the detector — is what the truth
+    /// episodes describe.
+    private static func constructedBpm(_ p: Parameters, at t: Double) -> Double {
+        for episode in p.rateEpisodes {
+            if episode.range.contains(t) { return episode.bpm }
+            let rampIn = episode.range.lowerBound - rateRampSeconds
+            if t >= rampIn, t < episode.range.lowerBound {
+                let f = (t - rampIn) / rateRampSeconds
+                return p.meanHeartRateBPM + f * (episode.bpm - p.meanHeartRateBPM)
+            }
+            let rampOut = episode.range.upperBound + rateRampSeconds
+            if t > episode.range.upperBound, t <= rampOut {
+                let f = (t - episode.range.upperBound) / rateRampSeconds
+                return episode.bpm + f * (p.meanHeartRateBPM - episode.bpm)
+            }
+        }
+        return p.meanHeartRateBPM
+    }
+
     /// Integrate the tachogram into beat times: each beat schedules the next
     /// one R–R later, reading the grid at the current time. Inside the AF
     /// span the grid is ignored: R–R draws are irregular and memoryless,
-    /// which is the property AF detectors key on.
+    /// which is the property AF detectors key on. Rate episodes shift the
+    /// local mean R–R while the grid's HRV DEVIATION rides on top, so the
+    /// spectral character survives the rate change.
     private static func placeBeats(
         _ p: Parameters, grid: [Double], rng: inout SplitMix64
     ) -> [Double] {
@@ -244,7 +321,9 @@ public enum SyntheticECG {
                 rrMs = min(1500, max(280, rrMs))
             } else {
                 let idx = min(grid.count - 1, max(0, Int(t * rrGridHz)))
-                rrMs = min(2000, max(350, grid[idx]))
+                let hrvDeviationMs = grid[idx] - meanRRMs
+                rrMs = 60_000 / constructedBpm(p, at: t) + hrvDeviationMs
+                rrMs = min(2000, max(350, rrMs))
             }
             t += rrMs / 1000
         }
