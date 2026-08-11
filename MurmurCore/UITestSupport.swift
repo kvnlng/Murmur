@@ -296,6 +296,20 @@ enum UITestSupport {
         return ProcessInfo.processInfo.arguments.contains("--ui-test-sample-rich") ? 180 : nil
     }
 
+    /// X105 (#176): a NON-numeric value of the same flag selects a canned
+    /// edge-state fixture — `--ui-test-sample-rich=flatline` (15 s full
+    /// disconnect mid-record) or `=dropout` (lead I flat for the whole
+    /// record). Generation through the real import path, per the X99/X100
+    /// lesson — an edge state is a record the app opens, not an inject flag.
+    enum RichSampleVariant: String {
+        case flatline
+        case dropout
+    }
+
+    static var richSampleVariant: RichSampleVariant? {
+        value(forFlag: "ui-test-sample-rich").flatMap(RichSampleVariant.init(rawValue:))
+    }
+
     /// True when `--ui-test-arrhythmia-candidates` is passed. Same bypass as
     /// `injectVTVFCandidates`, for the arrhythmia scan (A2): BedsideView
     /// publishes a fixed candidate set into `ArrhythmiaScanContext` so the

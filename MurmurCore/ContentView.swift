@@ -454,16 +454,34 @@ public struct ContentView: View {
         }
     }
 
+    /// X105 (#176): the canned edge-state fixtures behind
+    /// `--ui-test-sample-rich=<variant>`. Constructed states, not inject
+    /// flags — each is an ordinary record the app opens through the real
+    /// import path.
+    private static func richVariantParameters(
+        _ variant: UITestSupport.RichSampleVariant
+    ) -> SyntheticECG.Parameters {
+        switch variant {
+        case .flatline:
+            // A 15 s full disconnect mid-record: every lead flat, artifact
+            // lane at 0.9 in agreement — the flat-line lane-plot state.
+            return SyntheticECG.Parameters(flatlineSpans: [.init(range: 60...75)])
+        case .dropout:
+            // The DEFAULT PRIMARY lead is the dead one, deliberately — this
+            // is the primary-lead-fallback / flat-panel surface, not just a
+            // quiet overlay entry.
+            return SyntheticECG.Parameters(droppedLeads: ["I"])
+        }
+    }
+
     /// X99 — same shape as `loadSampleFixture`, but generation + import of a
     /// minutes-long record is real work, so it runs off-main behind a brief
     /// empty state rather than blocking the first frame.
-    private func loadRichSampleFixture(durationSeconds: Double) {
+    private func loadRichSampleFixture(parameters: SyntheticECG.Parameters) {
         Task { @MainActor in
             do {
                 let directory = try await Task.detached(priority: .userInitiated) {
-                    try SyntheticRecording.makeRichFixture(
-                        parameters: SyntheticECG.Parameters(durationSeconds: durationSeconds)
-                    )
+                    try SyntheticRecording.makeRichFixture(parameters: parameters)
                 }.value
                 let recording = try RecordingStore.shared.loadManifest(at: directory)
                 setAppState(.directView(directory: directory, recording: recording))
@@ -974,8 +992,12 @@ public struct ContentView: View {
         let args = ProcessInfo.processInfo.arguments
         // X99: the rich fixture outranks the plain one when both are passed —
         // a test asking for realism means it.
+        if let variant = UITestSupport.richSampleVariant {
+            loadRichSampleFixture(parameters: Self.richVariantParameters(variant))
+            return
+        }
         if let seconds = UITestSupport.richSampleDurationSeconds {
-            loadRichSampleFixture(durationSeconds: seconds)
+            loadRichSampleFixture(parameters: SyntheticECG.Parameters(durationSeconds: seconds))
             return
         }
         if args.contains("--ui-test-sample") {
