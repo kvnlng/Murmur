@@ -135,23 +135,63 @@ struct ArrhythmiaScanOrchestrator: View {
         let leadName = namesAligned && result.quality.leadUsed < leadNames.count
             ? leadNames[result.quality.leadUsed]
             : nil
-        let annotations = result.candidates.map { candidate in
-            ArrhythmiaCandidateSource.makeAnnotation(
-                kind: Self.coreKind(candidate.kind),
-                startSample: Int64(candidate.startSeconds * sampleRate),
-                endSample: Int64(candidate.endSeconds * sampleRate),
-                detail: candidate.detail,
-                confidence: candidate.confidence,
-                lead: leadName
-            )
-        }
+
+        let preflightWindows = Self.preflightWindows(from: result.quality)
+        let annotations = Self.annotations(
+            from: result.candidates, sampleRate: sampleRate,
+            leadName: leadName, preflightWindows: preflightWindows)
 
         let caption = Self.caption(
             rhythmConfig: rhythmConfig, pauseConfig: pauseConfig,
             afibConfig: afibConfig, quality: result.quality, leadName: leadName)
 
         await MainActor.run {
-            scanContext.setCandidates(annotations, parametersCaption: caption)
+            scanContext.setCandidates(annotations, parametersCaption: caption,
+                                      preflightWindows: preflightWindows)
+        }
+    }
+
+    /// A3: the σ lookup, made publishable. The scan's windows carry the
+    /// calibrated sensitivity; the error band comes from the same table the
+    /// service scanned with (its default — if a custom table is ever passed
+    /// to `scan`, look the bands up on THAT one).
+    private static func preflightWindows(
+        from quality: ArrhythmiaScanQuality
+    ) -> [ArrhythmiaPreflightWindow] {
+        let calibration = QRSQualityCalibration.builtInNSTDBElectrodeMotion
+        return quality.qualityWindows.map { window in
+            ArrhythmiaPreflightWindow(
+                startSeconds: window.startSeconds,
+                endSeconds: window.endSeconds,
+                sensitivity: window.sensitivity,
+                errP90Ms: calibration.band(forQuality: window.quality).p90AbsErrMs,
+                flagged: window.flagged
+            )
+        }
+    }
+
+    /// A3: a candidate standing on flagged ground says so on its row — the
+    /// detail stays factual (a calibrated number, not a verdict).
+    private static func annotations(
+        from candidates: [ArrhythmiaCandidate],
+        sampleRate: Double,
+        leadName: String?,
+        preflightWindows: [ArrhythmiaPreflightWindow]
+    ) -> [Annotation] {
+        candidates.map { candidate in
+            let qualifier = ArrhythmiaScanContext.flaggedWindowQualifier(
+                spanStartSeconds: candidate.startSeconds,
+                spanEndSeconds: candidate.endSeconds,
+                windows: preflightWindows
+            )
+            return ArrhythmiaCandidateSource.makeAnnotation(
+                kind: Self.coreKind(candidate.kind),
+                startSample: Int64(candidate.startSeconds * sampleRate),
+                endSample: Int64(candidate.endSeconds * sampleRate),
+                detail: qualifier.map { "\(candidate.detail) · \($0)" } ?? candidate.detail,
+                confidence: candidate.confidence,
+                lead: leadName
+            )
         }
     }
 

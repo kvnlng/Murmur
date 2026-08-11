@@ -159,6 +159,10 @@ struct FindingsPanel: View {
     /// VT/VF `regulatoryNotice`, which the orchestrator may source from
     /// model metadata — this detector has no model to speak for it.
     var arrhythmiaRegulatoryNotice: String = "RESEARCH USE ONLY — not for diagnosis"
+    /// A3: the scan's calibrated per-window pre-flight read — rendered in
+    /// the dials popover so the analyst sees what the σ lookup says about
+    /// this recording's signal BEFORE weighing its candidates.
+    var arrhythmiaPreflightWindows: [ArrhythmiaPreflightWindow] = []
 
     @State private var sort: FindingSort = .structural
     @State private var expandedGroups: Set<String> = []
@@ -1884,6 +1888,21 @@ struct FindingsPanel: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            // A3: the pre-flight read — the σ lookup's verdict on this
+            // recording's signal, stated up front so the analyst weighs the
+            // candidates knowing what the measurements were worth. The app
+            // states its confidence; the analyst sets the bar.
+            if let preflight = ArrhythmiaScanContext.preflightSummary(
+                windows: arrhythmiaPreflightWindows) {
+                Divider()
+                Text("Signal-quality pre-flight")
+                    .font(.subheadline.weight(.semibold))
+                Text(preflight)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("arrhythmia-preflight-read")
+            }
             HStack {
                 Spacer()
                 Button("Reset to 60–100 bpm, any duration") {

@@ -89,6 +89,36 @@ public enum ArrhythmiaCandidateSource {
     public static let dispositionFileName = "arrhythmia-dispositions.json"
 }
 
+/// A3: one calibrated pre-flight window, as primitives — MurmurCore never
+/// imports MurmurMetrics, so the orchestrator maps `QRSQualityWindow` (+ the
+/// calibration table's error band) into this before publishing. The numbers
+/// are the σ lookup: what the NSTDB-calibrated table says QRS detection is
+/// worth at this window's measured signal quality.
+public struct ArrhythmiaPreflightWindow: Sendable, Equatable {
+    public let startSeconds: Double
+    public let endSeconds: Double
+    /// Calibrated detection sensitivity at this window's quality.
+    public let sensitivity: Double
+    /// Calibrated R-peak placement error P90 (ms) at this window's quality.
+    public let errP90Ms: Double
+    /// Below the calibration's flagged bound — the collapsed-reliability band.
+    public let flagged: Bool
+
+    public init(
+        startSeconds: Double,
+        endSeconds: Double,
+        sensitivity: Double,
+        errP90Ms: Double,
+        flagged: Bool
+    ) {
+        self.startSeconds = startSeconds
+        self.endSeconds = endSeconds
+        self.sensitivity = sensitivity
+        self.errP90Ms = errP90Ms
+        self.flagged = flagged
+    }
+}
+
 /// Process-wide bridge for the arrhythmia scan flow. `@MainActor`
 /// because every consumer (review queue, channel overlays) is on the
 /// main actor.
@@ -112,18 +142,30 @@ public final class ArrhythmiaScanContext {
     /// findings-queue RUO surface).
     public var regulatoryNotice: String = "RESEARCH USE ONLY — not for diagnosis"
 
+    /// A3: the scan's per-window pre-flight read on the analysed lead, in
+    /// time order. Empty until a scan completes (the "scanning…"
+    /// placeholder publishes no windows — a stale read over a rescan would
+    /// cite the wrong pass).
+    public private(set) var preflightWindows: [ArrhythmiaPreflightWindow] = []
+
     public init() {}
 
     /// Publish a completed scan's candidates for the queue to render.
-    public func setCandidates(_ candidates: [Annotation], parametersCaption: String?) {
+    public func setCandidates(
+        _ candidates: [Annotation],
+        parametersCaption: String?,
+        preflightWindows: [ArrhythmiaPreflightWindow] = []
+    ) {
         self.candidates = candidates
         self.parametersCaption = parametersCaption
+        self.preflightWindows = preflightWindows
     }
 
     /// Drop all candidates — recording closed or entitlement lost.
     public func clearCandidates() {
         candidates = []
         parametersCaption = nil
+        preflightWindows = []
     }
 
     /// The per-recording quality read, composed from primitives so the
@@ -134,6 +176,47 @@ public final class ArrhythmiaScanContext {
     /// (A3): how many calibrated-quality windows fell in the collapsed-
     /// reliability band. Zero total windows (a recording too short for one
     /// stable read) omits the part rather than fabricating a clean bill.
+    /// A3: the pre-flight read, worded — what the σ lookup says about this
+    /// recording BEFORE the analyst spends attention on its candidates. Pure
+    /// so the wording is testable without MurmurMetrics. Facts only: counts
+    /// and the calibrated floor/ceiling over the flagged windows; the analyst
+    /// decides what to do about them (the lever stance — never a cutoff).
+    public nonisolated static func preflightSummary(
+        windows: [ArrhythmiaPreflightWindow]
+    ) -> String? {
+        guard let first = windows.first else { return nil }
+        let windowSeconds = Int((first.endSeconds - first.startSeconds).rounded())
+        let flagged = windows.filter(\.flagged)
+        guard let seFloor = flagged.map(\.sensitivity).min(),
+              let errCeiling = flagged.map(\.errP90Ms).max() else {
+            return "All \(windows.count) × \(windowSeconds) s windows clear of the flagged quality band."
+        }
+        return String(
+            format: "%d of %d × %d s windows in the flagged quality band — "
+                + "calibrated read there: beat detection sensitivity down to %.2f, "
+                + "R-peak placement error P90 up to %.0f ms.",
+            flagged.count, windows.count, windowSeconds, seFloor, errCeiling
+        )
+    }
+
+    /// A3: the σ qualifier for one candidate span — names the worst flagged
+    /// window the span touches, nil when it stands entirely on clear ground.
+    /// Appended to the candidate's factual detail at mint time, so a
+    /// candidate built on collapsed-quality beats SAYS so on its row.
+    public nonisolated static func flaggedWindowQualifier(
+        spanStartSeconds: Double,
+        spanEndSeconds: Double,
+        windows: [ArrhythmiaPreflightWindow]
+    ) -> String? {
+        let overlapping = windows.filter {
+            $0.flagged && $0.startSeconds < spanEndSeconds && $0.endSeconds > spanStartSeconds
+        }
+        guard let worst = overlapping.min(by: { $0.sensitivity < $1.sensitivity }) else {
+            return nil
+        }
+        return String(format: "flagged-quality window (Se ~%.2f)", worst.sensitivity)
+    }
+
     public nonisolated static func qualityCaption(
         beatCount: Int,
         leadName: String?,

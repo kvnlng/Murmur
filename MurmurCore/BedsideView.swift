@@ -434,7 +434,8 @@ struct BedsideView: View {
             arrhythmiaCandidates: arrhythmiaContext.candidates,
             arrhythmiaDispositionStore: arrhythmiaDispositionStore,
             arrhythmiaParametersCaption: arrhythmiaContext.parametersCaption,
-            arrhythmiaRegulatoryNotice: arrhythmiaContext.regulatoryNotice
+            arrhythmiaRegulatoryNotice: arrhythmiaContext.regulatoryNotice,
+            arrhythmiaPreflightWindows: arrhythmiaContext.preflightWindows
         )
         .inspectorColumnWidth(min: 260, ideal: 340, max: 500)
     }

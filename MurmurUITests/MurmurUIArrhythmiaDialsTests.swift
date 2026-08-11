@@ -136,4 +136,37 @@ final class MurmurUIArrhythmiaDialsTests: XCTestCase {
         XCTAssertEqual(suppressed, baseline,
                        "A 175 s window over a 180 s record must suppress every rate-band run")
     }
+
+    /// A3 (#2): the σ lookup surfaces as the popover's pre-flight read. The
+    /// X105 flatline fixture is the driver: its 15 s full disconnect
+    /// collapses at least one calibration window to the bottom band, and the
+    /// popover must state the calibrated consequence, not just a count.
+    @MainActor
+    func testPreflightReadSurfacesFlaggedQuality() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-sample-rich=flatline", "--ui-test-grant-studio"]
+        app.launch()
+
+        let header = app.descendants(matching: .any)
+            .matching(identifier: "arrhythmia-candidate-group-header").firstMatch
+        XCTAssertTrue(header.waitForExistence(timeout: 30),
+                      "The scan should run over the flat-line record and mount the group")
+        // Wait for a completed scan (the placeholder publishes no windows):
+        // the flat gap mints at least one candidate, so a non-zero count is
+        // the completion signal.
+        XCTAssertNotNil(waitForCandidateCount(app, toReach: { $0 > 0 }),
+                        "The 15 s disconnect should mint pause/rate candidates")
+
+        openDials(app)
+        let read = app.popovers.descendants(matching: .staticText)
+            .matching(identifier: "arrhythmia-preflight-read").firstMatch
+        XCTAssertTrue(read.waitForExistence(timeout: 5),
+                      "A completed scan must render the pre-flight read in the dials popover")
+        let text = read.label.isEmpty ? ((read.value as? String) ?? "") : read.label
+        XCTAssertTrue(text.contains("flagged quality band"),
+                      "The read must name the flagged windows, got: \(text)")
+        XCTAssertTrue(text.contains("sensitivity down to"),
+                      "The read must state the calibrated consequence (the σ lookup), got: \(text)")
+        closeDials(app)
+    }
 }
