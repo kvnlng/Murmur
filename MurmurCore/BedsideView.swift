@@ -2273,6 +2273,10 @@ struct BedsideView: View {
                     markingsContext.qtcFormula = formula
                 },
                 qtWithheldReason: markingsContext.qtWithheldReason,
+                rrCVFlagPercent: trendLaneContext.rrCVFlagPercent,
+                onPickRRCVFlag: { bound in
+                    trendLaneContext.rrCVFlagPercent = bound
+                },
                 tOffsetGateEnabled: markingsContext.tOffsetExclusionEnabled,
                 tOffsetGateScore: markingsContext.tOffsetExclusionScore,
                 onSetTOffsetGate: { enabled, score in
