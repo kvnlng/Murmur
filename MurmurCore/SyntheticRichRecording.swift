@@ -55,7 +55,11 @@ extension SyntheticRecording {
         heaLines.append("# Rhythm: sinus, LF/HF \(parameters.lfHfRatio)"
             + (parameters.afEpisode != nil ? ", one simulated AF episode" : "")
             + (parameters.rateEpisodes.isEmpty ? ""
-               : ", \(parameters.rateEpisodes.count) constructed rate episode(s)"))
+               : ", \(parameters.rateEpisodes.count) constructed rate episode(s)")
+            + (parameters.pvcTimesSeconds.isEmpty ? ""
+               : ", \(parameters.pvcTimesSeconds.count) constructed PVC(s)")
+            + (parameters.wideComplexRuns.isEmpty ? ""
+               : ", \(parameters.wideComplexRuns.count) wide-complex run(s)"))
         let heaURL = directory.appendingPathComponent("\(recordName).hea")
         try (heaLines.joined(separator: "\n") + "\n")
             .write(to: heaURL, atomically: true, encoding: .utf8)
@@ -142,22 +146,25 @@ extension SyntheticRecording {
 
     // MARK: - Truth sidecars
 
-    /// TRUE R peaks as annotator-coded normals (`source` prefixed "wfdb.atr"
-    /// + category N is what `normalBeatSampleIndices()` reads). No fabricated
-    /// VT/VF here — the rich record's findings are whatever the detectors
-    /// find.
+    /// TRUE R peaks as annotator-coded beats (`source` prefixed "wfdb.atr";
+    /// category N is what `normalBeatSampleIndices()` reads). X104: ectopic
+    /// beats are coded "V" — exactly like a real annotator file — so the
+    /// variability pipeline EXCLUDES them by the same rule it applies to
+    /// real records. No fabricated VT/VF verdicts here — the rich record's
+    /// findings are whatever the detectors find.
     private static func writeTruthAnnotations(
         _ truth: SyntheticECG.Truth,
         recordName: String,
         into directory: URL
     ) throws {
-        let findings: [String] = truth.beatSampleIndices.map { sample in
-            """
+        let findings: [String] = zip(truth.beatSampleIndices, truth.beatFiducials).map { sample, beat in
+            let code = beat.kind == .sinus ? "N" : "V"
+            return """
             {
               "kind": "point",
               "startSample": \(sample),
-              "category": "N",
-              "label": "N",
+              "category": "\(code)",
+              "label": "\(code)",
               "source": "wfdb.atr.synth"
             }
             """
