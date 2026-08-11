@@ -108,10 +108,12 @@ struct FiducialOverlay: View {
         // disagree without a test noticing.
         let drawable = policy.renderableLayers.intersection(enabledLayers)
 
+        let focused = beat.rPeakSampleIndex == focusedRPeakSampleIndex
+
         // QRS boundaries at .qrsOnly and higher, gated by layer toggle.
         if drawable.contains(.qrs) {
-            if let q = beat.qrsOnset { boundaryTick(fiducial: q, colorStyle: .qrs) }
-            if let s = beat.qrsOffset { boundaryTick(fiducial: s, colorStyle: .qrs) }
+            if let q = beat.qrsOnset { boundaryTick(fiducial: q, colorStyle: .qrs, focused: focused) }
+            if let s = beat.qrsOffset { boundaryTick(fiducial: s, colorStyle: .qrs, focused: focused) }
         }
 
         // P / T fiducials at .fullFiducials, each gated by its own
@@ -119,12 +121,12 @@ struct FiducialOverlay: View {
         // vice versa without changing the zoom.
         if detailLevel == .fullFiducials {
             if drawable.contains(.p) {
-                if let p = beat.pOnset  { boundaryTick(fiducial: p, colorStyle: .p) }
-                if let p = beat.pOffset { boundaryTick(fiducial: p, colorStyle: .p) }
+                if let p = beat.pOnset { boundaryTick(fiducial: p, colorStyle: .p, focused: focused) }
+                if let p = beat.pOffset { boundaryTick(fiducial: p, colorStyle: .p, focused: focused) }
             }
             if drawable.contains(.t) {
-                if let t = beat.tOnset  { boundaryTick(fiducial: t, colorStyle: .t) }
-                if let t = beat.tOffset { boundaryTick(fiducial: t, colorStyle: .t) }
+                if let t = beat.tOnset { boundaryTick(fiducial: t, colorStyle: .t, focused: focused) }
+                if let t = beat.tOffset { boundaryTick(fiducial: t, colorStyle: .t, focused: focused) }
                 // Tangent↔isoelectric bracket (project_qtc_trend_uncertainty_wireup_spec.md
                 // Phase 6): the T-offset fiducial is the tangent-based
                 // POINT estimate; the isoelectric endpoint marks where
@@ -190,11 +192,30 @@ struct FiducialOverlay: View {
         }
     }
 
+    /// Where the glyph band ends and the trace's space begins — the X93
+    /// hairlines start here so the confidence dots stay legible.
+    private static let hairlineTopInset: CGFloat = 28
+
     /// A short tick + optional dot for a boundary fiducial (P/QRS/T).
     /// Confidence modulates alpha; low-confidence gets a hollow ring
     /// so the analyst can spot it.
+    ///
+    /// X93 (#142): at full-fiducial zoom — exactly the window the Layers
+    /// chip claims "all" — each drawn boundary ALSO extends as a faint
+    /// full-height hairline through the trace. The 8-pt ticks lived only
+    /// in the top glyph band, hundreds of points above the waveform they
+    /// annotate, and read as grid noise: "available" on the chip while
+    /// nothing visible touched the complexes (Kevin's 2026-08-09 note).
+    /// The mockup reserved full-height lines for the focused beat; this
+    /// extends them, faintly, to every drawn boundary at the one zoom
+    /// where the spec says the analyst reads intervals — the focused
+    /// beat's lines render stronger, keeping that hierarchy.
     @ViewBuilder
-    private func boundaryTick(fiducial: MarkingsFiducial, colorStyle: FiducialColor) -> some View {
+    private func boundaryTick(
+        fiducial: MarkingsFiducial,
+        colorStyle: FiducialColor,
+        focused: Bool = false
+    ) -> some View {
         if let x = xPosition(forSample: fiducial.sampleIndex) {
             // Alpha bottoms out at 0.30 so even low-confidence marks
             // stay visible (analyst can then click to edit).
@@ -218,7 +239,22 @@ struct FiducialOverlay: View {
                     .frame(width: 4, height: 4)
                     .offset(x: x - 2, y: 22.5)
             }
+            if detailLevel == .fullFiducials, canvasSize.height > Self.hairlineTopInset {
+                Rectangle()
+                    .fill(colorStyle.color.opacity(
+                        hairlineAlpha(confidence: fiducial.confidence, focused: focused)))
+                    .frame(width: 1, height: canvasSize.height - Self.hairlineTopInset)
+                    .offset(x: x - 0.5, y: Self.hairlineTopInset)
+            }
         }
+    }
+
+    /// Faint for context, stronger where the analyst is looking. Confidence
+    /// still modulates — an unsure boundary must not paint an authoritative
+    /// line — but within a band that stays visible on the red ECG paper.
+    private func hairlineAlpha(confidence: Double, focused: Bool) -> Double {
+        let base = 0.10 + 0.12 * min(max(confidence, 0), 1)
+        return focused ? min(0.45, base * 2) : base
     }
 
     // MARK: - Coordinate mapping
