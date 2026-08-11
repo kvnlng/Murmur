@@ -39,17 +39,23 @@ final class MurmurUICalibrationTests: XCTestCase {
         XCTAssertTrue(readout.waitForExistence(timeout: 10),
                       "The persistent calibration readout should be visible on open, without hover")
 
-        let label = readout.label
+        // The combined element exposes its text through VALUE, not label, on
+        // macOS (probed under X16) — an empty read would pass every check
+        // below vacuously, so insist on real text first.
+        let text = (readout.value as? String).flatMap { $0.isEmpty ? nil : $0 }
+            ?? readout.label
+        XCTAssertFalse(text.isEmpty,
+                       "The calibration readout should expose its text via value (or label) — got neither")
         // The core of X50: the open state must never self-report as off paper.
-        XCTAssertFalse(label.contains("non-standard"),
-                       "A freshly opened raw record must not report a non-standard ruler — got \"\(label)\"")
+        XCTAssertFalse(text.contains("non-standard"),
+                       "A freshly opened raw record must not report a non-standard ruler — got \"\(text)\"")
         // On a trustworthy display the readout is in mm and must read standard
         // paper exactly. On a degenerate display (X40 §7) it honestly falls back
         // to points and asserts no mm scale — which the check above already
         // covers — so only tighten to the exact string when mm are shown.
-        if label.contains("mm/mV") {
-            XCTAssertTrue(label.contains("25 mm/s · 10 mm/mV"),
-                          "Open state should be standard 25 mm/s · 10 mm/mV — got \"\(label)\"")
+        if text.contains("mm/mV") {
+            XCTAssertTrue(text.contains("25 mm/s · 10 mm/mV"),
+                          "Open state should be standard 25 mm/s · 10 mm/mV — got \"\(text)\"")
         }
     }
 }

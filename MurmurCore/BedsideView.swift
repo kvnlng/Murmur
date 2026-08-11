@@ -811,6 +811,25 @@ struct BedsideView: View {
     /// capture) plus X50's second half — until both land, do not read this
     /// guard as if `.mur` were already exempt.
     private func applyOpenCalibrationIfNeeded() {
+        #if DEBUG
+        // Under XCUI the X100 window policy (`applyTestWindowPolicy`) sizes
+        // the window ASYNCHRONOUSLY after launch, so the first-layout canvas
+        // a one-shot snap would use is transient: once the resize lands, the
+        // viewport's samples are frozen but the canvas is wider, and the
+        // readout reports 25 × (settled ÷ snap-time width) mm/s —
+        // "non-standard" on open, the exact X50 own-goal, manufactured by the
+        // harness. Under the X50 opt-in the snap therefore RE-APPLIES on
+        // every canvas change: the same `applyStandardView` wiring production
+        // runs once, held through the harness's late resize. (This flag is
+        // exclusively the X50 wire-up guard's; nothing restored or manually
+        // set exists under it for the re-snap to clobber.)
+        if UITestSupport.standardOpenEnabled {
+            guard calibration.canvasSize.width > 0 else { return }
+            hasAppliedOpenCalibration = true
+            applyStandardView(anchorFraction: 0)
+            return
+        }
+        #endif
         guard !hasAppliedOpenCalibration,
               calibration.canvasSize.width > 0,
               calibration.gainMillimetersPerMillivolt == nil else { return }
@@ -820,7 +839,7 @@ struct BedsideView: View {
         // machine. Keep the legacy open width in tests unless a test explicitly
         // opts in (the dedicated X50 wire-up guard does). Non-test launches
         // always snap.
-        if UITestSupport.isRunningUITest && !UITestSupport.standardOpenEnabled {
+        if UITestSupport.isRunningUITest {
             hasAppliedOpenCalibration = true
             return
         }
