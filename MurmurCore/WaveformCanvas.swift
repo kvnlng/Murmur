@@ -264,8 +264,16 @@ struct WaveformCanvas: NSViewRepresentable {
         renderer.style.trace = traceColor ?? WaveformStyle().trace
         renderer.uniforms.startSample = Float(startSample)
         renderer.uniforms.endSample   = Float(endSample)
-        renderer.uniforms.yMin        = Float(displayMin)
-        renderer.uniforms.yMax        = Float(displayMax)
+        // X16: the y uniforms live in STORED-sample data space — the GPU
+        // compares them directly against samples[i]. displayMin/Max are TRUE
+        // millivolts; with a gain reinterpretation (true = stored × f) the
+        // stored-space window is the true window ÷ f. The axis labels, the
+        // ladder's tier RAMP, and the calibration readout all keep the TRUE
+        // window — this division (and the ladder spacing conversion below)
+        // is the single boundary where the two spaces meet.
+        let gainFactor = channel.appliedGainFactor
+        renderer.uniforms.yMin        = Float(displayMin / gainFactor)
+        renderer.uniforms.yMax        = Float(displayMax / gainFactor)
 
         // LOD selection based on the view's pixel width.
         let pixelWidth = Double(view.bounds.width)
@@ -295,7 +303,11 @@ struct WaveformCanvas: NSViewRepresentable {
                 plotWidthPoints: Double(view.bounds.width),
                 plotHeightPoints: Double(view.bounds.height)
             )
-            renderer.setGridLadder(ladder)
+            // X16: tier selection ran on the TRUE window (correct — on-screen
+            // spacing is a geometry fact), but the renderer bakes amplitude
+            // rules in the stored-unit space of its y uniforms, so the red
+            // 0.1/0.5 mV spacings convert at the same boundary.
+            renderer.setGridLadder(ladder.amplitudeSpacingScaled(dividedBy: gainFactor))
         }
 
         // Annotations — caller has already pre-filtered to the viewport.

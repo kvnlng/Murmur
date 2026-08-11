@@ -36,6 +36,10 @@ struct NoteAuthoringHooks {
     var beginQTCaliper: (Int64) -> Void
     var completeQTCaliper: (Int64) -> Void
     var cancelQTCaliper: () -> Void
+    /// X16: open the gain-reinterpretation sheet for a channel. Same gate as
+    /// findings (Editing + Studio) — reinterpreting a channel's gain is an
+    /// analyst assertion about the data, the same class of act as a finding.
+    var interpretGain: (Channel) -> Void
 }
 
 struct ChannelPanel: View {
@@ -289,11 +293,29 @@ struct ChannelPanel: View {
     /// baseline-centred window (10% headroom), sets the shared gain, and the
     /// view is then in a plain non-standard gain state the readout reports.
     /// Per-channel observed range but SHARED gain, matching the focused lead.
+    /// X16: the standing disclosure the gain badge and the context menu
+    /// share. Cites the header's claimed counts/mV when the bundle carries
+    /// it — the reinterpretation is auditable against what the header said.
+    private var gainFactorHelp: String {
+        let base = String(
+            format: "Analyst gain reinterpretation: true mV = stored × %g",
+            channel.appliedGainFactor)
+        guard let header = channel.headerGainCountsPerUnit else {
+            return base + " (header gain unknown)"
+        }
+        return base + String(format: " (header said %g counts/%@)",
+                             header, channel.unit.isEmpty ? "mV" : channel.unit)
+    }
+
     private func fitAmplitudeToWindow() {
         guard let range = sampleRange, !range.isEmpty,
               canvasHeightPoints > 0,
               let mmPerPoint = DisplayMetrics.millimetersPerPoint() else { return }
-        let extent = Double(max(abs(range.min), abs(range.max))) * 1.1
+        // X16: fit against TRUE millivolts — the window the gain dial is
+        // denominated in — so a reinterpreted channel fills the canvas with
+        // its corrected amplitude, not its stored one.
+        let extent = Double(max(abs(range.min), abs(range.max)))
+            * channel.appliedGainFactor * 1.1
         guard let gain = CalibrationMath.fitGain(
             extentMillivolts: extent,
             canvasHeightPoints: Double(canvasHeightPoints),
@@ -627,6 +649,19 @@ struct ChannelPanel: View {
                         .disabled(!hooks.canAuthorFindings)
                         .accessibilityIdentifier("bedside-context-qt-caliper-begin")
                     }
+                    Divider()
+                    // X16: gain reinterpretation — an assertion about the
+                    // DATA, gated like findings. The label reads back the
+                    // current factor so the menu states the channel's
+                    // standing interpretation.
+                    Button(channel.appliedGainFactor == 1
+                           ? "Interpret gain for \(channel.name)…"
+                           : String(format: "Interpret gain for %@ (×%g)…",
+                                    channel.name, channel.appliedGainFactor)) {
+                        hooks.interpretGain(channel)
+                    }
+                    .disabled(!hooks.canAuthorFindings)
+                    .accessibilityIdentifier("bedside-context-interpret-gain")
                     if !hooks.isEditing {
                         Divider()
                         // Same rule as every other authoring surface: say WHY
@@ -877,6 +912,16 @@ struct ChannelPanel: View {
             Text(channel.unit.isEmpty ? "" : "(\(channel.unit))")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            // X16: a reinterpreted channel wears its factor openly — every
+            // amplitude this panel asserts is stored × factor, and the badge
+            // is the standing disclosure of that.
+            if channel.appliedGainFactor != 1 {
+                Text(String(format: "gain ×%g", channel.appliedGainFactor))
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .help(gainFactorHelp)
+                    .accessibilityIdentifier("channel-gain-factor-\(channel.name)")
+            }
             if !clippedRanges.isEmpty {
                 Label("\(clippedRanges.count) off-scale", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption2.weight(.semibold))
@@ -884,7 +929,10 @@ struct ChannelPanel: View {
                     .help("\(clippedRanges.count) segment\(clippedRanges.count == 1 ? "" : "s") exceed ±5 mV and aren't drawn")
             }
             if let range = sampleRange, !range.isEmpty {
-                Text(String(format: "%.2f – %.2f", range.min, range.max))
+                // X16: the badge asserts TRUE millivolts — stored × factor.
+                Text(String(format: "%.2f – %.2f",
+                            Double(range.min) * channel.appliedGainFactor,
+                            Double(range.max) * channel.appliedGainFactor))
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.tertiary)
                     .help("Recording-wide voltage range observed on this channel")
@@ -924,6 +972,7 @@ struct ChannelPanel: View {
     private func scanForOffScale() async {
         let url = directory.appendingPathComponent(channel.storageFileName)
         let total = channel.sampleCount
+        let clipGainFactor = channel.appliedGainFactor
         guard total > 0 else { return }
         struct ScanResult: Sendable {
             let clipped: [ClippedRange]
@@ -934,10 +983,12 @@ struct ChannelPanel: View {
                 return ScanResult(clipped: [], range: nil)
             }
             let samples = access.samples(range: 0..<total)
+            // X16: the ±5 mV clinical band is a TRUE-millivolt claim; the
+            // stored samples compare against band ÷ factor.
             let clipped = ClippedRangeScanner.scan(
                 samples: samples,
-                clipMin: Float(Self.yMin),
-                clipMax: Float(Self.yMax)
+                clipMin: Float(Self.yMin / clipGainFactor),
+                clipMax: Float(Self.yMax / clipGainFactor)
             )
             let range = MinMaxScanner.scan(samples: samples)
             return ScanResult(clipped: clipped, range: range)

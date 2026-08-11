@@ -622,7 +622,14 @@ public struct ContentView: View {
 
     private func directShell(directory: URL, recording: Recording) -> some View {
         NavigationStack {
-            BedsideView(recording: recording, recordingDirectory: directory)
+            BedsideView(
+                recording: recording,
+                recordingDirectory: directory,
+                // X16: a gain reinterpretation mutates the manifest; the
+                // view's own `recording` is this state's copy, so the state
+                // must adopt the mutation for the panels to re-render.
+                onRecordingMutated: { setAppState(.directView(directory: directory, recording: $0)) }
+            )
                 .navigationTitle(recording.device)
                 .toolbar(id: MurmurToolbar.identifier) { overflowToolbarItems }
         }
@@ -693,7 +700,16 @@ public struct ContentView: View {
             case .importing(let progress):
                 importingPane(progress: progress)
             case .imported(let directory, let recording):
-                BedsideView(recording: recording, recordingDirectory: directory)
+                BedsideView(
+                    recording: recording,
+                    recordingDirectory: directory,
+                    // X16: same adoption as the direct view, into this
+                    // folder-entry's import cache.
+                    onRecordingMutated: { updated in
+                        importStates[key] = .imported(directory: directory, recording: updated)
+                        CurrentRecordingContext.shared.set(recording: updated, directory: directory)
+                    }
+                )
                     .id(recording.id)
             case .failed(let message):
                 failedPane(message: message, filename: key)
