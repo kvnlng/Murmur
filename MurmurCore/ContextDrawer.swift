@@ -28,6 +28,7 @@ import SwiftUI
 enum ContextDrawerSelection: Hashable {
     case hea
     case document
+    case morphology
     case note(UUID)
 }
 
@@ -54,6 +55,13 @@ struct ContextDrawer: View {
     /// The anchored notes as of the last session save/restore — the unsaved
     /// indicator compares against this. `nil` reads as an empty baseline.
     let savedNotes: [AnchoredNote]?
+    /// X112 — the computed morphology clusters, or nil when there is nothing
+    /// to show (no entitlement, no annotated beats). The row and editor
+    /// mount only when present.
+    let morphologySummary: MorphologySummary?
+    /// X112 — the analyst's endorsements: session work product owned by
+    /// BedsideView, same lifecycle as `notes`.
+    @Binding var morphologyEndorsements: [MorphologyEndorsement]
     var onJump: (AnchoredNote) -> Void
 
     @State private var searchText = ""
@@ -221,6 +229,16 @@ struct ContextDrawer: View {
                             identifier: "note-row-document"
                         )
                     }
+                    if let morphology = morphologySummary {
+                        fixedRow(
+                            selection: .morphology,
+                            icon: "waveform.path.ecg",
+                            title: "Morphology",
+                            badge: "\(morphology.cards.count) cluster\(morphology.cards.count == 1 ? "" : "s")",
+                            preview: morphologyPreview(morphology),
+                            identifier: "note-row-morphology"
+                        )
+                    }
                     ForEach(Array(filteredNotes.enumerated()), id: \.element.id) { index, note in
                         noteRow(note, index: index)
                     }
@@ -327,6 +345,16 @@ struct ContextDrawer: View {
         return sortedNotes.filter { $0.text.localizedCaseInsensitiveContains(query) }
     }
 
+    /// X112 — what the collapsed Morphology row says: adjudication state
+    /// first, because that is the fact the drawer exists to surface.
+    private func morphologyPreview(_ morphology: MorphologySummary) -> String {
+        let endorsed = morphologyEndorsements.count
+        if endorsed == 0 {
+            return "unadjudicated — no baseline endorsed"
+        }
+        return "\(endorsed) baseline\(endorsed == 1 ? "" : "s") endorsed"
+    }
+
     private var sortedNotes: [AnchoredNote] {
         sortByEdited
             ? notes.sorted { $0.modifiedAt > $1.modifiedAt }
@@ -341,6 +369,16 @@ struct ContextDrawer: View {
             switch selection {
             case .hea:
                 heaEditor
+            case .morphology:
+                if let morphology = morphologySummary {
+                    MorphologyPanel(
+                        summary: morphology,
+                        endorsements: $morphologyEndorsements,
+                        isEditing: isEditing)
+                } else {
+                    // The summary vanished under the selection (record swap).
+                    placeholder("Select a row to read or edit it.")
+                }
             case .note(let id):
                 if let index = notes.firstIndex(where: { $0.id == id }) {
                     noteEditor(index: index)

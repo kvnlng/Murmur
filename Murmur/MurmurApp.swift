@@ -146,6 +146,9 @@ struct MurmurApp: App {
                 // pause/AFib candidate spans to ArrhythmiaScanContext for the
                 // review queue + channel overlays.
                 .background(ArrhythmiaScanOrchestrator())
+                // X112 — morphology clusters for the Context drawer's
+                // Morphology section.
+                .background(MorphologyOrchestrator())
         }
         .defaultSize(width: 1320, height: 880)
         .commands {

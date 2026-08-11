@@ -5654,10 +5654,12 @@ struct IntervalTrendComputerTests {
             binSeconds: 120,
             templateBeatCount: 923,
             qtcFormulaName: "Bazett",
-            templateSelectionBasis: "annotator-coded normal (N)"
+            templateSelectionBasis: "unadjudicated — annotator-coded normal (N)"
         )
         #expect(out.reproCaption.contains("923"))
-        #expect(out.reproCaption.contains("annotator-coded normal (N)"))
+        // X112 §2: the default basis names its adjudication state — no
+        // analyst has endorsed the annotator-normal template.
+        #expect(out.reproCaption.contains("unadjudicated — annotator-coded normal (N)"))
         #expect(out.reproCaption.contains("spanning 0:00.0–1:00.0"))
     }
 

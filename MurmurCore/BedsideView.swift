@@ -150,6 +150,11 @@ struct BedsideView: View {
     /// travel in `sessionSnapshot` → `MurSessionState` and are written by
     /// File ▸ Save Session, never autosaved (DECISIONS §4).
     @State private var anchoredNotes: [AnchoredNote] = []
+    // X112 — morphology-cluster endorsements: session work product with the
+    // same lifecycle as anchored notes (reset with the view on record swap,
+    // saved via the session snapshot, restored from the .mur).
+    @State private var morphologyEndorsements: [MorphologyEndorsement] = []
+    @State private var morphologyContext = MorphologyContext.shared
     /// Which drawer row is open. Defaults to the notes.md document — the
     /// record-level surface that predates anchored notes.
     @State private var drawerSelection: ContextDrawerSelection? = .document
@@ -823,7 +828,10 @@ struct BedsideView: View {
             // X72: nil-when-empty so a session with no notes is byte-identical
             // to one saved before notes existed. Carried through
             // `replacingViewState` — omitting it there is the X11 wipe.
-            anchoredNotes: anchoredNotes.isEmpty ? nil : anchoredNotes
+            anchoredNotes: anchoredNotes.isEmpty ? nil : anchoredNotes,
+            // X112: same nil-when-empty discipline; carried through
+            // `replacingViewState` like the notes.
+            morphologyEndorsements: morphologyEndorsements.isEmpty ? nil : morphologyEndorsements
         )
     }
 
@@ -914,6 +922,12 @@ struct BedsideView: View {
         // fabricated empty list overwriting notes taken since open.
         if let notes = restore.anchoredNotes {
             anchoredNotes = notes
+        }
+        // X112: endorsements ride the same restore, same absent-stays-absent
+        // rule. Re-attachment to the recomputed clusters happens at render
+        // time by representative match — nothing to resolve here.
+        if let endorsements = restore.morphologyEndorsements {
+            morphologyEndorsements = endorsements
         }
         if let carried = context.pendingCarriedNotesBaseline {
             // X86: this restore came from CarriedSessionStore, not from a
@@ -2452,7 +2466,8 @@ struct BedsideView: View {
     /// `RecordContextPanel`'s notes.md editing wholesale.
     @ViewBuilder
     private var contextBar: some View {
-        if !recording.headerComments.isEmpty || recording.notesFileName != nil {
+        if !recording.headerComments.isEmpty || recording.notesFileName != nil
+            || morphologyContext.summary != nil {
             VStack(alignment: .leading, spacing: 6) {
                 Button {
                     withAnimation(.snappy(duration: 0.18)) {
@@ -2492,6 +2507,8 @@ struct BedsideView: View {
                         currentWindow: viewport.startSample...max(viewport.startSample, viewport.endSample),
                         currentLeadName: focusedChannel?.name,
                         savedNotes: CurrentRecordingContext.shared.sessionSavedNotes,
+                        morphologySummary: morphologyContext.summary,
+                        morphologyEndorsements: $morphologyEndorsements,
                         onJump: { note in jumpToNoteAnchor(note) }
                     )
                     // AX2: contain the drawer's children so it stops collapsing
@@ -2521,6 +2538,10 @@ struct BedsideView: View {
         let comments = recording.headerComments.count
         if comments > 0 {
             parts.append("\(comments) line\(comments == 1 ? "" : "s") from .hea")
+        }
+        if let morphology = morphologyContext.summary {
+            let clusters = morphology.cards.count
+            parts.append("\(clusters) morphology cluster\(clusters == 1 ? "" : "s")")
         }
         return parts.joined(separator: " · ")
     }

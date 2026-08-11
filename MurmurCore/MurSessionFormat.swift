@@ -224,6 +224,12 @@ public struct MurSessionState: Codable, Equatable, Sendable {
     /// are none, so a session saved before notes existed and one saved with
     /// zero notes are byte-identical.
     public var anchoredNotes: [AnchoredNote]?
+    /// X112 — the analyst's morphology-cluster endorsements. Same
+    /// nil-when-empty discipline as `anchoredNotes`: a session saved before
+    /// endorsements existed and one saved with none are byte-identical.
+    /// Cluster identity is by representative waveform, re-attached on load
+    /// (`MorphologyContext.attachedCardIndex`).
+    public var morphologyEndorsements: [MorphologyEndorsement]?
 
     public init(
         viewportStartSample: Int64? = nil,
@@ -238,7 +244,8 @@ public struct MurSessionState: Codable, Equatable, Sendable {
         minDurationSeconds: Double? = nil,
         mergeGapSeconds: Double? = nil,
         scanScopeWholeRecording: Bool? = nil,
-        anchoredNotes: [AnchoredNote]? = nil
+        anchoredNotes: [AnchoredNote]? = nil,
+        morphologyEndorsements: [MorphologyEndorsement]? = nil
     ) {
         self.viewportStartSample = viewportStartSample
         self.viewportEndSample = viewportEndSample
@@ -253,6 +260,7 @@ public struct MurSessionState: Codable, Equatable, Sendable {
         self.mergeGapSeconds = mergeGapSeconds
         self.scanScopeWholeRecording = scanScopeWholeRecording
         self.anchoredNotes = anchoredNotes
+        self.morphologyEndorsements = morphologyEndorsements
     }
 
     /// X96 — the ordered lead names a restore should stage, resolving the
@@ -291,6 +299,9 @@ public struct MurSessionState: Codable, Equatable, Sendable {
         // viewport change, and a merge that drops the field would wipe the
         // analyst's notes on the first pan.
         copy.anchoredNotes = other.anchoredNotes
+        // X112: endorsements are made and withdrawn in the bedside view's
+        // drawer, so they are view-owned — same X11 wipe risk as notes.
+        copy.morphologyEndorsements = other.morphologyEndorsements
         return copy
     }
 }

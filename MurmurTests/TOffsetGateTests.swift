@@ -78,7 +78,7 @@ struct TOffsetGateCaptionTests {
             templateBeatCount: 4772,
             qtcFormulaName: "Fridericia",
             sourceLead: "II",
-            templateSelectionBasis: "annotator-coded normal (N)",
+            templateSelectionBasis: "unadjudicated — annotator-coded normal (N)",
             spanStartSample: nil,
             spanEndSample: nil,
             sampleRate: 250,
