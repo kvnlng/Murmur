@@ -52,6 +52,21 @@ public enum SyntheticECG {
         /// suppressed P waves. Boundaries are exact truth for detectors that
         /// key on R–R irregularity.
         public var afEpisode: ClosedRange<Double>?
+        /// X104: times (seconds) near which an isolated wide-complex
+        /// premature beat REPLACES the nearest sinus beat: it arrives at
+        /// `pvcCouplingFraction` of the local R–R (the short coupling) while
+        /// the next sinus beat stays on schedule (the full compensatory
+        /// pause — coupling + following ≈ two sinus cycles, the signature
+        /// `PrematureBeatDetector` keys on). Times must be ≥ 3 sinus R–R
+        /// apart and clear of every episode span; a request that can't be
+        /// honored is SKIPPED — truth records only what was constructed.
+        public var pvcTimesSeconds: [Double]
+        /// X104: spans of ≥ 3 consecutive wide-complex beats at a regular
+        /// elevated rate. Morphology is deliberately crude (broad inverted
+        /// complex, discordant T, no P) — it validates plumbing and
+        /// thresholding, never classifier accuracy (the deliberate limit in
+        /// this file's header). Boundaries are truth verbatim.
+        public var wideComplexRuns: [WideComplexRun]
         /// X101: spans where the constructed rate holds a target bpm. The
         /// profile sits at `bpm` EXACTLY over each range — that range is the
         /// truth boundary — with short linear ramps immediately OUTSIDE it
@@ -70,6 +85,8 @@ public enum SyntheticECG {
             seed: UInt64 = 0xEC6_5EED,
             noiseEpisodes: [ClosedRange<Double>] = [],
             afEpisode: ClosedRange<Double>? = nil,
+            pvcTimesSeconds: [Double] = [],
+            wideComplexRuns: [WideComplexRun] = [],
             rateEpisodes: [RateEpisode] = []
         ) {
             self.durationSeconds = durationSeconds
@@ -80,6 +97,8 @@ public enum SyntheticECG {
             self.seed = seed
             self.noiseEpisodes = noiseEpisodes
             self.afEpisode = afEpisode
+            self.pvcTimesSeconds = pvcTimesSeconds
+            self.wideComplexRuns = wideComplexRuns
             self.rateEpisodes = rateEpisodes
         }
     }
@@ -100,6 +119,19 @@ public enum SyntheticECG {
         }
     }
 
+    /// X104 (#175): one constructed wide-complex run.
+    public struct WideComplexRun: Equatable, Sendable, Codable {
+        /// Seconds from record start; every beat inside is wide-complex,
+        /// regularly spaced at `bpm`.
+        public var range: ClosedRange<Double>
+        public var bpm: Double
+
+        public init(range: ClosedRange<Double>, bpm: Double = 160) {
+            self.range = range
+            self.bpm = bpm
+        }
+    }
+
     // MARK: - Ground truth
 
     public struct TruthEpisode: Equatable, Sendable, Codable {
@@ -114,10 +146,23 @@ public enum SyntheticECG {
             /// change a default-band detector must stay silent about.
             case bradycardia
             case tachycardia
+            /// X104: a constructed run of ≥ 3 wide-complex beats at elevated
+            /// rate. Boundaries are the constructed range verbatim.
+            case wideComplexRun
         }
         public var kind: Kind
         public var startSeconds: Double
         public var endSeconds: Double
+    }
+
+    /// X104 (#175): what each constructed beat IS. Construction truth, not a
+    /// clinical label — `.pvc` means "we built an early wide-complex beat
+    /// with a compensatory pause here," which is exactly what a detector is
+    /// entitled to find.
+    public enum BeatKind: String, Sendable, Codable {
+        case sinus
+        case pvc
+        case wideComplexRun
     }
 
     /// X103 (#174): per-beat fiducial truth, in the DELINEATOR'S vocabulary
@@ -128,6 +173,8 @@ public enum SyntheticECG {
     /// seconds from record start; P fields are nil where the P wave is
     /// suppressed (inside the AF span) — that absence IS truth.
     public struct TruthBeatFiducials: Equatable, Sendable, Codable {
+        /// X104: `.sinus` unless this beat was constructed as ectopy.
+        public var kind: BeatKind
         public var rPeakSeconds: Double
         public var pOnsetSeconds: Double?
         public var pOffsetSeconds: Double?
@@ -183,11 +230,12 @@ public enum SyntheticECG {
 
         // 1. The R–R tachogram, before any waveform exists (ECGSYN's order).
         let grid = rrTachogramGrid(p, rng: &rng)
-        let beats = placeBeats(p, grid: grid, rng: &rng)
+        var (beats, kinds) = placeBeats(p, grid: grid, rng: &rng)
+        insertPVCs(p, beats: &beats, kinds: &kinds)
 
         // 2. The waveform laid along it — from per-beat layouts that the
         // fiducial truth shares verbatim (X103).
-        let beatLayouts = layouts(p, beats: beats)
+        let beatLayouts = layouts(p, beats: beats, kinds: kinds)
         let sampleCount = Int(p.durationSeconds * p.ecgSampleRate)
         var dipole = [Double](repeating: 0, count: sampleCount)
         addBeatComplexes(p, beats: beats, layouts: beatLayouts, into: &dipole)
@@ -203,6 +251,13 @@ public enum SyntheticECG {
         if let af = p.afEpisode {
             episodes.append(TruthEpisode(
                 kind: .atrialFibrillation, startSeconds: af.lowerBound, endSeconds: af.upperBound
+            ))
+        }
+        for run in p.wideComplexRuns {
+            episodes.append(TruthEpisode(
+                kind: .wideComplexRun,
+                startSeconds: run.range.lowerBound,
+                endSeconds: run.range.upperBound
             ))
         }
         for episode in p.rateEpisodes {
@@ -228,7 +283,7 @@ public enum SyntheticECG {
             beatTimesSeconds: beats,
             rrIntervalsMs: rr,
             episodes: episodes.sorted { $0.startSeconds < $1.startSeconds },
-            beatFiducials: fiducialTruth(beats: beats, layouts: beatLayouts)
+            beatFiducials: fiducialTruth(beats: beats, kinds: kinds, layouts: beatLayouts)
         )
         return Output(
             leads: leads,
@@ -326,22 +381,30 @@ public enum SyntheticECG {
     /// span the grid is ignored: R–R draws are irregular and memoryless,
     /// which is the property AF detectors key on. Rate episodes shift the
     /// local mean R–R while the grid's HRV DEVIATION rides on top, so the
-    /// spectral character survives the rate change.
+    /// spectral character survives the rate change. Wide-complex runs
+    /// (X104) override everything inside their span: regular spacing at the
+    /// run's bpm, beat kind tagged.
     private static func placeBeats(
         _ p: Parameters, grid: [Double], rng: inout SplitMix64
-    ) -> [Double] {
+    ) -> (beats: [Double], kinds: [BeatKind]) {
         var beats: [Double] = []
+        var kinds: [BeatKind] = []
         var t = 0.3   // first beat shortly after record start
         let meanRRMs = 60_000 / p.meanHeartRateBPM
         while t < p.durationSeconds - 0.2 {
             beats.append(t)
             var rrMs: Double
-            if let af = p.afEpisode, af.contains(t) {
+            if let run = p.wideComplexRuns.first(where: { $0.range.contains(t) }) {
+                kinds.append(.wideComplexRun)
+                rrMs = 60_000 / run.bpm
+            } else if let af = p.afEpisode, af.contains(t) {
+                kinds.append(.sinus)
                 // Shorter mean, heavy jitter, hard clamps: irregularly
                 // irregular without spectral structure.
                 rrMs = 0.8 * meanRRMs + rng.gaussian() * 150
                 rrMs = min(1500, max(280, rrMs))
             } else {
+                kinds.append(.sinus)
                 let idx = min(grid.count - 1, max(0, Int(t * rrGridHz)))
                 let hrvDeviationMs = grid[idx] - meanRRMs
                 rrMs = 60_000 / constructedBpm(p, at: t) + hrvDeviationMs
@@ -349,7 +412,7 @@ public enum SyntheticECG {
             }
             t += rrMs / 1000
         }
-        return beats
+        return (beats, kinds)
     }
 
     // MARK: - Trend channels

@@ -12,6 +12,39 @@
 import Foundation
 
 extension SyntheticECG {
+    // MARK: - Ectopy (X104)
+
+    /// X104: the PVC coupling — the premature beat arrives at this fraction
+    /// of the local sinus R–R. 0.62 is comfortably past the detector's
+    /// default 15 % prematurity floor, and leaving the NEXT sinus beat on
+    /// schedule makes the pause fully compensatory by construction:
+    /// coupling + following = two sinus cycles exactly.
+    static let pvcCouplingFraction = 0.62
+
+    /// Replace the nearest eligible sinus beat with a premature one. A
+    /// request whose neighbourhood isn't three consecutive sinus beats
+    /// (record edges, episode spans, an already-converted neighbour) is
+    /// skipped — truth records only what was actually constructed.
+    static func insertPVCs(
+        _ p: Parameters, beats: inout [Double], kinds: inout [BeatKind]
+    ) {
+        guard !p.pvcTimesSeconds.isEmpty, beats.count >= 3 else { return }
+        for target in p.pvcTimesSeconds {
+            let candidates = beats.indices.dropFirst().dropLast().filter { k in
+                (k - 1...k + 1).allSatisfy { i in
+                    kinds[i] == .sinus && p.afEpisode?.contains(beats[i]) != true
+                }
+            }
+            guard let k = candidates.min(by: { abs(beats[$0] - target) < abs(beats[$1] - target) }),
+                  abs(beats[k] - target) < 2.0   // an eligible beat must exist NEAR the
+                                                 // request — otherwise it's a skip, not a
+                                                 // silent relocation to the far side of a span
+            else { continue }
+            beats[k] = beats[k - 1] + pvcCouplingFraction * (beats[k] - beats[k - 1])
+            kinds[k] = .pvc
+        }
+    }
+
     // MARK: - Waveform
 
     struct WaveBump {
@@ -46,7 +79,10 @@ extension SyntheticECG {
     /// Gaussian event bumps per beat (amplitudes in mV, times in seconds
     /// relative to the R peak). QT scales as √RR with QTc ≈ 410 ms — the
     /// dependence the QTc lane exists to remove.
-    static func beatLayout(_ p: Parameters, beat: Double, rrS: Double) -> BeatLayout {
+    static func beatLayout(
+        _ p: Parameters, beat: Double, rrS: Double, kind: BeatKind
+    ) -> BeatLayout {
+        guard kind == .sinus else { return wideComplexLayout() }
         let qt = 0.410 * sqrt(max(0.3, min(1.5, rrS)))     // Bazett, QTc 410 ms
         let tScale = sqrt(max(0.3, min(1.5, rrS)) / 0.8)
         let pSuppressed = p.afEpisode?.contains(beat) == true
@@ -59,18 +95,40 @@ extension SyntheticECG {
         )
     }
 
-    static func layouts(_ p: Parameters, beats: [Double]) -> [BeatLayout] {
+    /// X104: the crude ventricular morphology — a broad INVERTED complex
+    /// with a slurred onset, discordant (upright, late) T, and no P.
+    /// Deliberately not rr-adaptive and not lifelike: it exists so
+    /// rule-based plumbing has a wide-QRS-shaped signal to chew on, never
+    /// as a classifier fixture (the deliberate limit in SyntheticECG.swift's
+    /// header). Fiducial truth still derives from these bumps verbatim —
+    /// qrsOnset→qrsOffset spans ≈ 200 ms, "wide" by any definition.
+    static func wideComplexLayout() -> BeatLayout {
+        BeatLayout(
+            p: nil,
+            q: WaveBump(centre: -0.055, width: 0.020, amp: 0.18),
+            r: WaveBump(centre: 0.000, width: 0.045, amp: -1.15),
+            s: WaveBump(centre: 0.060, width: 0.022, amp: 0.25),
+            t: WaveBump(centre: 0.220, width: 0.055, amp: 0.45)
+        )
+    }
+
+    static func layouts(_ p: Parameters, beats: [Double], kinds: [BeatKind]) -> [BeatLayout] {
         let meanRRs = 60.0 / p.meanHeartRateBPM
         return beats.enumerated().map { i, beat in
             let rrS = i + 1 < beats.count ? beats[i + 1] - beat : meanRRs
-            return beatLayout(p, beat: beat, rrS: rrS)
+            return beatLayout(p, beat: beat, rrS: rrS, kind: kinds[i])
         }
     }
 
-    static func fiducialTruth(beats: [Double], layouts: [BeatLayout]) -> [TruthBeatFiducials] {
+    static func fiducialTruth(
+        beats: [Double], kinds: [BeatKind], layouts: [BeatLayout]
+    ) -> [TruthBeatFiducials] {
         let k = fiducialHalfWidthMultiplier
-        return zip(beats, layouts).map { beat, layout in
-            TruthBeatFiducials(
+        return beats.indices.map { i in
+            let beat = beats[i]
+            let layout = layouts[i]
+            return TruthBeatFiducials(
+                kind: kinds[i],
                 rPeakSeconds: beat + layout.r.centre,
                 pOnsetSeconds: layout.p.map { beat + $0.centre - k * $0.width },
                 pOffsetSeconds: layout.p.map { beat + $0.centre + k * $0.width },
