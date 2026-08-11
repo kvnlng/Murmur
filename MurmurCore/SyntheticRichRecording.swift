@@ -16,14 +16,18 @@ extension SyntheticRecording {
     /// bundle directory; the source folder beside it keeps
     /// `<record>.synthesis-truth.json` for anything that wants the oracle at
     /// runtime.
-    static func makeRichFixture(parameters: SyntheticECG.Parameters) throws -> URL {
+    static func makeRichFixture(
+        parameters: SyntheticECG.Parameters,
+        leadRenames: [String: String] = [:]
+    ) throws -> URL {
         let parent = FileManager.default.temporaryDirectory
             .appendingPathComponent("plotting-ui-test", isDirectory: true)
         sweepStaleFixtures(in: parent)
         let workDir = parent.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
 
-        let heaURL = try makeRichRecord(into: workDir, parameters: parameters)
+        let heaURL = try makeRichRecord(into: workDir, parameters: parameters,
+                                        leadRenames: leadRenames)
         let outputDir = workDir.appendingPathComponent("imported", isDirectory: true)
         try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
         let summary = try WFDBImporter.importRecord(heaURL: heaURL, outputDirectory: outputDir)
@@ -36,10 +40,14 @@ extension SyntheticRecording {
     /// provenance, so `normalBeatSampleIndices()` — and therefore the whole
     /// variability pipeline — measures exactly the generated tachogram), and
     /// the ground-truth JSON beside the header.
+    /// `leadRenames` (X109, test-support only): channel-name overrides
+    /// applied at WRITE time (e.g. ["II": "MCL1"]) so a fixture can present
+    /// telemetry-style naming; the signal content is untouched.
     static func makeRichRecord(
         into directory: URL,
         parameters: SyntheticECG.Parameters,
-        recordName: String = "synthrich"
+        recordName: String = "synthrich",
+        leadRenames: [String: String] = [:]
     ) throws -> URL {
         let output = SyntheticECG.generate(parameters)
         let frameCount = Int(parameters.durationSeconds)
@@ -48,7 +56,8 @@ extension SyntheticRecording {
             "\(recordName) \(SyntheticECG.leadNames.count + 2) 1 \(frameCount)"
         ]
         heaLines += try writeLeadSignals(output, parameters: parameters,
-                                         recordName: recordName, into: directory)
+                                         recordName: recordName, into: directory,
+                                         leadRenames: leadRenames)
         heaLines += try writeTrendSignals(output, frameCount: frameCount,
                                           recordName: recordName, into: directory)
         heaLines.append("# Synthetic ECGSYN-style recording with known ground truth (X99)")
@@ -89,11 +98,13 @@ extension SyntheticRecording {
         _ output: SyntheticECG.Output,
         parameters: SyntheticECG.Parameters,
         recordName: String,
-        into directory: URL
+        into directory: URL,
+        leadRenames: [String: String] = [:]
     ) throws -> [String] {
         let ecgGain = 200.0
         var heaLines: [String] = []
-        for (leadIdx, label) in SyntheticECG.leadNames.enumerated() {
+        for (leadIdx, canonical) in SyntheticECG.leadNames.enumerated() {
+            let label = leadRenames[canonical] ?? canonical
             let datFilename = "\(recordName)_\(safeFileName(label)).dat"
             heaLines.append(
                 "\(datFilename) 16x\(Int(parameters.ecgSampleRate)) \(Int(ecgGain))(mV)/0 16 0 0 0 0 \(label)"

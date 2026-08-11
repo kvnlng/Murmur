@@ -28,6 +28,14 @@ struct NoteAuthoringHooks {
     /// Mode-aware time label (elapsed vs wall-clock) for menu items, so the
     /// menu speaks the same clock as every other surface.
     var timeLabel: (Int64) -> String
+    /// X109 (§2.4): manual QT calipers — the analyst's override when (or
+    /// wherever) automated QT abstains. Two-click flow: Q onset, then T
+    /// offset; the result is an analyst-authored range annotation, never an
+    /// input to the automated trends. Nil label = no placement in progress.
+    var qtCaliperPendingLabel: String?
+    var beginQTCaliper: (Int64) -> Void
+    var completeQTCaliper: (Int64) -> Void
+    var cancelQTCaliper: () -> Void
 }
 
 struct ChannelPanel: View {
@@ -597,6 +605,28 @@ struct ChannelPanel: View {
                     }
                     .disabled(!hooks.canAuthorFindings)
                     .accessibilityIdentifier("bedside-context-mark-finding")
+                    Divider()
+                    // X109: manual QT calipers — same gate as findings
+                    // (Editing + Studio). The two-click flow reads back its
+                    // own pending state so the menu always says what the
+                    // next click will do.
+                    if let pending = hooks.qtCaliperPendingLabel {
+                        Button("Complete QT calipers: T offset at \(hooks.timeLabel(sample))") {
+                            hooks.completeQTCaliper(sample)
+                        }
+                        .disabled(!hooks.canAuthorFindings)
+                        .accessibilityIdentifier("bedside-context-qt-caliper-complete")
+                        Button("Cancel QT calipers (Q onset was \(pending))") {
+                            hooks.cancelQTCaliper()
+                        }
+                        .accessibilityIdentifier("bedside-context-qt-caliper-cancel")
+                    } else {
+                        Button("Place QT calipers: Q onset at \(hooks.timeLabel(sample))") {
+                            hooks.beginQTCaliper(sample)
+                        }
+                        .disabled(!hooks.canAuthorFindings)
+                        .accessibilityIdentifier("bedside-context-qt-caliper-begin")
+                    }
                     if !hooks.isEditing {
                         Divider()
                         // Same rule as every other authoring surface: say WHY

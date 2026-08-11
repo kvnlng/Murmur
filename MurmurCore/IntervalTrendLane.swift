@@ -129,6 +129,10 @@ struct IntervalTrendLane: View {
     /// X58: the T-offset reliability gate in effect — whether unreliable
     /// T-offsets are excluded from the QT aggregates, and at what risk-score
     /// threshold. Display state for the gate chip; ignored off the QTc lane.
+    /// X109 (§2.4): non-nil ⇒ automated QT was withheld (no conventional
+    /// lead). The QTc lane renders THIS string as its null state instead of
+    /// the generic no-fiducials message; PR/QRS lanes ignore it.
+    let qtWithheldReason: String?
     let tOffsetGateEnabled: Bool
     let tOffsetGateScore: Int
     /// Change the gate (enabled, score). Nil hides the gate chip.
@@ -212,6 +216,7 @@ struct IntervalTrendLane: View {
         onPickBinPreset: ((IntervalTrendBinPreset) -> Void)? = nil,
         onPickShowMode: ((IntervalTrendShowMode) -> Void)? = nil,
         onPickFormula: ((MarkingsQTcFormula) -> Void)? = nil,
+        qtWithheldReason: String? = nil,
         tOffsetGateEnabled: Bool = true,
         tOffsetGateScore: Int = IntervalMarkingsContext.defaultTOffsetExclusionScore,
         onSetTOffsetGate: ((Bool, Int) -> Void)? = nil,
@@ -226,6 +231,7 @@ struct IntervalTrendLane: View {
         self.showMode = showMode
         self.qtcFormula = qtcFormula
         self.onPickFormula = onPickFormula
+        self.qtWithheldReason = qtWithheldReason
         self.tOffsetGateEnabled = tOffsetGateEnabled
         self.tOffsetGateScore = tOffsetGateScore
         self.onSetTOffsetGate = onSetTOffsetGate
@@ -1172,15 +1178,29 @@ struct IntervalTrendLane: View {
     }
 
     private var emptyState: some View {
-        ZStack(alignment: .center) {
+        // X109: on the QTc lane a withheld QT is a deliberate, non-error
+        // status (§2.4) — state it plainly where the metric normally sits,
+        // never the generic "unavailable".
+        let withheldReason = metric == .qtc ? qtWithheldReason : nil
+        let message = withheldReason
+            ?? "Interval trend unavailable — no fiducials in this recording"
+        return ZStack(alignment: .center) {
             RoundedRectangle(cornerRadius: 4)
                 .fill(Color.secondary.opacity(0.06))
-            Text("Interval trend unavailable — no fiducials in this recording")
+            Text(message)
                 .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(withheldReason != nil ? AnyShapeStyle(.secondary)
+                                                       : AnyShapeStyle(.tertiary))
         }
         .frame(height: Self.laneHeight)
-        .accessibilityIdentifier("interval-trend-lane-empty")
+        // One AX element carrying the message as its label — the ZStack
+        // otherwise swallows the inner text and tests (and VoiceOver) read
+        // an empty container.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(message)
+        .accessibilityIdentifier(withheldReason != nil
+            ? "interval-trend-lane-qt-withheld"
+            : "interval-trend-lane-empty")
     }
 
 

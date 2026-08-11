@@ -487,17 +487,28 @@ public final class IntervalMarkingsContext {
         self.tOffsetExclusionScore = min(6, max(1, persistedScore))
     }
 
+    /// X109 (cardiologist review §2.4): non-nil when automated QT was
+    /// WITHHELD — the recording has no conventional QT lead (II/V5), and a
+    /// best-effort number on another lead would be physically
+    /// misrepresentative. The string is the null-state status every QT
+    /// surface renders where the metric normally sits; PR/QRS and the
+    /// fiducial overlays below the T wave stay live. Manual calipers are
+    /// the sanctioned override.
+    public private(set) var qtWithheldReason: String?
+
     // MARK: - Writes (orchestrator)
 
     public func set(
         beats: [MarkingsBeat],
         sampleRate: Double,
-        template: MarkingsTemplate?
+        template: MarkingsTemplate?,
+        qtWithheldReason: String? = nil
     ) {
         // Defensive sort — reader relies on ascending R-peak order.
         self.beats = beats.sorted { $0.rPeakSampleIndex < $1.rPeakSampleIndex }
         self.sampleRate = sampleRate
         self.template = template
+        self.qtWithheldReason = qtWithheldReason
     }
 
     public func clear() {
@@ -505,6 +516,7 @@ public final class IntervalMarkingsContext {
         sampleRate = 0
         template = nil
         focusedBeatSampleIndex = nil
+        qtWithheldReason = nil
     }
 
     /// Publish what the overlay is drawing for the current viewport. Written

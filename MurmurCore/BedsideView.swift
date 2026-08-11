@@ -2094,7 +2094,8 @@ struct BedsideView: View {
                 sampleRate: markingsContext.sampleRate,
                 template: markingsContext.template,
                 qtcFormula: markingsContext.qtcFormula,
-                kind: caliperKind(for: beat)
+                kind: caliperKind(for: beat),
+                qtWithheldReason: markingsContext.qtWithheldReason
             )
             .accessibilityIdentifier("docked-beat-inspector")
         }
@@ -2271,6 +2272,7 @@ struct BedsideView: View {
                 onPickFormula: { formula in
                     markingsContext.qtcFormula = formula
                 },
+                qtWithheldReason: markingsContext.qtWithheldReason,
                 tOffsetGateEnabled: markingsContext.tOffsetExclusionEnabled,
                 tOffsetGateScore: markingsContext.tOffsetExclusionScore,
                 onSetTOffsetGate: { enabled, score in
@@ -2530,6 +2532,10 @@ struct BedsideView: View {
     /// the same collection the drawer edits; findings go through the same
     /// store + persistence as drag-to-author. The menu is the second way in;
     /// the drawer's own buttons stay.
+    /// X109: the in-flight manual QT caliper — Q onset placed, T offset
+    /// pending. Cleared on completion, cancellation, or recording swap.
+    @State private var pendingQTCaliperStart: (sample: Int64, leadName: String?)?
+
     private var noteAuthoringHooks: NoteAuthoringHooks {
         NoteAuthoringHooks(
             isEditing: isEditing,
@@ -2537,8 +2543,51 @@ struct BedsideView: View {
             addNote: { sample in addAnchoredNote(atSample: sample) },
             addRecordNote: { addRecordNote() },
             addFinding: { sample in markFinding(atSample: sample) },
-            timeLabel: { sample in noteTimeLabel(sample) }
+            timeLabel: { sample in noteTimeLabel(sample) },
+            qtCaliperPendingLabel: pendingQTCaliperStart.map { noteTimeLabel($0.sample) },
+            beginQTCaliper: { sample in
+                pendingQTCaliperStart = (sample, focusedChannel?.name)
+            },
+            completeQTCaliper: { sample in completeQTCalipers(atSample: sample) },
+            cancelQTCaliper: { pendingQTCaliperStart = nil }
         )
+    }
+
+    /// X109 (§2.4): complete the two-click manual QT measurement. The result
+    /// is an analyst-authored RANGE annotation with the span's milliseconds
+    /// in its label — provenance is structurally distinct from every
+    /// automated measurement (source, category, citation all say
+    /// analyst-placed), so downstream layers can never confuse the two. It
+    /// deliberately does NOT feed the QTc trend, the template, or any
+    /// automated surface.
+    private func completeQTCalipers(atSample sample: Int64) {
+        guard let pending = pendingQTCaliperStart else { return }
+        defer { pendingQTCaliperStart = nil }
+        let sr = viewport.sampleRate
+        guard sr > 0, sample != pending.sample else { return }
+        let start = min(pending.sample, sample)
+        let end = max(pending.sample, sample)
+        let ms = Double(end - start) / sr * 1000.0
+        let lead = pending.leadName ?? focusedChannel?.name
+        let caliper = Annotation(
+            kind: .range,
+            sampleIndex: start,
+            endSampleIndex: end,
+            category: "QT-MANUAL",
+            label: String(format: "QT %.0f ms — analyst-placed", ms),
+            source: Annotation.analystAuthoredSource,
+            lead: lead,
+            citationCaption: String(
+                format: "Manual QT calipers: Q onset to T offset placed by the analyst on %@ — %.0f ms. Not an automated measurement.",
+                lead ?? "the ECG", ms)
+        )
+        attachedAnnotations.append(caliper)
+        do {
+            try BundleAnnotationsFile.write(allAnnotations, to: recordingDirectory)
+        } catch {
+            attachError = "The caliper measurement was added for this session "
+                + "but could not be saved to the bundle: \(error.localizedDescription)"
+        }
     }
 
     private func noteTimeLabel(_ sample: Int64) -> String {

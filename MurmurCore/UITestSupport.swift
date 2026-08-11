@@ -304,6 +304,9 @@ enum UITestSupport {
     enum RichSampleVariant: String {
         case flatline
         case dropout
+        /// X109: lead II written as telemetry-style MCL1 — no conventional
+        /// QT lead, so §2.4 abstention + the manual-caliper override run.
+        case noConventional = "no-qt-leads"
     }
 
     static var richSampleVariant: RichSampleVariant? {

@@ -127,11 +127,16 @@ struct IntervalMarkingsOrchestrator: View {
             template: NormalTemplate
         ) in
             if conventionalLeads.isEmpty, let samples = legacySamples {
+                // X109 (§2.4): no conventional QT lead → the pipeline still
+                // delineates for PR/QRS and the overlays, but every
+                // T-boundary claim (QT, QTc, JT, JTc, T fiducials, censoring,
+                // CI) is WITHHELD — a structural null, not a flagged number.
                 return Self.singleLeadComputed(
                     samples: samples, sampleRate: sampleRate,
                     beatSampleIndices: beatSampleIndices,
                     qtcFormula: Self.metricsFormula(from: qtcFormula),
-                    reliabilityThreshold: reliabilityThreshold)
+                    reliabilityThreshold: reliabilityThreshold,
+                    withholdQT: true)
             }
             return Self.conventionalComputed(
                 leadSamples: conventionalLeads.map(\.samples),
@@ -162,6 +167,10 @@ struct IntervalMarkingsOrchestrator: View {
             )
             : nil
 
+        let qtWithheldReason = conventionalLeads.isEmpty
+            ? "QT: Conventional leads (II, V5) absent."
+            : nil
+
         await MainActor.run {
             if computed.beats.isEmpty {
                 markingsContext.clear()
@@ -169,14 +178,50 @@ struct IntervalMarkingsOrchestrator: View {
                 markingsContext.set(
                     beats: computed.beats,
                     sampleRate: sampleRate,
-                    template: coreTemplate
+                    template: coreTemplate,
+                    qtWithheldReason: qtWithheldReason
                 )
             }
         }
     }
 
-    // MARK: - Compute paths
+    // MARK: - Enum bridging
 
+    private static func metricsFormula(from mirror: MarkingsQTcFormula) -> QTcFormula {
+        switch mirror {
+        case .bazett:     return .bazett
+        case .fridericia: return .fridericia
+        case .framingham: return .framingham
+        case .hodges:     return .hodges
+        }
+    }
+
+    // MARK: - Fiducial bridging
+
+    private static func coreFiducial(_ f: Fiducial) -> MarkingsFiducial {
+        MarkingsFiducial(
+            kind: coreKind(f.kind),
+            sampleIndex: f.sampleIndex,
+            confidence: f.confidence
+        )
+    }
+
+    private static func coreKind(_ kind: FiducialKind) -> MarkingsFiducialKind {
+        switch kind {
+        case .pOnset:    return .pOnset
+        case .pOffset:   return .pOffset
+        case .qrsOnset:  return .qrsOnset
+        case .rPeak:     return .rPeak
+        case .qrsOffset: return .qrsOffset
+        case .tOnset:    return .tOnset
+        case .tOffset:   return .tOffset
+        }
+    }
+}
+
+// MARK: - Compute paths
+
+private extension IntervalMarkingsOrchestrator {
     /// The pre-X108 single-lead pipeline, unchanged: runs only when the
     /// recording has NO conventional QT lead (first-channel fallback —
     /// X109 replaces this with §2.4's principled abstention).
@@ -186,12 +231,13 @@ struct IntervalMarkingsOrchestrator: View {
     /// `features` feeds the per-beat uncertainty pipeline: `tOffsetCensored`
     /// drives the "QT ≥ X ms" render; `tOffsetRiskScore` looks up the
     /// calibrated CI half-width.
-    private static func singleLeadComputed(
+    static func singleLeadComputed(
         samples: [Float],
         sampleRate: Double,
         beatSampleIndices: [Int64],
         qtcFormula: QTcFormula,
-        reliabilityThreshold: Int
+        reliabilityThreshold: Int,
+        withholdQT: Bool = false
     ) -> (beats: [MarkingsBeat], template: NormalTemplate) {
         let (store, features) = WaveletBeatDelineator.delineateWithFeatures(
             samples: samples,
@@ -202,19 +248,48 @@ struct IntervalMarkingsOrchestrator: View {
         // X53: exclude physically impossible beats from the template; X58:
         // also exclude unreliable T-offsets. Same rules, same threshold as
         // the per-beat flags below, so they can never disagree.
-        let template = NormalTemplateBuilder.build(
-            from: store,
-            qtcFormula: qtcFormula,
-            excluding: QTPlausibilityFilter.defaultRules,
-            features: features,
-            reliabilityThreshold: reliabilityThreshold
-        )
+        //
+        // X109: with QT withheld, the template keeps PR/QRS baselines only —
+        // built from readouts whose QT is structurally nil, so no QT/QTc
+        // statistic can exist to leak downstream.
+        let template = withholdQT
+            ? NormalTemplateBuilder.build(
+                from: readouts.map { IntervalReadout(
+                    rPeakSampleIndex: $0.rPeakSampleIndex,
+                    prMs: $0.prMs, qrsMs: $0.qrsMs,
+                    qtMs: nil, precedingRRMs: $0.precedingRRMs) },
+                qtcFormula: qtcFormula)
+            : NormalTemplateBuilder.build(
+                from: store,
+                qtcFormula: qtcFormula,
+                excluding: QTPlausibilityFilter.defaultRules,
+                features: features,
+                reliabilityThreshold: reliabilityThreshold
+            )
         let implausibleMask = QTPlausibilityFilter.mask(for: store)
         let calibration = CalibrationTable.builtInTOffset
         let beats = store.beats.indices.map { i -> MarkingsBeat in
             let bf = store.beats[i]
             let ro = readouts[i]
             let feat = i < features.count ? features[i] : .absent
+            if withholdQT {
+                // No T-boundary claims of any kind: values, fiducial
+                // markers, censoring, CI, and the QT-derived flags all
+                // withhold together, so no surface can reconstruct a QT
+                // the pipeline refused to state.
+                return Self.markingsBeat(
+                    bf: bf.withoutTBoundaries(), feat: .absent,
+                    values: BeatValues(
+                        prMs: ro.prMs, qrsMs: ro.qrsMs,
+                        qtMs: nil, qtcMs: nil,
+                        precedingRRMs: ro.precedingRRMs,
+                        jtMs: nil, jtcMs: nil,
+                        tOffsetCensored: false,
+                        ciHalfWidthMs: nil,
+                        isImplausible: false,
+                        isUnreliable: false
+                    ))
+            }
             return Self.markingsBeat(bf: bf, feat: feat, values: BeatValues(
                 prMs: ro.prMs, qrsMs: ro.qrsMs,
                 qtMs: ro.qtMs,
@@ -238,7 +313,7 @@ struct IntervalMarkingsOrchestrator: View {
     /// depolarization intervals (PR/QRS) stay the DISPLAY lead's — index 0,
     /// lead II when present. With one conventional lead the composite
     /// degenerates to that lead's own gated measurement.
-    private static func conventionalComputed(
+    static func conventionalComputed(
         leadSamples: [[Float]],
         sampleRate: Double,
         beatSampleIndices: [Int64],
@@ -303,7 +378,7 @@ struct IntervalMarkingsOrchestrator: View {
     /// The measured values + flags one beat carries, from whichever
     /// compute path produced them — bundled so the shared assembly below
     /// has a single provenance-bearing argument.
-    private struct BeatValues {
+    struct BeatValues {
         let prMs: Double?
         let qrsMs: Double?
         let qtMs: Double?
@@ -319,7 +394,7 @@ struct IntervalMarkingsOrchestrator: View {
 
     /// Shared `MarkingsBeat` assembly — fiducials from the display lead's
     /// store, values from whichever path computed them.
-    private static func markingsBeat(
+    static func markingsBeat(
         bf: BeatFiducials,
         feat: BeatConfidenceFeatures,
         values v: BeatValues
@@ -347,37 +422,22 @@ struct IntervalMarkingsOrchestrator: View {
             isUnreliable: v.isUnreliable
         )
     }
+}
 
-    // MARK: - Enum bridging
-
-    private static func metricsFormula(from mirror: MarkingsQTcFormula) -> QTcFormula {
-        switch mirror {
-        case .bazett:     return .bazett
-        case .fridericia: return .fridericia
-        case .framingham: return .framingham
-        case .hodges:     return .hodges
-        }
-    }
-
-    // MARK: - Fiducial bridging
-
-    private static func coreFiducial(_ f: Fiducial) -> MarkingsFiducial {
-        MarkingsFiducial(
-            kind: coreKind(f.kind),
-            sampleIndex: f.sampleIndex,
-            confidence: f.confidence
+private extension BeatFiducials {
+    /// X109: the same beat with every T-boundary claim removed — the
+    /// abstention path publishes no T fiducials, so the overlay cannot
+    /// render boundary markers for a measurement the pipeline withheld.
+    func withoutTBoundaries() -> BeatFiducials {
+        BeatFiducials(
+            rPeakSampleIndex: rPeakSampleIndex,
+            rPeakConfidence: rPeakConfidence,
+            pOnset: pOnset,
+            pOffset: pOffset,
+            qrsOnset: qrsOnset,
+            qrsOffset: qrsOffset,
+            tOnset: nil,
+            tOffset: nil
         )
-    }
-
-    private static func coreKind(_ kind: FiducialKind) -> MarkingsFiducialKind {
-        switch kind {
-        case .pOnset:    return .pOnset
-        case .pOffset:   return .pOffset
-        case .qrsOnset:  return .qrsOnset
-        case .rPeak:     return .rPeak
-        case .qrsOffset: return .qrsOffset
-        case .tOnset:    return .tOnset
-        case .tOffset:   return .tOffset
-        }
     }
 }
