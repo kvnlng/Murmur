@@ -25,22 +25,30 @@ final class MurmurUIVariabilityMetricsTests: XCTestCase {
         let app = XCUIApplication()
         // 8 atr-sourced normals across the 10 s fixture: whole record measures
         // (7 intervals); a 2 s window holds ~2 beats — one interval short.
-        app.launchArguments += ["--ui-test-sample", "--ui-test-seed-atr-normals=8"]
+        // Studio must be GRANTED: the orchestrator locks the strip behind
+        // the entitlement (`guard store.hasStudio else { setLocked() }`),
+        // so on a fresh container (every Xcode Cloud VM) the unlock seam
+        // renders instead of the strip. This test passed for weeks on
+        // entitled developer machines only — the 2026-08-12 Cloud failure's
+        // branch report (populated: no, insufficient: no) is what finally
+        // named the third branch.
+        app.launchArguments += ["--ui-test-sample", "--ui-test-seed-atr-normals=8",
+                                "--ui-test-grant-studio"]
         app.launch()
 
         // The populated strip, whole-record scope (the default). The
         // identifier exists ONLY on the populated variant — the insufficient
         // and locked branches carry their own — so absence means the seeded
-        // compute produced no summary. Failed on Xcode Cloud (2026-08-11/12)
-        // without a local repro; the branch report in the message says which
-        // state actually rendered there.
+        // compute produced no summary.
         let strip = app.descendants(matching: .any)
             .matching(identifier: "variability-metrics-strip").firstMatch
         if !strip.waitForExistence(timeout: 30) {
             let insufficient = app.descendants(matching: .any)
                 .matching(identifier: "variability-metrics-insufficient").firstMatch.exists
+            let locked = app.descendants(matching: .any)
+                .matching(identifier: "variability-metrics-unlock-seam").firstMatch.exists
             XCTFail("The fixture should populate the Variability Metrics strip — "
-                    + "insufficient-branch rendered: \(insufficient), "
+                    + "insufficient-branch: \(insufficient), locked-branch: \(locked), "
                     + "window \(app.windows.firstMatch.frame)")
             return
         }

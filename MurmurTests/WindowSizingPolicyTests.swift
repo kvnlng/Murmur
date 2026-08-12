@@ -15,7 +15,10 @@ import Testing
 @Suite("XCUI window policy resolution (X100)")
 struct WindowSizingPolicyTests {
     private let bigScreen = CGSize(width: 2560, height: 1415)
-    private let cloudVM = CGSize(width: 1024, height: 743)  // 1024×768 minus menu bar
+    // A short display like Cloud's Mac VMs (measured 2026-08-12: 1280×768
+    // with a 30 pt menu bar). Deliberately narrower than a real VM so the
+    // table's clamping rows exercise BOTH axes.
+    private let cloudVM = CGSize(width: 1024, height: 743)
 
     @Test("A pinned WxH that fits wins verbatim — the short-display regime must reproduce exactly")
     func pinnedWinsVerbatim() {
@@ -30,7 +33,7 @@ struct WindowSizingPolicyTests {
 
     @Test("A pin larger than the screen clamps to the largest window that fits")
     func oversizedPinClamps() {
-        // The 2026-08-11 Cloud failure: 1600×1100 pinned on the 1024×768 VM
+        // The 2026-08-11 Cloud failure: 1600×1100 pinned on the short VM
         // built an off-screen window whose persisted frame poisoned six
         // later suites. A pin must never exceed the visible frame.
         let size = WindowSizing.testWindowContentSize(
@@ -72,7 +75,7 @@ struct WindowSizingPolicyTests {
         #expect(size == WindowSizing.defaultTestWindowSize)
     }
 
-    @Test("No flag on Cloud's 1024x768 VM clamps to the largest window that fits")
+    @Test("No flag on a short-display VM clamps to the largest window that fits")
     func defaultClampsToCloudVM() {
         let size = WindowSizing.testWindowContentSize(
             pinned: nil, maximized: false, visible: cloudVM)

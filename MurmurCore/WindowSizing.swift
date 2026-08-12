@@ -11,7 +11,8 @@
 //
 //  Under an XCUI run (DEBUG + any `--ui-test*` argument) the minimum is
 //  capped by the runner's VISIBLE screen frame. Xcode Cloud's Mac VMs run
-//  1024×768; with the menu bar and Dock that leaves ~670 pt, so a 720-pt
+//  1280×768 (measured 2026-08-12: the policy default resolved a 1220×702
+//  window frame there); the menu bar leaves ~738 pt, so a 720-pt
 //  content minimum forces the window taller than the screen and every
 //  control in the bottom band reports "not hittable" — a failure mode that
 //  is invisible on tall developer displays. Capping the minimum lets AppKit
@@ -41,7 +42,7 @@ import SwiftUI
 extension UITestSupport {
     /// Explicit window size from `--ui-test-window=<width>x<height>`. Lets a
     /// test reproduce a SHORT DISPLAY deterministically on any machine —
-    /// Xcode Cloud's Mac VMs run 1024×768, where the production minimum
+    /// Xcode Cloud's Mac VMs run 1280×768, where the production minimum
     /// window (1100×720 content) cannot fit the visible frame and
     /// bottom-of-window controls go off-screen ("not hittable"). Tests that
     /// interact with bottom-region chrome launch with this flag so the
@@ -95,7 +96,7 @@ public enum WindowSizing {
 
     /// The no-flag XCUI default (X100): generous enough for full side-panel
     /// coexistence (≥ 1160 pt) and the whole bedside bottom band, clamped to
-    /// the runner's visible frame so Cloud's 1024×768 VMs get the largest
+    /// the runner's visible frame so Cloud's 1280×768 VMs get the largest
     /// window that fits.
     public static let defaultTestWindowSize = CGSize(width: 1400, height: 900)
 
@@ -106,7 +107,7 @@ public enum WindowSizing {
     /// pin by definition fits; a pin LARGER than the screen can never be a
     /// legitimate repro — it builds a window whose bottom band is off-screen
     /// and whose persisted frame poisons every later launch, which is how
-    /// 1600×1100 pins took down six unrelated suites on Cloud's 1024×768
+    /// 1600×1100 pins took down six unrelated suites on Cloud's short-display
     /// VMs), `max` fills the visible frame, no flag takes the generous
     /// default clamped to the visible frame.
     static func testWindowContentSize(
@@ -121,9 +122,9 @@ public enum WindowSizing {
         if let pinned {
             // The cap is asymmetric because chrome is vertical: a window is
             // exactly as wide as its content, but the title bar rides on top
-            // of it — so width clamps to the full visible width (Cloud's
-            // standing 1000×600 pins must keep reproducing 1000 exactly on
-            // the 1024-wide VM) while height leaves the chrome allowance.
+            // of it — so width clamps to the full visible width (short
+            // displays must keep reproducing the standing 1000×600 pins
+            // exactly) while height leaves the chrome allowance.
             guard let visible else { return pinned }
             return CGSize(width: min(pinned.width, visible.width),
                           height: min(pinned.height, visible.height - chromeAllowance))
