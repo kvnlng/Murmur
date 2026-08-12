@@ -217,16 +217,29 @@ final class MurmurUINavigationTests: XCTestCase {
         app.launchArguments += ["--ui-test-sample"]
         app.launch()
 
-        // Inspector is open by default; if it isn't, the toolbar
-        // button toggles it.
+        // Let the bedside finish mounting BEFORE consulting the inspector.
+        // The old shape polled the picker for 3 s from launch and then
+        // clicked the toggle — on a slow runner (Xcode Cloud VMs) that
+        // race CLOSED the default-open inspector while it was still
+        // loading, and the picker never appeared. Load first, then look.
+        let panel = app.descendants(matching: .any)
+            .matching(identifier: "channel-panel-I").firstMatch
+        XCTAssertTrue(panel.waitForExistence(timeout: 30),
+                      "The sample fixture should open with lead I focused")
+
+        // Inspector is open by default; only reach for the toggle if the
+        // loaded app really doesn't show it. (On narrow windows the toggle
+        // itself lives in the system toolbar overflow — probed at 964 pt —
+        // so its absence from the button tree is not a failure by itself.)
         let picker = app.descendants(matching: .any)
             .matching(identifier: "findings-sort-picker").firstMatch
-        if !picker.waitForExistence(timeout: 3) {
+        if !picker.waitForExistence(timeout: 10) {
             let toggle = app.buttons.matching(identifier: "findings-toggle").firstMatch
-            XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+            XCTAssertTrue(toggle.waitForExistence(timeout: 5),
+                          "No picker and no findings toggle — the inspector is unreachable")
             toggle.click()
         }
-        XCTAssertTrue(picker.waitForExistence(timeout: 5),
+        XCTAssertTrue(picker.waitForExistence(timeout: 10),
                       "FindingsPanel header should expose a 'findings-sort-picker'")
     }
 
@@ -535,3 +548,4 @@ final class MurmurUINavigationTests: XCTestCase {
         return chip.label
     }
 }
+
