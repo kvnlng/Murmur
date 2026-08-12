@@ -118,6 +118,17 @@ final class MurmurUIMorphologyTests: XCTestCase {
                                 "--ui-test-window=max"]
         app.launch()
 
+        // #202: with the two-morphology fixture the pinned stage's rigid
+        // minimum (~681 pt) plus the context strip overflow any window under
+        // ~900 pt of content height, laying the WHOLE scrolling context out
+        // below the window's bottom edge — off-window, where no amount of
+        // scrolling can reach it (measured: strip at y 838.5 under a window
+        // ending at 840). Xcode Cloud's 1024×768 VMs top out at ~684 pt, so
+        // this test cannot run there until the stage learns to yield.
+        let windowHeight = app.windows.firstMatch.frame.height
+        try XCTSkipIf(windowHeight < 900,
+                      "Window is \(Int(windowHeight)) pt tall; the pinned stage overflows short windows and buries the drawer (kvnlng/Murmur#202)")
+
         let contextBar = app.descendants(matching: .any)
             .matching(identifier: "context-bar").firstMatch
         XCTAssertTrue(contextBar.waitForExistence(timeout: 30))

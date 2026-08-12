@@ -103,7 +103,7 @@ final class MurmurUINotesDrawerTests: XCTestCase {
         let newNote = app.buttons.matching(identifier: "notes-drawer-new-note").firstMatch
         XCTAssertTrue(newNote.waitForExistence(timeout: 3))
         XCTAssertTrue(newNote.isEnabled, "Unlocking Editing should enable New note")
-        newNote.click()
+        scrollIntoViewAndClick(newNote, within: app, "the new-note button")
 
         let readout = app.descendants(matching: .any)
             .matching(identifier: "notes-drawer-stepper-readout").firstMatch
@@ -217,7 +217,7 @@ final class MurmurUINotesDrawerTests: XCTestCase {
         editToggle.click()
         let newNote = app.buttons.matching(identifier: "notes-drawer-new-note").firstMatch
         XCTAssertTrue(newNote.waitForExistence(timeout: 3))
-        newNote.click()
+        scrollIntoViewAndClick(newNote, within: app, "the new-note button")
 
         app.typeKey("q", modifierFlags: .command)
         // NSAlert buttons; scoped to the whole app because the alert is
@@ -268,7 +268,7 @@ final class MurmurUINotesDrawerTests: XCTestCase {
         editToggle.click()
         let newNote = app.buttons.matching(identifier: "notes-drawer-new-note").firstMatch
         XCTAssertTrue(newNote.waitForExistence(timeout: 3))
-        newNote.click()
+        scrollIntoViewAndClick(newNote, within: app, "the new-note button")
 
         let readout = app.descendants(matching: .any)
             .matching(identifier: "notes-drawer-stepper-readout").firstMatch
@@ -358,7 +358,7 @@ final class MurmurUINotesDrawerTests: XCTestCase {
         editToggle.click()
         let newNote = app.buttons.matching(identifier: "notes-drawer-new-note").firstMatch
         XCTAssertTrue(newNote.waitForExistence(timeout: 3))
-        newNote.click()
+        scrollIntoViewAndClick(newNote, within: app, "the new-note button")
 
         // Switch to the clean second record (see the carry test for why the
         // navigator may need requesting first).
@@ -428,7 +428,7 @@ final class MurmurUINotesDrawerTests: XCTestCase {
         editToggle.click()
         let newNote = app.buttons.matching(identifier: "notes-drawer-new-note").firstMatch
         XCTAssertTrue(newNote.waitForExistence(timeout: 3))
-        newNote.click()
+        scrollIntoViewAndClick(newNote, within: app, "the new-note button")
 
         let readout = app.descendants(matching: .any)
             .matching(identifier: "notes-drawer-stepper-readout").firstMatch

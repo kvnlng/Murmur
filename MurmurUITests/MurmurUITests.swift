@@ -5,6 +5,7 @@
 //  Created by Kevin Long on 6/14/26.
 //
 
+import AppKit
 import XCTest
 
 final class MurmurUITests: XCTestCase {
@@ -32,7 +33,25 @@ final class MurmurUITests: XCTestCase {
 
         let openButton = app.buttons["empty-state-open-button"]
         XCTAssertTrue(openButton.exists, "Empty-state Open CSV button should be present")
-        XCTAssertTrue(openButton.isHittable, "Empty-state Open CSV button should be hittable")
+        // The welcome card is a ScrollView, and recents left by earlier
+        // suites render above it — on Cloud's short bare-launch window
+        // (production minimums on a 1024×768 VM, window bottom past the
+        // display) that pushed the button below the fold. A real user
+        // scrolls; so does the test — steered by frames against the
+        // smaller of window and screen bottom (per-tick isHittable on a
+        // clipped element is the X98 stall).
+        let welcomeScroll = app.scrollViews
+            .containing(.button, identifier: "empty-state-open-button").firstMatch
+        let screenBottom = NSScreen.main.map {
+            $0.frame.height - ($0.visibleFrame.minY - $0.frame.minY)
+        } ?? .greatestFiniteMagnitude
+        let visibleBottom = min(app.windows.firstMatch.frame.maxY, screenBottom)
+        for _ in 0..<20 {
+            if openButton.frame.maxY <= visibleBottom - 8 { break }
+            welcomeScroll.scroll(byDeltaX: 0, deltaY: -24)
+        }
+        XCTAssertTrue(openButton.isHittable,
+                      "Empty-state Open CSV button should be hittable — button \(openButton.frame), window \(app.windows.firstMatch.frame)")
     }
 
     /// Opening a record folder stays reachable with NOTHING open — which is

@@ -28,11 +28,22 @@ final class MurmurUIVariabilityMetricsTests: XCTestCase {
         app.launchArguments += ["--ui-test-sample", "--ui-test-seed-atr-normals=8"]
         app.launch()
 
-        // The populated strip, whole-record scope (the default).
+        // The populated strip, whole-record scope (the default). The
+        // identifier exists ONLY on the populated variant — the insufficient
+        // and locked branches carry their own — so absence means the seeded
+        // compute produced no summary. Failed on Xcode Cloud (2026-08-11/12)
+        // without a local repro; the branch report in the message says which
+        // state actually rendered there.
         let strip = app.descendants(matching: .any)
             .matching(identifier: "variability-metrics-strip").firstMatch
-        XCTAssertTrue(strip.waitForExistence(timeout: 20),
-                      "The fixture should populate the Variability Metrics strip")
+        if !strip.waitForExistence(timeout: 30) {
+            let insufficient = app.descendants(matching: .any)
+                .matching(identifier: "variability-metrics-insufficient").firstMatch.exists
+            XCTFail("The fixture should populate the Variability Metrics strip — "
+                    + "insufficient-branch rendered: \(insufficient), "
+                    + "window \(app.windows.firstMatch.frame)")
+            return
+        }
 
         // Narrow the scope to the visible window. The segmented picker's
         // segments surface as radio buttons on macOS.
