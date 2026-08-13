@@ -145,6 +145,40 @@ final class MurmurUIWindowPolicyTests: XCTestCase {
         }
     }
 
+    /// No surface in the bedside column is wider than the column (#223).
+    ///
+    /// The width sibling of `testColumnsScrollRatherThanOverflowTheWindow`.
+    /// The trend stack read 799 pt at every window under ~1180 while the strip
+    /// above it tracked the column — 728 pt at the 1100 pt production minimum —
+    /// because the interval lane's seven fixed-size control chips had a 633 pt
+    /// floor and the lane's cell clipped rather than compressed. Clipped
+    /// controls are still in the layout: they can neither be seen nor clicked.
+    ///
+    /// The strip is the yardstick rather than the window because it is the
+    /// sibling that actually fills the column, so this measures the same
+    /// question a reader would — is this card wider than the thing above it.
+    @MainActor
+    func testNoBedsideSurfaceIsWiderThanItsColumn() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-sample-rich=two-morphology",
+                                "--ui-test-grant-studio",
+                                "--ui-test-window=1100x900"]
+        app.launch()
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 30), "The main window should exist")
+        Thread.sleep(forTimeInterval: 8)
+        let strip = window.descendants(matching: .any)
+            .matching(identifier: "variability-metrics-strip").firstMatch
+        let stack = window.descendants(matching: .any)
+            .matching(identifier: "trend-stack").firstMatch
+        XCTAssertTrue(strip.exists, "no metrics strip")
+        XCTAssertTrue(stack.exists, "no trend stack")
+        XCTAssertLessThanOrEqual(
+            stack.frame.width, strip.frame.width + 2,
+            "The trend stack is \(stack.frame.width) pt in a \(strip.frame.width) pt column — "
+            + "a lane is still publishing a width floor its cell can only clip")
+    }
+
     /// `max` fills the runner's visible frame (minus the chrome allowance).
     @MainActor
     func testMaxFillsTheVisibleFrame() throws {
