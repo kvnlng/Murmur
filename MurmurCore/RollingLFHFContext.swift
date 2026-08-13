@@ -32,6 +32,18 @@ public final class RollingLFHFContext {
     /// with the numbers; never trimmed (provenance is not decoration).
     public private(set) var caption: String?
 
+    /// The shipping provenance string, owned here rather than spelled out at
+    /// each call site — the orchestrator and the UI-test injection had their
+    /// own copies, which is how a subtitle gets re-worded in one place only.
+    ///
+    /// Wording is load-bearing, not cosmetic (#216): this is the longest
+    /// subtitle in the stack and the LF/HF row is a fixed 46 pt, so the older
+    /// `5-min window · 1 min step` phrasing wrapped to two lines and the
+    /// second ran into the Quality lane's title beneath it. Same three facts
+    /// — estimator, window, step — in a box that fits its row.
+    /// `TrendStackGeometryTests` measures that claim.
+    public static let provenanceCaption = "Lomb–Scargle · 5-min / 1 min"
+
     public init() {}
 
     public func set(samples: [VariabilityLaneSample], caption: String) {

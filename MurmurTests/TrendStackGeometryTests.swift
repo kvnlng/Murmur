@@ -171,4 +171,136 @@ struct TrendStackGeometryTests {
         #expect(abs(CGFloat(measured.first) - expected) <= CGFloat(slack),
                 "Charts put the data at \(measured.first) pt, the arithmetic says \(expected)")
     }
+
+    // MARK: - Vertical geometry
+
+    /// A lane's label column: title over subtitle, in `TrendStack.labelWidth`.
+    private struct Rail {
+        let id: String
+        let title: String
+        let subtitle: String
+        /// The row height the lane declares in `BedsideTrendStack`.
+        let height: CGFloat
+
+        /// Rebuilt from `TrendStack.laneRowContent`'s rail. Duplicated rather
+        /// than reached into because the rail is a private detail of a private
+        /// method; the fonts and the 1 pt spacing are the part under test.
+        var view: some View {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                Text(subtitle)
+                    .font(.caption2)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(width: TrendStack.labelWidth, alignment: .leading)
+        }
+    }
+
+    /// A five-lane stack at the heights `BedsideTrendStack` declares. Built
+    /// here rather than through `BedsideTrendStack` so the measurement doesn't
+    /// depend on entitlement or a loaded record.
+    private func fiveLaneStack() -> TrendStack {
+        func lane(_ id: String, _ subtitle: String, height: CGFloat?) -> TrendStackLane {
+            TrendStackLane(id: id, title: "Lane", subtitle: subtitle,
+                           value: "1.50", height: height) {
+                LFHFLanePlot(samples: laneSamples(), recordingRange: range, stepSeconds: 30)
+            }
+        }
+        return TrendStack(
+            lanes: [
+                lane("hr", "bpm · trend channel only", height: 46),
+                lane("beat-hr", "bpm · median per 10 s · from R–R", height: 46),
+                // The natural-height lane matters to the measurement: it is
+                // the one whose height comes from its content rather than a
+                // literal, so a greedy stack can hide behind it.
+                TrendStackLane(id: "rmssd", title: "RMSSD", subtitle: "ms · 5-min window",
+                               value: "42", height: nil) { rmssdLane() },
+                lane(BedsideTrendStack.lfhfLaneID, RollingLFHFContext.provenanceCaption, height: 46),
+                lane(BedsideTrendStack.qualityLaneID, "artifact ratio · outline over 10%", height: 22),
+            ],
+            recordingRange: range,
+            viewportRange: 100.0...400.0,
+            caption: "one axis · every lane"
+        )
+    }
+
+    @Test("The stack takes the height of its lanes, not the height it is offered")
+    func stackIsNotGreedyVertically() {
+        // #215. TWO children voted for the full proposal, and either one alone
+        // is enough to make the card claim everything — measured by putting
+        // each back: with only the other fixed, a five-lane stack still
+        // demanded 700 pt of 700 and 2000 of 2000.
+        //
+        //   1. `crossLaneOverlay` as a `ZStack` sibling of the lanes. It is a
+        //      `GeometryReader`, which has no intrinsic size, so it accepted
+        //      the whole proposal and the ZStack sized to the larger child.
+        //   2. `axisRow`'s two `Color.clear` spacers. Given a width and no
+        //      height they still take any height proposed, so the axis row
+        //      sized to the container rather than to its 16 pt of axis.
+        //
+        // Same fault as #208's `maxHeight` claim, wearing two different views.
+        // The stack now settles at ~299 pt for these five lanes.
+        let stack = fiveLaneStack()
+        let content = demandedHeightGivenRoom(stack, width: 700)
+        #expect(content < 1000,
+                "Offered 4000 pt the stack demanded \(content) pt — it is claiming, not needing")
+
+        // The invariant, not the number: what it wants must not track what it
+        // is offered. Equal answers to two proposals is an honest answer.
+        let small = demandedSize(stack, proposal: CGSize(width: 700, height: 700)).height
+        let large = demandedSize(stack, proposal: CGSize(width: 700, height: 2000)).height
+        #expect(abs(small - large) < 1,
+                "Demanded \(small) pt of 700 but \(large) pt of 2000 — the height follows the offer")
+    }
+
+    @Test("The LF/HF provenance line fits its label column on one line")
+    func lfhfProvenanceFitsOneLine() {
+        // #216, and the measurement corrects the report: the old subtitle did
+        // not overflow its row — `Lomb–Scargle · 5-min window · 1 min step`
+        // wrapped to two lines for a 40 pt rail in a 46 pt row. What it left
+        // was SIX points between its last line and the Quality lane's title
+        // beneath, and at .caption2 six points reads as one paragraph rather
+        // than two lanes. Crowding, not overflow.
+        //
+        // So the guard is the property the fix actually establishes: the
+        // longest subtitle in the stack fits on one line. Re-word it longer
+        // and it wraps, the clearance drops back to ~6 pt, and this fails.
+        let oneLine = Rail(id: "reference", title: "LF / HF", subtitle: "bpm", height: 46)
+        let shipping = Rail(id: BedsideTrendStack.lfhfLaneID, title: "LF / HF",
+                            subtitle: RollingLFHFContext.provenanceCaption, height: 46)
+        let reference = demandedHeightGivenRoom(oneLine.view, width: TrendStack.labelWidth)
+        let measured = demandedHeightGivenRoom(shipping.view, width: TrendStack.labelWidth)
+        #expect(abs(measured - reference) < 1,
+                "'\(RollingLFHFContext.provenanceCaption)' needs \(measured) pt against \(reference) pt for one line, so it wraps and crowds the lane beneath")
+    }
+
+    @Test("A lane's rail fits the row height the lane declares")
+    func railsFitTheirRows() {
+        // The general form of #216, so the next long subtitle is caught by a
+        // test rather than by an eye.
+        //
+        // The Quality lane is deliberately absent: its rail wants 40 pt in the
+        // 22 pt row a thin heat band was designed for, so it has ALWAYS
+        // overflowed — by 18 pt, into the axis row's empty left gutter, which
+        // is why nothing visible broke. No subtitle wording fixes that (even
+        // one line needs 27 pt); it needs a decision about what a 22 pt lane's
+        // rail should be. Filed separately rather than guessed at here.
+        let rows: [Rail] = [
+            Rail(id: "hr", title: "Trends · HR",
+                 subtitle: "bpm · trend channel only", height: 46),
+            Rail(id: "beat-hr", title: "HR · beat-derived",
+                 subtitle: "bpm · median per \(Int(BeatHeartRateSeries.defaultBinSeconds)) s · from R–R",
+                 height: 46),
+            Rail(id: BedsideTrendStack.lfhfLaneID, title: "LF / HF",
+                 subtitle: RollingLFHFContext.provenanceCaption, height: 46),
+        ]
+        for row in rows {
+            let demanded = demandedHeightGivenRoom(row.view, width: TrendStack.labelWidth)
+            #expect(demanded <= row.height,
+                    "\(row.id)'s rail wants \(demanded) pt in a \(row.height) pt row, so it spills onto the lane beneath")
+        }
+    }
 }
