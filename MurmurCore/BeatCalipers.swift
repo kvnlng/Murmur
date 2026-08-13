@@ -136,10 +136,37 @@ struct BeatCalipers: View {
             }
             templateProvenanceFooter
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, Columns.horizontalPadding)
         .padding(.vertical, 8)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
         .accessibilityIdentifier("beat-calipers")
+    }
+
+    /// The measurement row's column widths, in ONE place, with the budget
+    /// they have to live inside stated next to them.
+    ///
+    /// #205: these were three literals (40 / 72 / 78 + 10 pt padding = 218 pt)
+    /// sized against a 220 pt docked column that X71 later narrowed to 186 —
+    /// so the card drew 32 pt past its column, under the review queue, and
+    /// clipped the delta cell ("+23.4 m"). Nothing connected the two numbers,
+    /// so nothing noticed. `totalWidth` is now derived and pinned against
+    /// `BedsideGeometry.dockedColumnWidth` by a test.
+    ///
+    /// Each width is the measured worst-case string plus a little slack, at
+    /// `.caption.monospacedDigit()`: "QRS" 21 pt, "≥ 545.0 ms" 56 pt,
+    /// "+117.0 ±22 ms" 75 pt.
+    enum Columns {
+        static let label: CGFloat = 22
+        static let value: CGFloat = 58
+        static let delta: CGFloat = 78
+        static let spacing: CGFloat = 4
+        static let horizontalPadding: CGFloat = 8
+
+        /// What the card demands horizontally — what a test can compare
+        /// against the column it is given.
+        static var totalWidth: CGFloat {
+            label + value + delta + 2 * spacing + 2 * horizontalPadding
+        }
     }
 
     /// True when the T-offset walk clipped at the search-window ceiling
@@ -306,15 +333,11 @@ struct BeatCalipers: View {
                      undefined: Bool = false,
                      censored: Bool = false,
                      halfWidthMs: Double? = nil) -> some View {
-        HStack(spacing: 4) {
-            // Column widths sized to fit the widest content that renders
-            // in each column ("QRS"/"QTc" · "≥ 545.0 ms" · "+117.0 ±22 ms")
-            // so the panel's overall footprint fits the docked
-            // inspector's 220pt hard-width budget in the pinned stage.
+        HStack(spacing: Columns.spacing) {
             Text(label)
                 .font(.caption.monospacedDigit().weight(.medium))
                 .foregroundStyle(.secondary)
-                .frame(width: 40, alignment: .leading)
+                .frame(width: Columns.label, alignment: .leading)
             // Reuses the same "—" glyph as a missing value but styles
             // the whole row muted + italic when the interval is
             // explicitly undefined for this beat kind (PR on a PVC,
@@ -327,10 +350,10 @@ struct BeatCalipers: View {
                 .font(.caption.monospacedDigit())
                 .italic(undefined)
                 .foregroundStyle(undefined ? Color.secondary : Color.primary)
-                .frame(width: 72, alignment: .trailing)
+                .frame(width: Columns.value, alignment: .trailing)
                 .accessibilityIdentifier(censored ? "beat-calipers-\(label.lowercased())-censored" : "beat-calipers-\(label.lowercased())")
             deltaLabel(delta, halfWidthMs: undefined ? nil : halfWidthMs)
-                .frame(width: 78, alignment: .trailing)
+                .frame(width: Columns.delta, alignment: .trailing)
         }
     }
 

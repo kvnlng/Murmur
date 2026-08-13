@@ -1852,15 +1852,11 @@ struct BedsideView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
                     .background(.background)
-                    // The cap is load-bearing, not cosmetic. The split view
-                    // sizes its detail column by probing this view's minimum
-                    // at width 0 — where the strip's tiles wrap into a
-                    // ~1800 pt tower — and then PROPOSES that answer back as
-                    // the column's height, shoving the whole persistent stage
-                    // off-window. Bounding what the probe can measure keeps
-                    // the pathological answer out of the negotiation; at any
-                    // real width the strip is ~165 pt and the cap never bites.
-                    .frame(maxHeight: Self.metricsStripInsetMaxHeight, alignment: .top)
+                    // As tall as the strip, never taller than the cap. Both
+                    // halves matter and both live in the modifier, where a
+                    // test measures the same construction the app renders —
+                    // see `MetricsStripInsetHeight` for why (#208).
+                    .modifier(MetricsStripInsetHeight())
             }
         }
         .onGeometryChange(for: CGFloat.self) { proxy in
@@ -1878,13 +1874,6 @@ struct BedsideView: View {
     /// stage off-screen. Zero height (first frame) counts as fitting so
     /// the strip does not flash between positions during launch.
     private static let metricsAboveMonitorMinHeight: CGFloat = 800
-
-    /// Ceiling on the strip-above-monitor inset's measured height. Roomy
-    /// enough for every strip variant at the narrowest column the tall
-    /// regime can produce (~165 pt measured, locked/insufficient smaller);
-    /// exists so the width-0 minimum-size probe (see the inset comment)
-    /// cannot report a wrapped-to-a-tower height.
-    private static let metricsStripInsetMaxHeight: CGFloat = 260
 
     private var metricsReadAboveMonitor: Bool {
         bedsideContentHeight <= 0 || bedsideContentHeight >= Self.metricsAboveMonitorMinHeight
@@ -2041,7 +2030,7 @@ struct BedsideView: View {
             dockedBeatCard
             keyboardHint
         }
-        .frame(width: 186, alignment: .topLeading)
+        .frame(width: BedsideGeometry.dockedColumnWidth, alignment: .topLeading)
     }
 
     /// The one-line keyboard hint, relocated from the retired `summaryHeader`
@@ -2270,6 +2259,10 @@ struct BedsideView: View {
                 metricLabel: laneContext.metricLabel,
                 unit: laneContext.unit,
                 windowCaption: laneContext.windowCaption,
+                // #209: the Trend stack's rail already prints both of these
+                // (`title:` / `subtitle:` on the lane below) — the lane must
+                // not say its own name a second time inside the plot.
+                showsMetricLabel: false,
                 // Read hover state so the lane highlights coordinate
                 // with ECG-side hovers when that direction lands.
                 externalHoverTimeSeconds: laneContext.hoveredSource == .ecg
