@@ -70,6 +70,81 @@ final class MurmurUIWindowPolicyTests: XCTestCase {
                        "A launch without --ui-test-window must get the policy default, not the persisted 1000 pt frame")
     }
 
+    /// Each column scrolls its own content, so no column may publish a
+    /// minimum the window has to honour (#202, #207).
+    ///
+    /// The window is pinned BELOW the content's old minimum. Before this, the
+    /// split view answered with an oversized frame and macOS centred it, so
+    /// the content spilled over the title bar at the top and past the window
+    /// at the bottom — the bottom band unreachable at any window size, which
+    /// is what made X112's drawer untestable on Cloud's short VMs.
+    @MainActor
+    func testColumnsScrollRatherThanOverflowTheWindow() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-sample-rich=two-morphology",
+                                "--ui-test-grant-studio",
+                                "--ui-test-window=1500x786"]
+        app.launch()
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 30), "The main window should exist")
+        // The split view re-negotiates after the record's derived surfaces
+        // land, so read once it has settled rather than on the first frame.
+        Thread.sleep(forTimeInterval: 8)
+        let windowFrame = window.frame
+        let split = app.windows.firstMatch.descendants(matching: .splitGroup).firstMatch
+        XCTAssertTrue(split.exists, "The split view should exist")
+        let splitFrame = split.frame
+
+        XCTAssertLessThanOrEqual(
+            splitFrame.height, windowFrame.height + 2,
+            "The split view is \(splitFrame.height) pt in a \(windowFrame.height) pt window — "
+            + "a column is still publishing its content height as a minimum")
+        XCTAssertGreaterThanOrEqual(
+            splitFrame.minY, windowFrame.minY - 2,
+            "The split view starts \(windowFrame.minY - splitFrame.minY) pt above the window — "
+            + "oversized content is being centred and is spilling over the title bar")
+        XCTAssertLessThanOrEqual(
+            splitFrame.maxY, windowFrame.maxY + 2,
+            "The split view ends \(splitFrame.maxY - windowFrame.maxY) pt below the window — "
+            + "the bottom band is unreachable")
+    }
+
+    /// The whole-record summary reads ABOVE the trace at every window size.
+    ///
+    /// X83 made this conditional on an 800 pt column, so the strip dropped
+    /// below the trace on a short window. That rule was never observed
+    /// working — it measured the oversized layout it was handed rather than
+    /// the window — and once the columns scrolled it started firing and moved
+    /// the strip. The condition is gone: a scrolling column costs a short
+    /// window a scroll, not a surface.
+    ///
+    /// Both sizes matter. The tall one alone passed throughout the period the
+    /// rule was broken AND the period it was wrong.
+    @MainActor
+    func testMetricsSummaryReadsAboveTheTraceAtEveryWindowSize() throws {
+        for size in ["1500x1400", "1500x786"] {
+            let app = XCUIApplication()
+            app.launchArguments += ["--ui-test-sample-rich=two-morphology",
+                                    "--ui-test-grant-studio",
+                                    "--ui-test-window=\(size)"]
+            app.launch()
+            let window = app.windows.firstMatch
+            XCTAssertTrue(window.waitForExistence(timeout: 30), "no window at \(size)")
+            Thread.sleep(forTimeInterval: 8)
+            let strip = window.descendants(matching: .any)
+                .matching(identifier: "variability-metrics-strip").firstMatch
+            let stage = window.descendants(matching: .any)
+                .matching(identifier: "pinned-stage").firstMatch
+            XCTAssertTrue(strip.exists, "no metrics strip at \(size)")
+            XCTAssertTrue(stage.exists, "no stage at \(size)")
+            XCTAssertLessThan(
+                strip.frame.minY, stage.frame.minY,
+                "At \(size) the strip is at y=\(strip.frame.minY) and the trace at "
+                + "y=\(stage.frame.minY) — the summary has dropped below the trace")
+            app.terminate()
+        }
+    }
+
     /// `max` fills the runner's visible frame (minus the chrome allowance).
     @MainActor
     func testMaxFillsTheVisibleFrame() throws {

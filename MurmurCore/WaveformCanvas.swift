@@ -49,10 +49,13 @@ struct WheelScroll {
 /// project_grid_ladder_and_wheel_navigation.md). A notched wheel is the only
 /// mouse affordance for the trace after pan/zoom moved to the trackpad's drag
 /// + pinch; this fills that gap:
-///   • bare wheel   → pan along time
+///   • horizontal wheel → pan along time
 ///   • ⌘ / ⌥ + wheel → zoom anchored at the pointer (never ⌃ — that is macOS
 ///     accessibility screen zoom and would fight us)
-///   • ⇧ + wheel    → pan (horizontal-scroll muscle memory)
+///   • ⇧ + wheel    → pan (AppKit reports ⇧-wheel as horizontal)
+///   • bare VERTICAL wheel → not ours; chains to the enclosing column so the
+///     analyst can scroll past the trace. It used to pan, which made the
+///     column unscrollable wherever the trace sat.
 /// Zoom is exponential and ignores natural-scroll inversion (wheel-away = zoom
 /// in, always); pan respects it. Deltas are coalesced per runloop turn so a
 /// wheel burst drives one redraw, not one per event — the canvas draws
@@ -84,8 +87,31 @@ final class WheelMTKView: MTKView {
 
         let dx = event.scrollingDeltaX
         let dy = event.scrollingDeltaY
+
+        // A VERTICAL scroll belongs to the column, not to the trace.
+        //
+        // This canvas used to take whichever axis dominated, and never called
+        // `super` on that path — so a two-finger scroll down over the trace was
+        // eaten as a horizontal pan and nothing chained to the enclosing scroll
+        // view. With the column now scrollable, that meant the column could not
+        // be scrolled at all while the pointer was over the trace, which is
+        // most of the window.
+        //
+        // Panning is what it always was for the deliberate gestures — a
+        // horizontal scroll, ⇧-wheel (which AppKit reports as horizontal), and
+        // ⌘/⌥ for zoom. What changes is that an UNMODIFIED vertical scroll now
+        // passes through to the column instead of moving the signal.
+        let verticalScrollBelongsToTheColumn = !zoomMode && abs(dy) > abs(dx)
+        guard !verticalScrollBelongsToTheColumn else {
+            super.scrollWheel(with: event)
+            return
+        }
+
         let primary = abs(dx) > abs(dy) ? dx : dy
-        guard primary != 0 else { return }
+        guard primary != 0 else {
+            super.scrollWheel(with: event)
+            return
+        }
 
         // Anchor a zoom at the pointer's fraction across the plot width.
         let local = convert(event.locationInWindow, from: nil)
