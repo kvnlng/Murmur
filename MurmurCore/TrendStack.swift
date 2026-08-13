@@ -198,19 +198,25 @@ struct TrendStack: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ZStack(alignment: .topLeading) {
-                VStack(spacing: 0) {
-                    ForEach(lanes) { lane in
-                        laneRow(lane)
-                        if lane.id != lanes.last?.id {
-                            Divider().opacity(0.4)
-                        }
+            VStack(spacing: 0) {
+                ForEach(lanes) { lane in
+                    laneRow(lane)
+                    if lane.id != lanes.last?.id {
+                        Divider().opacity(0.4)
                     }
                 }
-                // Drawn ONCE, over every lane. A per-lane box would be four
-                // boxes that agree only as long as four separate mappings do.
-                crossLaneOverlay
             }
+            // Drawn ONCE, over every lane. A per-lane box would be four
+            // boxes that agree only as long as four separate mappings do.
+            //
+            // `.overlay` rather than a `ZStack` sibling (#215): the overlay is
+            // a `GeometryReader`, which has no intrinsic size and so accepts
+            // whatever it is proposed. As a `ZStack` child it therefore VOTED
+            // for the full proposal and the stack sized to it — offered 4000 pt
+            // the card demanded 4000, against 309 pt of actual lanes. An
+            // overlay is sized BY the view it decorates instead of voting on
+            // that view's size, which is what "drawn across the lanes" means.
+            .overlay { crossLaneOverlay }
             axisRow
             if let caption {
                 Text(caption)
@@ -339,12 +345,12 @@ struct TrendStack: View {
                 windowBox(plotX: plotX, plotWidth: plotWidth, height: geo.size.height)
             }
         }
-        // Purely visual. The seek gesture lives on each seekable lane's plot
-        // cell instead — this layer sits over ALL lanes, including the two
-        // whose plots carry their own hover, chips, and bin-click drilldown,
-        // and a gesture here would swallow those. (Its layout frame also only
-        // spans its widest child, not the plot column, so a gesture here was
-        // never hittable where the lanes actually are.)
+        // Purely visual, and now emphatically so: as an overlay (#215) this
+        // layer covers the lanes EXACTLY, where as a `ZStack` sibling its
+        // layout frame only spanned its widest child. The seek gesture lives
+        // on each seekable lane's plot cell instead — this sits over ALL
+        // lanes, including the two whose plots carry their own hover, chips,
+        // and bin-click drilldown, and a gesture here would swallow those.
         .allowsHitTesting(false)
     }
 
@@ -377,9 +383,15 @@ struct TrendStack: View {
                     }
                 }
             }
-            .frame(height: Self.axisHeight)
             Color.clear.frame(width: Self.valueWidth + 10)
         }
+        // Height on the ROW, not on the GeometryReader alone (#215). The two
+        // `Color.clear` spacers are the stack's other greedy child: given a
+        // width and no height they still accept whatever height they are
+        // proposed, so the axis row — and the whole card with it — sized to
+        // the container rather than to the 16 pt of axis it draws. Measured
+        // before the fix: offered 700 pt a single-lane stack demanded 700.
+        .frame(height: Self.axisHeight)
         .padding(.bottom, 2)
         .accessibilityHidden(true)
     }

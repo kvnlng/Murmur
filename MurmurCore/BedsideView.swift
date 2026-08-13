@@ -1168,7 +1168,7 @@ struct BedsideView: View {
                 }
                 RollingLFHFContext.shared.set(
                     samples: injected,
-                    caption: "Lomb–Scargle · 5-min window · 1 min step"
+                    caption: RollingLFHFContext.provenanceCaption
                 )
             }
             if let count = UITestSupport.seedNotesCount {

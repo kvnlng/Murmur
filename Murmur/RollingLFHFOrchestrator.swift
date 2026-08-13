@@ -95,7 +95,7 @@ struct RollingLFHFOrchestrator: View {
         } else {
             lfhfContext.set(
                 samples: samples,
-                caption: "Lomb–Scargle · 5-min window · 1 min step"
+                caption: RollingLFHFContext.provenanceCaption
             )
         }
     }
