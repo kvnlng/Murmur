@@ -250,11 +250,32 @@ struct TrendStack: View {
 
     @ViewBuilder
     private func laneRow(_ lane: TrendStackLane) -> some View {
-        // Fixed-height lanes pin the row; natural lanes size to their cell,
-        // whose content (headers, chips, captions) defines the height.
+        // A declared height is a FLOOR for the plot, not a ceiling for the
+        // rail (#218).
+        //
+        // It used to be a hard `.frame(height:)`, which made the number a
+        // claim the rail could not contradict. The quality lane declares 22 pt
+        // — right for a thin heat band — while its rail (title over a wrapped
+        // subtitle) wants 40, so it overflowed its row by 18 pt for as long as
+        // it has existed. Nothing visibly broke only because it is the LAST
+        // lane and the spill landed in the axis row's empty left gutter; a
+        // lane added beneath it would have been crowded, which is #216 again.
+        //
+        // `minHeight` lets the row take what its own rail needs and keeps the
+        // declared height as the plot's floor. That costs vertical space, and
+        // before #220 that was the objection — it is why this shipped as a
+        // decision rather than a fix. With the column scrolling, a taller
+        // stack costs a scroll instead of a surface, so the general answer is
+        // now also the cheap one.
+        //
+        // The rail is what may grow the row; the PLOT still may not, or a
+        // Charts lane with no intrinsic height would size the row to whatever
+        // it felt like. Hence the explicit ceiling on the cell in
+        // `laneRowContent` — the two halves are a pair.
         if let height = lane.height {
             laneRowContent(lane)
-                .frame(height: height)
+                .frame(minHeight: height)
+                .fixedSize(horizontal: false, vertical: true)
         } else {
             laneRowContent(lane)
                 .fixedSize(horizontal: false, vertical: true)
@@ -291,7 +312,15 @@ struct TrendStack: View {
                 // only — clipping the leading edge would take the metric name
                 // and the caption's start, which are the parts that identify
                 // what the lane is.
-                .frame(minWidth: 0, maxWidth: .infinity, maxHeight: lane.height == nil ? nil : .infinity, alignment: .topLeading)
+                // The height half is #218's other pair-piece. A fixed-height
+                // lane's plot is pinned to EXACTLY the declared height rather
+                // than allowed to fill the row: with the row now free to grow
+                // for its rail, a Charts lane — which has no intrinsic height
+                // and accepts whatever it is proposed — would otherwise be the
+                // thing that decided how tall the row was. The rail may grow
+                // the row; the plot may not.
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
+                .frame(height: lane.height)
                 .clipped()
                 .overlay {
                     // The seek surface lives on the lane's plot cell, not on

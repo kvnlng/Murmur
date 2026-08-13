@@ -277,17 +277,18 @@ struct TrendStackGeometryTests {
                 "'\(RollingLFHFContext.provenanceCaption)' needs \(measured) pt against \(reference) pt for one line, so it wraps and crowds the lane beneath")
     }
 
-    @Test("A lane's rail fits the row height the lane declares")
+    @Test("A lane's row is at least as tall as its own rail")
     func railsFitTheirRows() {
         // The general form of #216, so the next long subtitle is caught by a
         // test rather than by an eye.
         //
-        // The Quality lane is deliberately absent: its rail wants 40 pt in the
-        // 22 pt row a thin heat band was designed for, so it has ALWAYS
-        // overflowed — by 18 pt, into the axis row's empty left gutter, which
-        // is why nothing visible broke. No subtitle wording fixes that (even
-        // one line needs 27 pt); it needs a decision about what a 22 pt lane's
-        // rail should be. Filed separately rather than guessed at here.
+        // Quality is the case that made this a decision rather than a fix
+        // (#218): its rail wants 40 pt in the 22 pt row a thin heat band was
+        // designed for, and no wording closes that — even a one-line subtitle
+        // needs 27. It was excluded here while the only remedies cost the
+        // column space it did not have. A declared height is now a floor
+        // rather than a claim, so it is in the list, and this is the
+        // acceptance test #218 asked for.
         let rows: [Rail] = [
             Rail(id: "hr", title: "Trends · HR",
                  subtitle: "bpm · trend channel only", height: 46),
@@ -296,11 +297,31 @@ struct TrendStackGeometryTests {
                  height: 46),
             Rail(id: BedsideTrendStack.lfhfLaneID, title: "LF / HF",
                  subtitle: RollingLFHFContext.provenanceCaption, height: 46),
+            Rail(id: BedsideTrendStack.qualityLaneID, title: "Quality",
+                 subtitle: "artifact ratio · outline over 10%", height: 22),
         ]
         for row in rows {
-            let demanded = demandedHeightGivenRoom(row.view, width: TrendStack.labelWidth)
-            #expect(demanded <= row.height,
-                    "\(row.id)'s rail wants \(demanded) pt in a \(row.height) pt row, so it spills onto the lane beneath")
+            let rail = demandedHeightGivenRoom(row.view, width: TrendStack.labelWidth)
+            let rendered = demandedHeightGivenRoom(
+                laneRow(rail: row, plotHeight: row.height), width: 700)
+            #expect(rendered >= rail - 1,
+                    "\(row.id)'s row renders \(rendered) pt around a \(rail) pt rail, so the rail spills onto the lane beneath")
         }
+    }
+
+    /// A row built the way `TrendStack.laneRow` builds one, for measuring
+    /// what the row does with a rail taller than the declared height.
+    private func laneRow(rail: Rail, plotHeight: CGFloat) -> some View {
+        HStack(alignment: .top, spacing: 0) {
+            rail.view.padding(.leading, 10)
+            LFHFLanePlot(samples: laneSamples(), recordingRange: range, stepSeconds: 30)
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
+                .frame(height: plotHeight)
+            Text("1.50").font(.caption.monospacedDigit())
+                .frame(width: TrendStack.valueWidth, alignment: .trailing)
+                .padding(.trailing, 10)
+        }
+        .frame(minHeight: plotHeight)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
