@@ -285,7 +285,34 @@ struct IntervalTrendLane: View {
 
     // MARK: - Caption row
 
+    /// Provenance on the leading edge, controls on the trailing edge.
+    ///
+    /// #223: the controls wrap. Seven `.fixedSize()` chips in a plain `HStack`
+    /// composed into a 633 pt floor — wider than this lane's cell in any window
+    /// under ~1180 pt — and the cell's `.clipped()` then removed the trailing
+    /// chips from view while leaving them in the layout. `WrappingChipRow`
+    /// makes the cluster's minimum its widest chip instead of the sum of all
+    /// of them; on a wide lane it lays out identically to the `HStack`.
     private var captionRow: some View {
+        HStack(alignment: .top, spacing: 6) {
+            provenanceText
+            // `minLength: 0` so the chips may take the whole row before the
+            // provenance text is asked to give up its last few points: the
+            // text truncates gracefully and a clipped chip does not.
+            Spacer(minLength: 0)
+            WrappingChipRow(spacing: 6) {
+                metricPicker
+                formulaPicker
+                tOffsetGateChip
+                cvFlagMenu
+                binPicker
+                showModePicker
+                addGuideChip
+            }
+        }
+    }
+
+    private var provenanceText: some View {
         HStack(spacing: 6) {
             Text(metric.displayName)
                 .font(.caption2.weight(.semibold))
@@ -327,17 +354,8 @@ struct IntervalTrendLane: View {
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("interval-trend-lane-qt-clock")
             }
-
-            Spacer()
-
-            metricPicker
-            formulaPicker
-            tOffsetGateChip
-            cvFlagMenu
-            binPicker
-            showModePicker
-            addGuideChip
         }
+        .lineLimit(1)
     }
 
     @ViewBuilder

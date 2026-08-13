@@ -309,6 +309,92 @@ struct TrendStackGeometryTests {
         }
     }
 
+    // MARK: - Horizontal geometry
+
+    /// The plot cell's width at the narrowest window the app allows.
+    ///
+    /// Measured, then arithmetic: at `WindowSizing.productionMinWidth` the
+    /// bedside column is 728 pt (AX sweep, `--ui-test-sample-rich`), and
+    /// `laneRowContent` spends the rail, the value column and 20 pt of padding
+    /// before the cell begins.
+    private var cellWidthAtMinimumWindow: CGFloat {
+        728 - TrendStack.labelWidth - 10 - TrendStack.valueWidth - 10
+    }
+
+    @Test("A lane's controls fit the cell the stack gives them")
+    func laneControlsFitTheNarrowestCell() {
+        // #223. The stack itself is width-compliant — offered any width it
+        // answers with exactly that width, and its own floor is 267 pt of
+        // chrome — so nothing about the CARD catches this. The fault is one
+        // level down and invisible from above: `laneRowContent`'s cell is
+        // `minWidth: 0 … .clipped()`, so a lane too wide for its cell reports
+        // nothing and is quietly cut off instead.
+        //
+        // The interval lane was 645 pt wide at its floor — 633 of it seven
+        // `.fixedSize()` control chips in an HStack — against a 506 pt cell at
+        // the 1100 pt window minimum. The chips past the cut were rendered,
+        // laid out, and unreachable: `.clipped()` removes the paint, not the
+        // control. Measured as a rendered union, the stack read 799 pt wide
+        // (150 rail + 10 + 639 of chips) at every window under ~1180.
+        //
+        // So the guard is on the LANE, where the floor actually is: what it
+        // insists on when offered nothing must still fit the narrowest cell a
+        // real window produces.
+        let lane = intervalLaneWithEveryControl()
+        let floor = demandedSize(lane, proposal: CGSize(width: 1, height: 600)).width
+        #expect(floor <= cellWidthAtMinimumWindow,
+                "The interval lane insists on \(floor) pt in a \(cellWidthAtMinimumWindow) pt cell, so its trailing controls are clipped away at the 1100 pt window minimum")
+    }
+
+    /// The lane as `BedsideView` builds it: every control chip present. The
+    /// snapshot fixtures pass none of these, which is exactly why the suite
+    /// that renders this lane four times never saw the floor.
+    private func intervalLaneWithEveryControl() -> IntervalTrendLane {
+        let bins: [IntervalTrendBin] = (0..<15).map { i in
+            let start = Double(i) * 120
+            let median = 420 + 40 / (1 + exp(-(Double(i) - 6) / 1.5))
+            return IntervalTrendBin(
+                startSeconds: start, endSeconds: start + 120,
+                median: median, q1: median - 6, q3: median + 6,
+                bandLowerMs: median - 2.5, bandUpperMs: median + 2.5,
+                hasCensoredBeats: false, isEligible: true, beatCount: 60,
+                perBeatValues: (0..<40).map { median + sin(Double($0) * 0.7) * 4 })
+        }
+        return IntervalTrendLane(
+            timeRangeSeconds: 0...1800,
+            data: IntervalTrendData(bins: bins, baselineBand: 412...428, baselineMedian: 420,
+                                    reproCaption: "QTc · Fridericia · 2-min bins"),
+            metric: .qtc,
+            showMode: .medianAndIQR,
+            selectedBinPreset: .twoMinute,
+            onLaneHover: { _ in },
+            onBinClick: { _ in },
+            onPickMetric: { _ in },
+            onPickBinPreset: { _ in },
+            onPickShowMode: { _ in },
+            onPickFormula: { _ in },
+            rrCVFlagPercent: 10,
+            onPickRRCVFlag: { _ in },
+            onSetTOffsetGate: { _, _ in },
+            onAddGuide: { _, _ in },
+            onRemoveGuide: { _ in },
+            onAuthorRange: { _, _, _, _ in })
+    }
+
+    @Test("The stack answers a width proposal with that width, at every width")
+    func stackIsNotGreedyHorizontally() {
+        // The width sibling of `stackIsNotGreedyVertically`, and the check
+        // that keeps the test above honest about WHERE the floor is: if the
+        // card ever starts carrying a lane's floor itself, this fails and the
+        // lane-level guard alone would not have told us.
+        let stack = fiveLaneStack()
+        for width in [400, 506, 728, 900] as [CGFloat] {
+            let measured = demandedSize(stack, proposal: CGSize(width: width, height: 600)).width
+            #expect(abs(measured - width) < 1,
+                    "Offered \(width) pt the stack demanded \(measured) pt")
+        }
+    }
+
     /// A row built the way `TrendStack.laneRow` builds one, for measuring
     /// what the row does with a rail taller than the declared height.
     private func laneRow(rail: Rail, plotHeight: CGFloat) -> some View {
