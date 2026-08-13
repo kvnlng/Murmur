@@ -107,6 +107,15 @@ struct VariabilityLane: View {
     /// when the caller doesn't want to advertise it.
     let windowCaption: String?
 
+    /// Whether the caption row names the metric and its window.
+    ///
+    /// False when the lane is EMBEDDED somewhere that already labels it —
+    /// the Trend stack's rail carries `title`/`subtitle` for every lane, so
+    /// drawing them again inside the plot printed "RMSSD · 5-min window ·
+    /// 30 s step" twice, 40 pt apart (#209). The rest of the row — preset
+    /// picker, unit, hover readout — is not duplicated anywhere and stays.
+    var showsMetricLabel: Bool = true
+
     /// Optional external hover coordinate (seconds from recording
     /// start). When non-nil, the lane draws a highlight ruler +
     /// emphasized point at that time. Passed by BedsideView from
@@ -136,6 +145,7 @@ struct VariabilityLane: View {
         metricLabel: String,
         unit: String,
         windowCaption: String? = nil,
+        showsMetricLabel: Bool = true,
         externalHoverTimeSeconds: Double? = nil,
         selectedPreset: VariabilityWindowPreset? = nil,
         onLaneHover: ((Double?) -> Void)? = nil,
@@ -146,6 +156,7 @@ struct VariabilityLane: View {
         self.metricLabel = metricLabel
         self.unit = unit
         self.windowCaption = windowCaption
+        self.showsMetricLabel = showsMetricLabel
         self.externalHoverTimeSeconds = externalHoverTimeSeconds
         self.selectedPreset = selectedPreset
         self.onLaneHover = onLaneHover
@@ -180,17 +191,19 @@ struct VariabilityLane: View {
 
     private var captionRow: some View {
         HStack(spacing: 8) {
-            Text(metricLabel)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .accessibilityIdentifier("variability-lane-label")
-            if let caption = windowCaption, !caption.isEmpty {
-                Text("·")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                Text(caption)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+            if showsMetricLabel {
+                Text(metricLabel)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("variability-lane-label")
+                if let caption = windowCaption, !caption.isEmpty {
+                    Text("·")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    Text(caption)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
             }
             if let hoverSample = hoveredSample, hoverSample.value.isFinite {
                 Text("·")
