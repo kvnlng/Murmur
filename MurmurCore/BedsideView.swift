@@ -1657,6 +1657,7 @@ struct BedsideView: View {
     /// order is unchanged — record's numbers first, then how they move.
     @ViewBuilder
     private var contextLanes: some View {
+        beatSourceDisclosure
         trendStackHeader
         // X85: folded, the header bar is all that renders — same
         // whole-region collapse as the Context drawer.
@@ -1678,6 +1679,27 @@ struct BedsideView: View {
                 rmssdLane: rmssdLane,
                 intervalLane: intervalLane,
                 lfhfLane: lfhfLane
+            )
+        }
+    }
+
+    /// Stated once, where the beat-derived surfaces would have been (#206).
+    ///
+    /// One line rather than three: Variability Metrics, the Trend stack and
+    /// Morphology are absent for a single reason, and repeating it at each
+    /// hole would read as three faults instead of one property of the record.
+    @ViewBuilder
+    private var beatSourceDisclosure: some View {
+        if let absence = recording.beatSourceAbsence() {
+            BeatSourceDisclosure(
+                absence: absence,
+                siblingBeatFileName: BeatSourceDisclosure.siblingBeatFileName(
+                    // `sourceFileName` is the `.hea` this record was imported
+                    // from, so its stem is the WFDB record name every sibling
+                    // shares — `418.hea` → `418` → `418.qrs`.
+                    forRecordNamed: (recording.sourceFileName as NSString).deletingPathExtension,
+                    in: recordingDirectory
+                )
             )
         }
     }
