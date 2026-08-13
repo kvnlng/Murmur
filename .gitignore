@@ -6,6 +6,14 @@ xcuserdata/
 *.xcuserstate
 *.xcuserdatad/
 
+# Xcode Cloud — per-checkout workspace manifest. Worth stating why, because
+# it sits inside xcshareddata/, which is otherwise shared deliberately (the
+# schemes there are tracked): this file only maps THIS checkout's workspace to
+# a workflow target id, Xcode regenerates it on demand, and it carries no
+# setting anyone else needs. Contrast Package.resolved below, which is tracked
+# precisely because Xcode Cloud does need it.
+Murmur.xcodeproj/xcshareddata/xcodecloud/
+
 # Xcode — build products / derived data
 build/
 DerivedData/
