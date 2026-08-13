@@ -453,6 +453,12 @@ struct BedsideView: View {
             arrhythmiaPreflightWindows: arrhythmiaContext.preflightWindows
         )
         .inspectorColumnWidth(min: 260, ideal: 340, max: 500)
+        // The Review Queue owns its own scrolling, so its content height is
+        // its business and not the window's. Without this floor the queue
+        // publishes that height upward and the whole window inherits a
+        // minimum it never needed — measured at 850 pt against a 720 pt
+        // window minimum. Same contract as the centre column above.
+        .frame(minHeight: 0)
     }
 
     var body: some View {
@@ -1825,10 +1831,26 @@ struct BedsideView: View {
     /// clues stay on screen while the surrounding context moves.
     /// See `project_layout_persistent_stage.md`.
     private func focusModeLayout(channel: Channel) -> some View {
-        VStack(spacing: 0) {
-            pinnedStage(channel: channel)
-            Divider()
-            ScrollView {
+        // ONE scroll for the centre column, stage included.
+        //
+        // The stage used to sit outside the scroll view, so its ~732 pt floor
+        // was published straight up into the split view's minimum. Nothing
+        // below could yield enough to cover that — the stage alone exceeded the
+        // 720 pt window minimum — which is what made #202/#207 look like a
+        // choice between compressing the trace and abandoning the persistent
+        // stage. It was neither: a column that scrolls does not need its
+        // content to fit, only to stop declaring a floor. Measured, the stage
+        // reports 523 pt here instead of 732, and the trace is untouched.
+        //
+        // `minHeight: 0` is the load-bearing half, and it is the same lesson as
+        // X97's `minWidth: 0` on the trend lane's plot cell, rotated: without
+        // it a scroll view's minimum follows its content, and a ScrollView
+        // whose minimum is its content height does not scroll — it relocates
+        // the overflow to its parent.
+        ScrollView {
+            VStack(spacing: 0) {
+                pinnedStage(channel: channel)
+                Divider()
                 VStack(alignment: .leading, spacing: 12) {
                     if !metricsReadAboveMonitor {
                         VariabilityMetricsStrip()
@@ -1840,6 +1862,7 @@ struct BedsideView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+        .frame(minHeight: 0)
         // X83: the whole-record summary reads ABOVE the monitor. As a top
         // safe-area inset, so it reads as chrome (like the chip bar) rather
         // than as the first row of the stage — and only when the window can

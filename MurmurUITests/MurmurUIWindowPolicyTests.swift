@@ -70,6 +70,45 @@ final class MurmurUIWindowPolicyTests: XCTestCase {
                        "A launch without --ui-test-window must get the policy default, not the persisted 1000 pt frame")
     }
 
+    /// Each column scrolls its own content, so no column may publish a
+    /// minimum the window has to honour (#202, #207).
+    ///
+    /// The window is pinned BELOW the content's old minimum. Before this, the
+    /// split view answered with an oversized frame and macOS centred it, so
+    /// the content spilled over the title bar at the top and past the window
+    /// at the bottom — the bottom band unreachable at any window size, which
+    /// is what made X112's drawer untestable on Cloud's short VMs.
+    @MainActor
+    func testColumnsScrollRatherThanOverflowTheWindow() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-sample-rich=two-morphology",
+                                "--ui-test-grant-studio",
+                                "--ui-test-window=1500x786"]
+        app.launch()
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 30), "The main window should exist")
+        // The split view re-negotiates after the record's derived surfaces
+        // land, so read once it has settled rather than on the first frame.
+        Thread.sleep(forTimeInterval: 8)
+        let windowFrame = window.frame
+        let split = app.windows.firstMatch.descendants(matching: .splitGroup).firstMatch
+        XCTAssertTrue(split.exists, "The split view should exist")
+        let splitFrame = split.frame
+
+        XCTAssertLessThanOrEqual(
+            splitFrame.height, windowFrame.height + 2,
+            "The split view is \(splitFrame.height) pt in a \(windowFrame.height) pt window — "
+            + "a column is still publishing its content height as a minimum")
+        XCTAssertGreaterThanOrEqual(
+            splitFrame.minY, windowFrame.minY - 2,
+            "The split view starts \(windowFrame.minY - splitFrame.minY) pt above the window — "
+            + "oversized content is being centred and is spilling over the title bar")
+        XCTAssertLessThanOrEqual(
+            splitFrame.maxY, windowFrame.maxY + 2,
+            "The split view ends \(splitFrame.maxY - windowFrame.maxY) pt below the window — "
+            + "the bottom band is unreachable")
+    }
+
     /// `max` fills the runner's visible frame (minus the chrome allowance).
     @MainActor
     func testMaxFillsTheVisibleFrame() throws {
