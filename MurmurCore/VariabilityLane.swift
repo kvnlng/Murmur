@@ -174,10 +174,15 @@ struct VariabilityLane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
+            // The chrome is inset; the CHART is not. A card padding wrapped
+            // around both put this lane's data 12 pt inside its cell at each
+            // edge, so its time mapping was both shifted and compressed
+            // relative to the stack's shared axis — measured at 45…687 in a
+            // 700 pt cell where the HR lane drew 0…698 (#210).
             captionRow
+                .padding(.horizontal, 12)
             chart
         }
-        .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
         // AX1 (pre-emptive): same container-contains-children pairing as the
@@ -314,12 +319,7 @@ struct VariabilityLane: View {
             }
             .chartXAxis(.hidden)
             .chartXScale(domain: timeRangeSeconds)
-            .chartYAxis {
-                AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) { _ in
-                    AxisValueLabel().font(.caption2.monospacedDigit())
-                    AxisGridLine().foregroundStyle(.secondary.opacity(0.15))
-                }
-            }
+            .trendLaneYAxis()
             .chartYScale(domain: yDomain)
             .frame(height: Self.laneHeight)
             .background(

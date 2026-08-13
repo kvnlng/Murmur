@@ -28,7 +28,68 @@
 //  trimmed to save space.
 //
 
+import Charts
 import SwiftUI
+
+/// The stack's y-scale, drawn in the reserved gutter by a lane that is not a
+/// Swift Charts view.
+///
+/// Charts lanes get the same gutter from `trendLaneYAxis()`. This is for the
+/// `Canvas` lanes, which reserved nothing before #210 — which is why the HR
+/// lane, alone among the trends, carried no scale at all. Height is what
+/// decided whether a lane got a usable scale, and that was not a decision
+/// anyone made.
+struct TrendLaneScaleGutter: View {
+    /// Ticks as `(fraction, label)`, fraction 0 at the bottom of the plot.
+    let ticks: [(fraction: Double, label: String)]
+
+    var body: some View {
+        GeometryReader { geo in
+            ForEach(Array(ticks.enumerated()), id: \.offset) { _, tick in
+                Text(tick.label)
+                    .font(.caption2.monospacedDigit())
+                    // Charts renders its own labels at secondary; a gutter
+                    // that differed by lane would read as two kinds of scale.
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .frame(width: TrendStack.axisLabelWidth, alignment: .trailing)
+                    // Centred ON the value, the way Charts places its labels,
+                    // then held inside the lane so the top tick of a 22 pt
+                    // lane doesn't ride out of its own row.
+                    .position(
+                        x: TrendStack.axisLabelWidth / 2,
+                        y: min(max(6, (1 - tick.fraction) * geo.size.height), geo.size.height - 6))
+            }
+        }
+        .frame(width: TrendStack.axisGutter)
+        .accessibilityHidden(true)
+    }
+}
+
+extension View {
+    /// The stack's y-axis for a Swift Charts lane: three ticks in a gutter
+    /// exactly `TrendStack.axisGutter` wide, so the lane's data starts where
+    /// every other lane's does.
+    ///
+    /// The fixed-width label box is the whole point — left to size itself,
+    /// Charts reserves whatever the widest label happens to need, so the plot
+    /// origin became a function of the DATA. Two lanes with different
+    /// magnitudes then disagreed about where time zero is.
+    /// `desiredCount` exists for the short lanes: three ticks in a 46 pt row
+    /// collide, which is how X92's LF/HF scale ended up unreadable.
+    func trendLaneYAxis(decimals: Int = 0, desiredCount: Int = 3) -> some View {
+        chartYAxis {
+            AxisMarks(position: .leading, values: .automatic(desiredCount: desiredCount)) { value in
+                AxisValueLabel(horizontalSpacing: TrendStack.axisLabelSpacing) {
+                    Text(value.as(Double.self).map { String(format: "%.\(decimals)f", $0) } ?? "")
+                        .font(.caption2.monospacedDigit())
+                        .frame(width: TrendStack.axisLabelWidth, alignment: .trailing)
+                }
+                AxisGridLine().foregroundStyle(.secondary.opacity(0.15))
+            }
+        }
+    }
+}
 
 /// One row of the stack.
 struct TrendStackLane: Identifiable {
@@ -97,6 +158,43 @@ struct TrendStack: View {
     static let labelWidth: CGFloat = 150
     static let valueWidth: CGFloat = 52
     private static let axisHeight: CGFloat = 16
+
+    // MARK: - The plot-geometry contract (#210)
+    //
+    // Every lane gets an identical plot cell — and until this, what each lane
+    // did INSIDE that cell differed. The Swift Charts lanes let Charts reserve
+    // a leading gutter for their y-labels, so their data began ~35 pt in and
+    // (for the RMSSD lane, which also carried horizontal padding) ended ~12 pt
+    // early. The `Canvas` lanes drew from the cell's left edge. Measured on a
+    // 700 pt cell: HR 0…698, LF/HF 35…699, RMSSD 45…687.
+    //
+    // So four lanes stacked on "one axis" had three different x-mappings, and
+    // the shared window box — deliberately drawn once — landed on the RMSSD
+    // lane's y-labels rather than on its data. On a 25 h record the ~30 pt
+    // offset is about 50 minutes of misreading.
+    //
+    // The contract: a lane's DATA occupies its cell inset by `axisGutter` on
+    // the leading edge and by nothing on the trailing edge. Charts lanes hit it
+    // via `trendLaneYAxis()`; `Canvas` lanes via `TrendLaneScaleGutter`. The
+    // overlay and the axis row map to the same origin, so there is one mapping
+    // and no way for a lane to hold a private one.
+
+    /// Leading strip of every plot cell, reserved for the lane's y-scale.
+    static let axisGutter: CGFloat = 45
+    /// The label box inside that gutter. Four monospaced digits at
+    /// `.caption2` — the interval lane plots RR in ms and reaches four
+    /// figures, and a label box that clips is a scale that lies.
+    static let axisLabelWidth: CGFloat = 26
+    /// Gap between the label box and the data.
+    static let axisLabelSpacing: CGFloat = 4
+    /// What Swift Charts adds on top of label + spacing when it reserves a
+    /// leading axis. Measured, not documented: label boxes of 20/28/28/40 pt
+    /// at spacings of 4/4/10/4 put the data at 40/47/53/59 pt, i.e. a fixed
+    /// 15 pt. `TrendStackGeometryTests` fails if a future Charts changes it.
+    static let chartsAxisPadding: CGFloat = 15
+
+    /// Where every lane's data starts, measured from the card's leading edge.
+    static var plotOriginX: CGFloat { labelWidth + 10 + axisGutter }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -192,8 +290,9 @@ struct TrendStack: View {
                 .overlay {
                     // The seek surface lives on the lane's plot cell, not on
                     // the cross-lane overlay: the cell's own geometry IS the
-                    // shared x-mapping (every plot fills it edge-to-edge), so
-                    // the click math here cannot drift from what was drawn.
+                    // shared x-mapping, so the click math here cannot drift
+                    // from what was drawn — as long as it subtracts the same
+                    // gutter the data was inset by (#210).
                     if lane.seekable, let onSeek {
                         GeometryReader { geo in
                             Color.clear
@@ -201,8 +300,9 @@ struct TrendStack: View {
                                 .gesture(
                                     DragGesture(minimumDistance: 0)
                                         .onEnded { value in
-                                            guard geo.size.width > 0 else { return }
-                                            let f = min(1, max(0, value.location.x / geo.size.width))
+                                            let plotWidth = geo.size.width - Self.axisGutter
+                                            guard plotWidth > 0 else { return }
+                                            let f = min(1, max(0, (value.location.x - Self.axisGutter) / plotWidth))
                                             onSeek(recordingRange.lowerBound
                                                    + Double(f) * (recordingRange.upperBound - recordingRange.lowerBound))
                                         }
@@ -225,7 +325,7 @@ struct TrendStack: View {
     /// lane at once.
     private var crossLaneOverlay: some View {
         GeometryReader { geo in
-            let plotX = Self.labelWidth + 10
+            let plotX = Self.plotOriginX
             let plotWidth = max(0, geo.size.width - plotX - Self.valueWidth - 10)
             ZStack(alignment: .topLeading) {
                 ForEach(Array(lowQualitySpans.enumerated()), id: \.offset) { _, span in
@@ -265,7 +365,7 @@ struct TrendStack: View {
 
     private var axisRow: some View {
         HStack(spacing: 0) {
-            Color.clear.frame(width: Self.labelWidth + 10)
+            Color.clear.frame(width: Self.plotOriginX)
             GeometryReader { geo in
                 ZStack(alignment: .topLeading) {
                     ForEach(Array(axisTicks.enumerated()), id: \.offset) { _, tick in
