@@ -38,9 +38,6 @@ struct BedsideView: View {
     /// candidate jumps recenter without changing zoom — for analysts who
     /// read in fixed time windows. A manual zoom breaks the lock.
     @State private var windowLockedTo10s = false
-    /// X83: the bedside column's rendered height, for deciding whether the
-    /// Variability Metrics strip fits above the pinned stage.
-    @State private var bedsideContentHeight: CGFloat = 0
     /// X28 — elapsed vs wall-clock. App preference, shared across records.
     private var timeDisplay: TimeDisplayContext { TimeDisplayContext.shared }
     /// The record's real start instant, or nil when it carried none. nil is the
@@ -1852,9 +1849,6 @@ struct BedsideView: View {
                 pinnedStage(channel: channel)
                 Divider()
                 VStack(alignment: .leading, spacing: 12) {
-                    if !metricsReadAboveMonitor {
-                        VariabilityMetricsStrip()
-                    }
                     contextBar
                     contextLanes
                 }
@@ -1865,41 +1859,33 @@ struct BedsideView: View {
         .frame(minHeight: 0)
         // X83: the whole-record summary reads ABOVE the monitor. As a top
         // safe-area inset, so it reads as chrome (like the chip bar) rather
-        // than as the first row of the stage — and only when the window can
-        // hold it: on short displays the strip returns to the top of the
-        // scrolling context instead — X82's whole-or-nothing rule, applied
-        // vertically.
+        // than as the first row of the stage.
+        //
+        // Unconditionally now. X83 made this conditional on a 800 pt height,
+        // because below that the column could not hold stage + strip and the
+        // strip would have pushed the stage off-window — X82's whole-or-
+        // nothing rule, applied vertically. That premise is gone: the column
+        // scrolls, so nothing is pushed anywhere and a short window costs the
+        // analyst a scroll rather than a surface.
+        //
+        // Worth recording that the rule was never observed working. It
+        // compared `bedsideContentHeight` — which came from the layout it was
+        // handed, i.e. the OVERSIZED 1104 — against 800, so it read "plenty of
+        // room" at every window size including 720 and kept the strip up top
+        // regardless. Fixing the overflow made it start firing, and the first
+        // thing it did was move the strip below the trace, which is not where
+        // this summary belongs.
         .safeAreaInset(edge: .top, spacing: 0) {
-            if metricsReadAboveMonitor {
-                VariabilityMetricsStrip()
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(.background)
-                    // As tall as the strip, never taller than the cap. Both
-                    // halves matter and both live in the modifier, where a
-                    // test measures the same construction the app renders —
-                    // see `MetricsStripInsetHeight` for why (#208).
-                    .modifier(MetricsStripInsetHeight())
-            }
+            VariabilityMetricsStrip()
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(.background)
+                // As tall as the strip, never taller than the cap. Both
+                // halves matter and both live in the modifier, where a
+                // test measures the same construction the app renders —
+                // see `MetricsStripInsetHeight` for why (#208).
+                .modifier(MetricsStripInsetHeight())
         }
-        .onGeometryChange(for: CGFloat.self) { proxy in
-            proxy.size.height
-        } action: { height in
-            bedsideContentHeight = height
-        }
-    }
-
-    /// X83: whether the Variability Metrics strip renders above the pinned
-    /// stage. Below this height the persistent column cannot hold stage +
-    /// strip and overflows off-window (measured: stage floor ~523 + strip
-    /// ~156 + divider and scroll minimum), so the strip yields back into
-    /// the scrolling context — never partially shown, never pushing the
-    /// stage off-screen. Zero height (first frame) counts as fitting so
-    /// the strip does not flash between positions during launch.
-    private static let metricsAboveMonitorMinHeight: CGFloat = 800
-
-    private var metricsReadAboveMonitor: Bool {
-        bedsideContentHeight <= 0 || bedsideContentHeight >= Self.metricsAboveMonitorMinHeight
     }
 
     /// The pinned stage. Contains the ECG canvas, the docked caliper

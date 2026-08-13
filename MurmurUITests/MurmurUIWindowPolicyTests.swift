@@ -109,6 +109,42 @@ final class MurmurUIWindowPolicyTests: XCTestCase {
             + "the bottom band is unreachable")
     }
 
+    /// The whole-record summary reads ABOVE the trace at every window size.
+    ///
+    /// X83 made this conditional on an 800 pt column, so the strip dropped
+    /// below the trace on a short window. That rule was never observed
+    /// working — it measured the oversized layout it was handed rather than
+    /// the window — and once the columns scrolled it started firing and moved
+    /// the strip. The condition is gone: a scrolling column costs a short
+    /// window a scroll, not a surface.
+    ///
+    /// Both sizes matter. The tall one alone passed throughout the period the
+    /// rule was broken AND the period it was wrong.
+    @MainActor
+    func testMetricsSummaryReadsAboveTheTraceAtEveryWindowSize() throws {
+        for size in ["1500x1400", "1500x786"] {
+            let app = XCUIApplication()
+            app.launchArguments += ["--ui-test-sample-rich=two-morphology",
+                                    "--ui-test-grant-studio",
+                                    "--ui-test-window=\(size)"]
+            app.launch()
+            let window = app.windows.firstMatch
+            XCTAssertTrue(window.waitForExistence(timeout: 30), "no window at \(size)")
+            Thread.sleep(forTimeInterval: 8)
+            let strip = window.descendants(matching: .any)
+                .matching(identifier: "variability-metrics-strip").firstMatch
+            let stage = window.descendants(matching: .any)
+                .matching(identifier: "pinned-stage").firstMatch
+            XCTAssertTrue(strip.exists, "no metrics strip at \(size)")
+            XCTAssertTrue(stage.exists, "no stage at \(size)")
+            XCTAssertLessThan(
+                strip.frame.minY, stage.frame.minY,
+                "At \(size) the strip is at y=\(strip.frame.minY) and the trace at "
+                + "y=\(stage.frame.minY) — the summary has dropped below the trace")
+            app.terminate()
+        }
+    }
+
     /// `max` fills the runner's visible frame (minus the chrome allowance).
     @MainActor
     func testMaxFillsTheVisibleFrame() throws {
