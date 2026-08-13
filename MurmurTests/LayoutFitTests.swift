@@ -104,6 +104,81 @@ struct LayoutFitTests {
                 "The strip's inset demands \(inset) pt for \(bare) pt of strip — \(inset - bare) pt of dead space")
     }
 
+    // MARK: - #207 · the width-0 probe
+
+    /// A summary with enough rows that the single-column collapse is a tower —
+    /// three sections, nine rows, which is an ordinary record, not a stress test.
+    private func realisticSummary() -> VariabilityMetricsSummary {
+        func row(_ i: Int, _ label: String, _ value: String, _ unit: String) -> VariabilityMetricsSummary.Row {
+            .init(id: "r\(i)", label: label, value: value, unit: unit)
+        }
+        return VariabilityMetricsSummary(
+            sections: [
+                .init(id: "hrv", title: "Heart rate variability", rows: [
+                    row(1, "Mean RR", "798.9", "ms"), row(2, "SDNN", "191.1", "ms"),
+                    row(3, "RMSSD", "133.0", "ms"), row(4, "pNN50", "18.5", "%")
+                ]),
+                .init(id: "freq", title: "Frequency-domain HRV", rows: [
+                    row(5, "VLF", "16999", "ms²"), row(6, "LF", "8334", "ms²"),
+                    row(7, "HF", "3766", "ms²"), row(8, "LF/HF", "2.21", ""),
+                    row(9, "LF / HF n.u.", "69 / 31", "")
+                ]),
+                .init(id: "qtv", title: "QT variability index", rows: [],
+                      captions: ["No qualifying 5-min segments (needs ≥ 5 min of stable, artifact-free rate)."])
+            ],
+            provenance: "16265 · whole record · 100215 beats · 22.2 h",
+            exportText: "x")
+    }
+
+    private func populatedStrip() -> some View {
+        let context = VariabilityMetricsContext()
+        context.set(summary: realisticSummary())
+        return VariabilityMetricsStrip(context: context)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+    }
+
+    @Test("A width-0 probe is answered at the floor, not with the collapsed tower")
+    func widthZeroProbeIsNotATower() {
+        let strip = populatedStrip()
+        let bare = demandedHeightGivenRoom(strip, width: 0)
+        #expect(bare > MetricsStripInsetHeight.cap,
+                "fixture collapses to \(bare) pt — it must exceed the cap, or this proves nothing")
+        let probed = demandedHeightGivenRoom(cappedInset(strip), width: 0)
+        let atFloor = demandedHeightGivenRoom(strip, width: MetricsStripInsetHeight.measurementWidthFloor)
+        // The whole point: the strip's MINIMUM height is what it would be in a
+        // real column, not the cap. Before the floor this was 260 — the cap —
+        // and the split view carried all 260 into its own minimum (#207).
+        #expect(probed == atFloor,
+                "Probe answers \(probed) pt, floor width answers \(atFloor) pt")
+        #expect(probed < MetricsStripInsetHeight.cap,
+                "The cap is still load-bearing at \(probed) pt")
+    }
+
+    @Test("The floor reports the width it was given, so it can widen nothing")
+    func widthFloorDoesNotWiden() {
+        // #207 is a minimum-WIDTH problem too (1537 pt). A floor that reported
+        // 600 pt back would add itself to that, trading one spill for another.
+        let probed = demandedSize(cappedInset(populatedStrip()),
+                                  proposal: CGSize(width: 0, height: 4000))
+        #expect(probed.width == 0, "The inset demands \(probed.width) pt of width at a width-0 probe")
+    }
+
+    @Test("At real column widths the floor changes nothing")
+    func widthFloorIsInertAtRealWidths() {
+        // The narrowest the detail column can structurally become is the split
+        // view's minimum width less the sidebar and inspector at their maximums
+        // — around 717 pt, comfortably above the floor. Below it the reported
+        // height would understate the content, so the floor must stay below any
+        // width the app can actually produce.
+        let strip = populatedStrip()
+        for width in [MetricsStripInsetHeight.measurementWidthFloor, 800, 1200] as [CGFloat] {
+            #expect(demandedHeightGivenRoom(cappedInset(strip), width: width)
+                    == demandedHeightGivenRoom(strip, width: width),
+                    "The inset diverges from its content at \(width) pt")
+        }
+    }
+
     @Test("The cap still bounds a pathological measurement")
     func cappedInsetStillClamps() {
         // Stands in for the strip's LazyVGrid collapsing to one column at
