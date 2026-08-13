@@ -238,6 +238,26 @@ public extension Recording {
             .map { (sampleIndex: $0.0, symbol: $0.1) }
     }
 
+    /// Why this record has no annotator-coded beats, or nil when it has some
+    /// (#206).
+    ///
+    /// Every beat-derived surface — Variability Metrics, the beat lanes of the
+    /// Trend stack, Morphology — reads `annotatedBeats()` /
+    /// `normalBeatSampleIndices()`, and Murmur has no beat detector. So this
+    /// one question decides whether all of them can render, and it is asked
+    /// here rather than at each surface: three gates that each independently
+    /// decided to unmount is exactly how the absence became silent.
+    ///
+    /// Distinguishes the two cases because they read differently to the
+    /// analyst. A record with a full review queue and no beats (all of vfdb)
+    /// looks like a broken import; a record with no annotations at all looks
+    /// like what it is.
+    func beatSourceAbsence() -> BeatSourceAbsence? {
+        guard annotatedBeats().isEmpty else { return nil }
+        let wfdb = annotations.filter { $0.source.hasPrefix("wfdb.atr") }
+        return wfdb.isEmpty ? .noAnnotations : .rhythmAnnotationsOnly(rhythmCount: wfdb.count)
+    }
+
     /// Read the entire sample buffer of the primary ECG channel from
     /// its on-disk file inside `directory`. Returns nil when the
     /// recording has no ECG channels or the file is unreadable.
