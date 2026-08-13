@@ -264,11 +264,14 @@ struct IntervalTrendLane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
+            // Chrome inset, chart full-bleed — the lane's data has to span its
+            // cell edge to edge or it is not on the stack's axis (#210).
             captionRow
+                .padding(.horizontal, 12)
             chart
             rrAssumptionNote
+                .padding(.horizontal, 12)
         }
-        .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
         // AX1: mark the lane as a container that CONTAINS its children as
@@ -1083,12 +1086,7 @@ struct IntervalTrendLane: View {
             }
             .chartXAxis(.hidden)
             .chartXScale(domain: timeRangeSeconds)
-            .chartYAxis {
-                AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) { _ in
-                    AxisValueLabel().font(.caption2.monospacedDigit())
-                    AxisGridLine().foregroundStyle(.secondary.opacity(0.15))
-                }
-            }
+            .trendLaneYAxis()
             .chartYScale(domain: yDomain)
             .frame(height: Self.laneHeight)
             .background(

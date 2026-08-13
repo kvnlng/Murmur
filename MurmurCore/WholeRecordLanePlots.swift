@@ -38,7 +38,33 @@ struct HeartRateLanePlot: View {
     let sampleRate: Double
     let recordingRange: ClosedRange<Double>
 
+    /// The drawn domain, computed from the samples rather than from the binned
+    /// columns so the gutter labels and the Canvas cannot disagree — binning
+    /// preserves the overall min and max, so the two are the same numbers.
+    private var domain: (lo: Double, hi: Double)? {
+        let finite = samples.filter(\.isFinite).map(Double.init)
+        guard let lo = finite.min(), let hi = finite.max(), hi > lo else { return nil }
+        return (lo, hi)
+    }
+
     var body: some View {
+        // #210: the gutter is the lane's half of the stack's plot-geometry
+        // contract. It also gives this lane a y-scale for the first time —
+        // reported as "HR (and effectively LF/HF) carry no y-scale at all".
+        HStack(spacing: 0) {
+            TrendLaneScaleGutter(ticks: ticks)
+            plot
+        }
+    }
+
+    private var ticks: [(fraction: Double, label: String)] {
+        guard let domain else { return [] }
+        return [0.0, 0.5, 1.0].map { f in
+            (f, String(format: "%.0f", domain.lo + f * (domain.hi - domain.lo)))
+        }
+    }
+
+    private var plot: some View {
         GeometryReader { geo in
             let columns = LaneBinning.bin(
                 samples: samples,
@@ -47,10 +73,7 @@ struct HeartRateLanePlot: View {
                 targetColumns: Int(geo.size.width.rounded())
             )
             Canvas { ctx, size in
-                guard !columns.isEmpty else { return }
-                let finite = columns.compactMap { $0 }
-                guard let lo = finite.map(\.min).min(),
-                      let hi = finite.map(\.max).max(), hi > lo else { return }
+                guard !columns.isEmpty, let (lo, hi) = domain else { return }
                 let scale = size.height / CGFloat(hi - lo)
                 func y(_ v: Double) -> CGFloat { size.height - CGFloat(v - lo) * scale }
                 let step = size.width / CGFloat(max(1, columns.count))
@@ -76,6 +99,20 @@ struct HeartRateLanePlot: View {
     }
 }
 
+/// Every lane reserves the same leading gutter, including the ones with
+/// nothing to put in it — an empty gutter is what keeps a scale-less lane on
+/// the same x-mapping as the rest (#210).
+struct TrendLaneEmptyGutter<Plot: View>: View {
+    @ViewBuilder var plot: () -> Plot
+
+    var body: some View {
+        HStack(spacing: 0) {
+            TrendLaneScaleGutter(ticks: [])
+            plot()
+        }
+    }
+}
+
 /// Artifact-ratio heat band across the whole recording.
 ///
 /// Each column reports the WORST ratio in the stretch it covers. A lane whose
@@ -89,6 +126,12 @@ struct QualityLanePlot: View {
     var threshold: Double = 0.1
 
     var body: some View {
+        // A heat band has no scale to print, but it still reserves the gutter:
+        // its columns must line up with the lanes above it (#210).
+        TrendLaneEmptyGutter { plot }
+    }
+
+    private var plot: some View {
         GeometryReader { geo in
             let columns = LaneBinning.bin(
                 samples: samples,
@@ -183,14 +226,14 @@ struct LFHFLanePlot: View {
         }
         .chartXAxis(.hidden)
         .chartXScale(domain: recordingRange)
-        // The y-scale: same tick count, font and gridline treatment as the
-        // RMSSD lane, so the two variability lanes read as one family.
-        .chartYAxis {
-            AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) { _ in
-                AxisValueLabel().font(.caption2.monospacedDigit())
-                AxisGridLine().foregroundStyle(.secondary.opacity(0.15))
-            }
-        }
+        // The y-scale, in the stack's shared gutter. X92 added the axis and it
+        // was invisible on screen: at this lane's 46 pt height Charts rendered
+        // a single tick whose self-sized label spilled left out of the plot
+        // cell and landed on the rail's subtitle — the stray "5" in
+        // "Lomb–Scargle · 5-min window". A fixed label box cannot spill.
+        // One decimal: this is a ratio around 1–3, and "2" vs "2.2" is the
+        // difference between a scale and a decoration.
+        .trendLaneYAxis(decimals: 1, desiredCount: 2)
         .chartYScale(domain: yDomain)
         .accessibilityHidden(true)
     }
