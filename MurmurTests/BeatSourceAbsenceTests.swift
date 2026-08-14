@@ -125,7 +125,20 @@ struct BeatSourceAbsenceTests {
     /// without the drive, and these tests skip rather than fail there — the
     /// fixtures above carry the contract; these prove the fixtures match the
     /// data the issue was filed against.
+    ///
+    /// The skip has to be a CONDITION TRAIT. `try #require(fileExists…)` in
+    /// the body reads like a skip and isn't one: it records an expectation
+    /// failure before it throws, so every machine without the drive — Xcode
+    /// Cloud included — reported these as red. `.enabled(if:)` is the only
+    /// thing Swift Testing offers that actually declines to run the test.
     private static let physioNet = URL(fileURLWithPath: "/Volumes/PRO-G40/Data/PhysioNet")
+
+    /// Whether a PhysioNet record is on this machine, for the traits below.
+    /// Static because a trait's condition is evaluated outside any instance.
+    private static func hasRecord(_ relativePath: String) -> Bool {
+        FileManager.default.fileExists(
+            atPath: physioNet.appendingPathComponent(relativePath).path)
+    }
 
     private func importRecord(_ hea: URL) throws -> Recording {
         let out = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -134,11 +147,11 @@ struct BeatSourceAbsenceTests {
         return try WFDBImporter.importRecord(heaURL: hea, outputDirectory: out).recording
     }
 
-    @Test("vfdb 418, imported for real, reports rhythm-only")
+    @Test("vfdb 418, imported for real, reports rhythm-only",
+          .enabled(if: BeatSourceAbsenceTests.hasRecord("vfdb/418.hea"),
+                   "vfdb not available on this machine"))
     func realVFDBRecordIsRhythmOnly() throws {
         let hea = Self.physioNet.appendingPathComponent("vfdb/418.hea")
-        try #require(FileManager.default.fileExists(atPath: hea.path),
-                     "vfdb not available on this machine — skipping")
         let recording = try importRecord(hea)
         let absence = try #require(recording.beatSourceAbsence(),
                                    "418 is the record #206 was filed against; it must report an absence")
@@ -152,12 +165,12 @@ struct BeatSourceAbsenceTests {
         #expect(count == 121, "Expected 418's 121 rhythm markers, got \(count)")
     }
 
-    @Test("afdb is rhythm-only too, but its beats are in a sibling file we can name")
+    @Test("afdb is rhythm-only too, but its beats are in a sibling file we can name",
+          .enabled(if: BeatSourceAbsenceTests.hasRecord("afdb/04015.hea"),
+                   "afdb not available on this machine"))
     func realAFDBRecordOffersItsSiblingFile() throws {
         let dir = Self.physioNet.appendingPathComponent("afdb")
         let hea = dir.appendingPathComponent("04015.hea")
-        try #require(FileManager.default.fileExists(atPath: hea.path),
-                     "afdb not available on this machine — skipping")
         let recording = try importRecord(hea)
         #expect(recording.beatSourceAbsence() != nil,
                 "afdb's .atr is rhythm-annotated like vfdb's")
