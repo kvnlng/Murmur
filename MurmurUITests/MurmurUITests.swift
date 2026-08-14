@@ -608,10 +608,58 @@ final class MurmurUITests: XCTestCase {
     /// `.runningForeground` throughout that experiment, asserting on
     /// `wait(for: .runningForeground)` proves very little. `activate()` is the
     /// part that could do work; the wait is not a meaningful guard.
+
+    /// Wait until `element`'s frame stops moving.
+    ///
+    /// The context column mounts its lanes ASYNCHRONOUSLY — delineation,
+    /// LF/HF, the X89 beat series — and every mount grows the scroll content
+    /// and shifts everything below it. `scrollUntilHittable` already makes two
+    /// passes for exactly this reason, but two passes cannot cover the gap
+    /// AFTER it returns: XCUI resolves a click coordinate from the frame as it
+    /// stands at click time, so a lane landing in between sends the click to
+    /// whatever now occupies the old position. That failure is silent — the
+    /// click is dispatched, XCUI is satisfied, and the wrong thing (or
+    /// nothing) receives it, which is precisely the #231 signature.
+    ///
+    /// Settled means `stableFor` consecutive identical reads. Frames are cheap
+    /// (~0.1 s attribute reads, unlike `isHittable` on an offscreen element —
+    /// see X98), so polling them is affordable where polling hittability is
+    /// not. An empty frame never counts as settled: the element is not
+    /// realised yet.
     @MainActor
-    static func clickInWindow(_ element: XCUIElement, in app: XCUIApplication) {
+    static func waitForFrameToSettle(
+        _ element: XCUIElement,
+        stableFor: Int = 2,
+        timeout: TimeInterval = 5
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        var last: CGRect?
+        var stable = 0
+        while Date() < deadline {
+            let frame = element.frame
+            if !frame.isEmpty, frame == last {
+                stable += 1
+                if stable >= stableFor { return true }
+            } else {
+                stable = frame.isEmpty ? 0 : 1
+            }
+            last = frame
+            usleep(150_000)
+        }
+        return false
+    }
+
+    /// Activate, wait for the layout to stop moving, then click. Returns
+    /// whether the frame settled — a caller in a test where movement is the
+    /// suspected fault should assert on it rather than discard it.
+    @discardableResult
+    @MainActor
+    static func clickInWindow(_ element: XCUIElement, in app: XCUIApplication) -> Bool {
         app.activate()
+        // Settle LAST, so nothing between it and the click can move the frame.
+        let settled = waitForFrameToSettle(element)
         element.click()
+        return settled
     }
 
     /// XCUIElement.waitForNonExistence isn't on macOS; spin our own.
