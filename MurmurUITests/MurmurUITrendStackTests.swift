@@ -191,7 +191,7 @@ final class MurmurUITrendStackTests: XCTestCase {
         // context — bring it into view the way an analyst would.
         XCTAssertTrue(MurmurUITests.scrollUntilHittable(menu, in: app),
                       "The Lanes menu never became clickable, even after scrolling the stack into view")
-        menu.click()
+        MurmurUITests.clickInWindow(menu, in: app)
 
         let toggle = app.menuItems["trend-lane-toggle-hr"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 5),
@@ -246,7 +246,7 @@ final class MurmurUITrendStackTests: XCTestCase {
         // it worse by growing the stack a row taller than the fold allows.
         XCTAssertTrue(MurmurUITests.scrollUntilHittable(menu, in: app),
                       "The Lanes menu should scroll into view")
-        menu.click()
+        MurmurUITests.clickInWindow(menu, in: app)
         XCTAssertTrue(app.menuItems["trend-lane-toggle-lfhf"].waitForExistence(timeout: 5),
                       "The Lanes menu should offer LF / HF when the series exists")
         app.typeKey(.escape, modifierFlags: [])
@@ -316,7 +316,18 @@ final class MurmurUITrendStackTests: XCTestCase {
         XCTAssertTrue(menu.waitForExistence(timeout: 5))
         XCTAssertTrue(MurmurUITests.scrollUntilHittable(menu, in: app),
                       "The Lanes menu should scroll into view")
-        menu.click()
+        // #236. Hittability is already handled by the scroll above and it
+        // passes — the click reaches the element and the menu does not open,
+        // which is the in-window-click-swallowed signature for the third time
+        // on this runner (#232 and #231 both went green on activation alone).
+        //
+        // These sites briefly had this guard: added in #233, reverted in #234
+        // as speculative spread, because they were not failing and activation
+        // had no evidence behind it then. That call was right on the evidence
+        // available — unevidenced guards are what made #233 unreadable — but
+        // it queued this failure up behind #231 instead of clearing both at
+        // once. A build cycle traded for a definitive answer.
+        MurmurUITests.clickInWindow(menu, in: app)
         XCTAssertTrue(app.menuItems["trend-lane-toggle-hr-beats"].waitForExistence(timeout: 5),
                       "The Lanes menu should offer the beat-derived HR lane")
         app.typeKey(.escape, modifierFlags: [])
