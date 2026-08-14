@@ -325,7 +325,11 @@ final class MurmurUITests: XCTestCase {
         XCTAssertTrue(recentRow.waitForExistence(timeout: 5),
                       "Seeded recents entry should render in the welcome view")
         // #232: this click reached the row locally and did nothing on Cloud,
-        // with no error from XCUI — the in-window-click signature.
+        // with no error from XCUI — the in-window-click signature. Activation
+        // is the ONLY guard this test carries, so the next Cloud run says
+        // something either way: still failing means the click was never the
+        // problem, and the security-scoped bookmark (which also has to resolve
+        // on a fresh VM, and fails identically from the outside) is next.
         MurmurUITests.clickInWindow(recentRow, in: app)
 
         // Single-record folders auto-select and auto-import on open, so
@@ -608,58 +612,20 @@ final class MurmurUITests: XCTestCase {
     /// `.runningForeground` throughout that experiment, asserting on
     /// `wait(for: .runningForeground)` proves very little. `activate()` is the
     /// part that could do work; the wait is not a meaningful guard.
-
-    /// Wait until `element`'s frame stops moving.
     ///
-    /// The context column mounts its lanes ASYNCHRONOUSLY — delineation,
-    /// LF/HF, the X89 beat series — and every mount grows the scroll content
-    /// and shifts everything below it. `scrollUntilHittable` already makes two
-    /// passes for exactly this reason, but two passes cannot cover the gap
-    /// AFTER it returns: XCUI resolves a click coordinate from the frame as it
-    /// stands at click time, so a lane landing in between sends the click to
-    /// whatever now occupies the old position. That failure is silent — the
-    /// click is dispatched, XCUI is satisfied, and the wrong thing (or
-    /// nothing) receives it, which is precisely the #231 signature.
-    ///
-    /// Settled means `stableFor` consecutive identical reads. Frames are cheap
-    /// (~0.1 s attribute reads, unlike `isHittable` on an offscreen element —
-    /// see X98), so polling them is affordable where polling hittability is
-    /// not. An empty frame never counts as settled: the element is not
-    /// realised yet.
+    /// Deliberately ONE step, not two. A frame-settle poll was written to sit
+    /// here as well, covering the other candidate for #231 — a lane mounting
+    /// between the hit test and the click, moving the target out from under a
+    /// coordinate XCUI had already resolved. It was removed before merge for
+    /// two reasons: instrumenting it showed the frame stable after a single
+    /// poll at every call site, so there was no evidence for it; and a click
+    /// carrying two guards cannot tell you which one worked. See #231 for the
+    /// measurements, and `git log` for the implementation if it is needed
+    /// again.
     @MainActor
-    static func waitForFrameToSettle(
-        _ element: XCUIElement,
-        stableFor: Int = 2,
-        timeout: TimeInterval = 5
-    ) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        var last: CGRect?
-        var stable = 0
-        while Date() < deadline {
-            let frame = element.frame
-            if !frame.isEmpty, frame == last {
-                stable += 1
-                if stable >= stableFor { return true }
-            } else {
-                stable = frame.isEmpty ? 0 : 1
-            }
-            last = frame
-            usleep(150_000)
-        }
-        return false
-    }
-
-    /// Activate, wait for the layout to stop moving, then click. Returns
-    /// whether the frame settled — a caller in a test where movement is the
-    /// suspected fault should assert on it rather than discard it.
-    @discardableResult
-    @MainActor
-    static func clickInWindow(_ element: XCUIElement, in app: XCUIApplication) -> Bool {
+    static func clickInWindow(_ element: XCUIElement, in app: XCUIApplication) {
         app.activate()
-        // Settle LAST, so nothing between it and the click can move the frame.
-        let settled = waitForFrameToSettle(element)
         element.click()
-        return settled
     }
 
     /// XCUIElement.waitForNonExistence isn't on macOS; spin our own.
