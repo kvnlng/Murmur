@@ -538,6 +538,7 @@ struct ChannelPanel: View {
                     sampleRate: markingsContext.sampleRate,
                     detailLevel: MarkingsDetailLevel.level(forViewportSeconds: viewport.durationSeconds),
                     focusedRPeakSampleIndex: markingsContext.focusedBeatSampleIndex,
+                    pinnedRPeakSampleIndex: markingsContext.pinnedBeatSampleIndex,
                     enabledLayers: markingsContext.enabledLayers,
                     canvasSize: liveSize,
                     tier: resolvedTier
@@ -670,6 +671,15 @@ struct ChannelPanel: View {
                         Text("Unlock Editing to add notes or findings")
                     }
                 }
+            }
+            // #225: click a beat to PIN its card open. The pan gesture has a
+            // 1 pt dead zone, so a click without movement never reaches it
+            // and the two can coexist without a priority fight.
+            .onTapGesture { location in
+                guard liveSize.width > 0 else { return }
+                let sample = cursorSampleIndex(at: location, in: liveSize)
+                guard let beat = markingsContext.nearestBeat(toSampleIndex: sample) else { return }
+                markingsContext.togglePin(beatSampleIndex: beat.rPeakSampleIndex)
             }
             .gesture(panGesture(in: liveSize))
             .gesture(zoomGesture(in: liveSize))
