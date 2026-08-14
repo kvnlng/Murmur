@@ -50,66 +50,55 @@ final class MurmurUITrendStackTests: XCTestCase {
         _ = stack.waitForExistence(timeout: 3)
     }
 
-    /// The Context drawer's expansion is `@AppStorage`, so whatever the last
-    /// run (or a developer's manual session) left behind is what this test
-    /// inherits — and an expanded drawer pushes the Lanes menu below the
-    /// fold, where XCUI reports it "not hittable". Tests that CLICK stack
-    /// chrome collapse the drawer first; existence-only tests don't care.
+    /// Launch arguments that pin the Context drawer SHUT.
     ///
-    /// #231, and the reason it is CI-shaped: `murmur.notesDrawerExpanded`
-    /// DEFAULTS TO FALSE, so on a clean machine `panel.exists` is false and
-    /// this whole body returns early without clicking anything. The path only
-    /// executes when an earlier test in the same run left the drawer open —
-    /// `MurmurUINotesDrawerTests` does, and it sorts before this file. Running
-    /// the trend-stack tests alone, which is what local debugging does, skips
-    /// the code CI fails in. Reproduce with:
+    /// Handled in app code (`UITestSupport.shouldCollapseContextDrawer`), the
+    /// same way X65 pinned the review queue's group state — the drawer renders
+    /// closed regardless of what `@AppStorage` inherited from an earlier test
+    /// or a developer's manual session. No click, no animation, no waiting for
+    /// an unmount.
     ///
-    ///     defaults write com.kevinlong.murmur murmur.notesDrawerExpanded -bool true
+    /// **The obvious shortcut is a trap.** Passing `-murmur.notesDrawerExpanded
+    /// NO` puts the value in `UserDefaults`' argument domain, which outranks
+    /// the app domain and needs no production change at all. It also breaks
+    /// this suite: with `MurmurUINotesDrawerTests` running first, the injected
+    /// beat and LF/HF lanes stop rendering entirely and the tests fail on lane
+    /// EXISTENCE, twenty seconds of waiting apiece. Isolated to the argument
+    /// alone — unmodified helper code, one added launch argument, reproducible.
+    /// Root cause not established; the flag below sidesteps it. Do not
+    /// "simplify" this back.
     ///
-    /// (Done. The path then runs, and passes, on a developer machine — so the
-    /// suite-order dependency explains the local/CI split but is not by itself
-    /// the fault.)
+    /// **Why this replaced a helper that clicked the bar shut.** These tests
+    /// do not care whether the drawer works; they need it OUT OF THE WAY so
+    /// the Lanes menu is reachable. The old `collapseContextDrawer` collapsed
+    /// it by hand and asserted the unmount, which made a setup step fail as
+    /// though it were the subject — three Cloud builds reported "Collapsing
+    /// the Context bar should unmount the drawer" when the actual casualty was
+    /// a beat-rate assertion 200 lines further down that never got to run.
+    ///
+    /// Worse, it was not deterministic. The helper opened with
+    /// `guard panel.exists else { return }`, and the drawer's state was
+    /// inherited from whatever ran before — `MurmurUINotesDrawerTests` leaves
+    /// it open and sorts earlier. So a given build might exercise the click
+    /// path or skip it entirely, and the two are indistinguishable in the
+    /// report. Builds that looked like controlled experiments were not:
+    /// identical helper code passed on one Cloud run and failed on the next.
+    ///
+    /// Drawer open/close has its own coverage, where it belongs —
+    /// `MurmurUINotesDrawerTests.testCommandShiftNTogglesDrawer` and
+    /// `launchWithDrawerOpen`. It does not need a second, accidental home
+    /// here.
+    private static let drawerShut = ["--ui-test-context-drawer-collapsed"]
+
+    /// The drawer really is shut. Cheap, and it fails HERE — naming the
+    /// precondition — rather than fifty lines later as an unreachable menu.
     @MainActor
-    private func collapseContextDrawer(_ app: XCUIApplication) {
+    private func assertContextDrawerShut(_ app: XCUIApplication) {
         let panel = app.descendants(matching: .any)
             .matching(identifier: "context-panel").firstMatch
-        guard panel.exists else { return }
-        let contextBar = app.descendants(matching: .any)
-            .matching(identifier: "context-bar").firstMatch
-        XCTAssertTrue(contextBar.waitForExistence(timeout: 5))
-        // The bar rides the same scrolling context as the stack, and callers
-        // arrive here AFTER `ensureTrendStackExpanded` may have scrolled the
-        // stack into view — which carries the bar off the TOP of the
-        // viewport. Clicking a scrolled-out element doesn't error on macOS:
-        // XCUI resolves a hit point outside the window, the click lands
-        // nowhere, and the drawer just stays open — which is exactly how this
-        // presented on Cloud's short display, as a bare "Collapsing the
-        // Context bar should unmount the drawer" with no click error above it.
-        XCTAssertTrue(MurmurUITests.scrollUntilHittable(contextBar, in: app),
-                      "The Context bar should scroll into view before it is clicked")
-        // Activation, and it is the one variable this build changes.
-        //
-        // The previous build settled #231's timeout hypothesis by killing it:
-        // raised to 10 s, the drawer STILL had not unmounted. Ten seconds is
-        // not slowness, it is "never" — the collapse is not happening at all,
-        // so the click is not landing.
-        //
-        // What promotes activation from plausible to likely is the other half
-        // of that same build: #232's recents row, whose ONLY change was
-        // `clickInWindow`, went green. That is the in-window-click-swallowed
-        // mechanism demonstrated on Cloud hardware rather than merely quoted
-        // from `MurmurUIPurchaseTests` — and this bar is the one site the
-        // guard was deliberately stripped from when the experiment was cut to
-        // one variable per test. Same signature, same runner, now with a
-        // worked example next door.
-        MurmurUITests.clickInWindow(contextBar, in: app)
-        // Left at 10 s ON PURPOSE, though hypothesis 3 is dead. Reverting it
-        // to 3 s would change two things at once; and since 10 s alone has
-        // already been shown insufficient, it cannot be credited if this
-        // passes. Attribution stays clean. Fold it back to 3 s once activation
-        // is confirmed.
-        XCTAssertTrue(MurmurUITests.waitForElementToDisappear(panel, timeout: 10),
-                      "Collapsing the Context bar should unmount the drawer")
+        XCTAssertFalse(panel.exists,
+                       "`drawerShut` should have pinned the Context drawer closed at launch — "
+                       + "an open drawer pushes the stack's bottom chrome past the fold")
     }
 
     /// The fixture carries `HR_bpm` and `ecg_artifact_ratio`, so both
@@ -175,14 +164,14 @@ final class MurmurUITrendStackTests: XCTestCase {
     @MainActor
     func testLanesMenuRemovesALane() throws {
         let app = XCUIApplication()
-        app.launchArguments += ["--ui-test-sample", "--ui-test-window=1000x600"]
+        app.launchArguments += ["--ui-test-sample", "--ui-test-window=1000x600"] + Self.drawerShut
         app.launch()
         ensureTrendStackExpanded(app)
 
         let hrLane = app.descendants(matching: .any)
             .matching(identifier: "trend-lane-hr").firstMatch
         XCTAssertTrue(hrLane.waitForExistence(timeout: 20))
-        collapseContextDrawer(app)
+        assertContextDrawerShut(app)
 
         let menu = app.descendants(matching: .any)
             .matching(identifier: "trend-lanes-menu").firstMatch
@@ -220,7 +209,7 @@ final class MurmurUITrendStackTests: XCTestCase {
     func testLFHFLaneRendersInjectedSeries() throws {
         let app = XCUIApplication()
         app.launchArguments += ["--ui-test-sample", "--ui-test-inject-lfhf-lane",
-                                "--ui-test-window=1220x678"]
+                                "--ui-test-window=1220x678"] + Self.drawerShut
         app.launch()
         ensureTrendStackExpanded(app)
 
@@ -236,7 +225,7 @@ final class MurmurUITrendStackTests: XCTestCase {
                       "The lane's value column should render the injected 1.50")
 
         // The Lanes menu offers the lane once the series exists.
-        collapseContextDrawer(app)
+        assertContextDrawerShut(app)
         let menu = app.descendants(matching: .any)
             .matching(identifier: "trend-lanes-menu").firstMatch
         XCTAssertTrue(menu.waitForExistence(timeout: 5))
@@ -294,7 +283,7 @@ final class MurmurUITrendStackTests: XCTestCase {
     func testBeatDerivedHRLaneRendersComputedRate() throws {
         let app = XCUIApplication()
         app.launchArguments += ["--ui-test-sample", "--ui-test-inject-qtc-lane=455",
-                                "--ui-test-window=1220x678"]
+                                "--ui-test-window=1220x678"] + Self.drawerShut
         app.launch()
         ensureTrendStackExpanded(app)
 
@@ -310,7 +299,7 @@ final class MurmurUITrendStackTests: XCTestCase {
                       "800 ms R–R must render as exactly 75.0 bpm in the value column")
 
         // The Lanes menu offers the lane once beats exist.
-        collapseContextDrawer(app)
+        assertContextDrawerShut(app)
         let menu = app.descendants(matching: .any)
             .matching(identifier: "trend-lanes-menu").firstMatch
         XCTAssertTrue(menu.waitForExistence(timeout: 5))
@@ -338,13 +327,13 @@ final class MurmurUITrendStackTests: XCTestCase {
     @MainActor
     func testHeaderBarFoldsTheStackWhole() throws {
         let app = XCUIApplication()
-        app.launchArguments += ["--ui-test-sample", "--ui-test-window=1000x600"]
+        app.launchArguments += ["--ui-test-sample", "--ui-test-window=1000x600"] + Self.drawerShut
         app.launch()
 
         let bar = app.descendants(matching: .any)
             .matching(identifier: "trend-stack-bar").firstMatch
         XCTAssertTrue(bar.waitForExistence(timeout: 20))
-        collapseContextDrawer(app)
+        assertContextDrawerShut(app)
 
         let stack = app.descendants(matching: .any)
             .matching(identifier: "trend-stack").firstMatch

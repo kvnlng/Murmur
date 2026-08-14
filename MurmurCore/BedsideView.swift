@@ -142,6 +142,19 @@ struct BedsideView: View {
     /// the design says as much.
     @AppStorage("murmur.notesDrawerExpanded")
     private var notesDrawerExpanded: Bool = false
+
+    /// What the drawer actually RENDERS as. Identical to
+    /// `notesDrawerExpanded` in production and in any UI test that doesn't ask
+    /// otherwise; pinned closed for suites launched with
+    /// `--ui-test-context-drawer-collapsed`, which need the drawer out of the
+    /// way and inherit its persisted state from whatever ran before them.
+    /// Reads go through here; the stored value is still what toggling writes.
+    private var contextDrawerIsOpen: Bool {
+        #if DEBUG
+        if UITestSupport.shouldCollapseContextDrawer { return false }
+        #endif
+        return notesDrawerExpanded
+    }
     /// X85 — the trend stack folds like the Context drawer. Defaults
     /// EXPANDED (unlike the drawer): the stack is a primary reading surface
     /// that has always been visible; folding is an option the analyst takes,
@@ -339,7 +352,7 @@ struct BedsideView: View {
             nextNote: { stepNote(by: 1) },
             previousNote: { stepNote(by: -1) },
             notesAvailable: !anchoredNotes.isEmpty,
-            notesDrawerVisible: notesDrawerExpanded,
+            notesDrawerVisible: contextDrawerIsOpen,
             textEntryActive: notesEditorFocused,
             isEditing: isEditing
         )
@@ -659,7 +672,7 @@ struct BedsideView: View {
                     Label("Notes", systemImage: ToolbarGlyph.notes)
                 }
                 .help("Show or hide the Context drawer (⌘⇧N)")
-                .tint(notesDrawerExpanded ? Color.accentColor : nil)
+                .tint(contextDrawerIsOpen ? Color.accentColor : nil)
                 .accessibilityIdentifier("notes-toggle")
             }
             ToolbarItem(id: "edit-mode-toggle", placement: .automatic, showsByDefault: true) {
@@ -2597,7 +2610,7 @@ struct BedsideView: View {
                     }
                 } label: {
                     HStack(spacing: 6) {
-                        Image(systemName: notesDrawerExpanded ? "chevron.down" : "chevron.right")
+                        Image(systemName: contextDrawerIsOpen ? "chevron.down" : "chevron.right")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                         Text("Context")
@@ -2613,7 +2626,7 @@ struct BedsideView: View {
                 .accessibilityLabel("Context. \(contextBarDetail)")
                 .accessibilityIdentifier("context-bar")
 
-                if notesDrawerExpanded {
+                if contextDrawerIsOpen {
                     ContextDrawer(
                         headerComments: recording.headerComments,
                         notesURL: recording.notesFileName.map {

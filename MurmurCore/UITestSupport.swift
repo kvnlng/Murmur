@@ -397,6 +397,25 @@ enum UITestSupport {
         isRunningUITest && !collapseFindingsGroups
     }
 
+    /// Whether the Context drawer should render CLOSED regardless of what
+    /// `@AppStorage("murmur.notesDrawerExpanded")` holds.
+    ///
+    /// Opt-IN, unlike `shouldExpandFindingsGroups` — the drawer's real default
+    /// is already closed, so tests that say nothing keep observing the shipping
+    /// behaviour. Only suites that need it definitively out of the way ask.
+    ///
+    /// Why it exists: the drawer's state is persisted, so it is inherited from
+    /// whatever ran earlier in the suite — `MurmurUINotesDrawerTests` leaves it
+    /// open. The trend-stack tests then had to collapse it by hand, and that
+    /// setup step failed on three separate Cloud builds while reporting itself
+    /// as a drawer bug. It also made those builds non-deterministic: the
+    /// collapse path ran or didn't depending on suite order, and the report
+    /// cannot tell the two apart.
+    static var shouldCollapseContextDrawer: Bool {
+        isRunningUITest
+            && ProcessInfo.processInfo.arguments.contains("--ui-test-context-drawer-collapsed")
+    }
+
     /// If `--ui-test-seed-beat-annotations=N` is set, returns N. The
     /// synthetic fixture generator adds N evenly-spaced normal-beat
     /// ("N") point annotations across the whole recording so waveform
