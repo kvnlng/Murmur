@@ -324,7 +324,9 @@ final class MurmurUITests: XCTestCase {
             .matching(NSPredicate(format: "identifier BEGINSWITH 'welcome-recent-'")).firstMatch
         XCTAssertTrue(recentRow.waitForExistence(timeout: 5),
                       "Seeded recents entry should render in the welcome view")
-        recentRow.click()
+        // #232: this click reached the row locally and did nothing on Cloud,
+        // with no error from XCUI — the in-window-click signature.
+        MurmurUITests.clickInWindow(recentRow, in: app)
 
         // Single-record folders auto-select and auto-import on open, so
         // the bedside view should render once the importer finishes.
@@ -577,6 +579,39 @@ final class MurmurUITests: XCTestCase {
         toggle.click()
         XCTAssertTrue(vfRow.waitForExistence(timeout: 2),
                       "Finding row should reappear after toggling the panel back on")
+    }
+
+    /// Click an element inside the app's OWN WINDOW, having first made the app
+    /// frontmost.
+    ///
+    /// macOS delivers the first click on an INACTIVE window to the window
+    /// manager, not to the responder chain: it activates the app and stops
+    /// there. XCUI reports nothing wrong — the element was hittable, the click
+    /// was dispatched — so the test fails later and elsewhere, on an assertion
+    /// about state that never changed. Tests that reach their target through
+    /// `app.menuItems` are immune, because opening a menu activates the app on
+    /// the way in; that is why five menu-driven URL tests pass while the one
+    /// in-window URL test did not. `MurmurUIPurchaseTests` names the same
+    /// mechanism ("the headless CI runner often is not [frontmost]").
+    ///
+    /// HONEST STATUS: unverified. The regime could not be reproduced on a
+    /// developer machine — XCUI holds the app under test frontmost, and twenty
+    /// attempts to steal activation from the runner process left
+    /// `NSWorkspace.frontmostApplication` pointing at Murmur every time, with
+    /// `app.state` never leaving `.runningForeground`. So this is insurance
+    /// against a mechanism that is documented and plausible but not
+    /// demonstrated, and it is a no-op whenever the app is already active —
+    /// which, locally, is always. See #231/#232 before trusting it to have
+    /// fixed anything.
+    ///
+    /// A corollary worth knowing: because `app.state` stayed
+    /// `.runningForeground` throughout that experiment, asserting on
+    /// `wait(for: .runningForeground)` proves very little. `activate()` is the
+    /// part that could do work; the wait is not a meaningful guard.
+    @MainActor
+    static func clickInWindow(_ element: XCUIElement, in app: XCUIApplication) {
+        app.activate()
+        element.click()
     }
 
     /// XCUIElement.waitForNonExistence isn't on macOS; spin our own.

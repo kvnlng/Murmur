@@ -73,7 +73,11 @@ final class MurmurUITrendStackTests: XCTestCase {
         // Context bar should unmount the drawer" with no click error above it.
         XCTAssertTrue(MurmurUITests.scrollUntilHittable(contextBar, in: app),
                       "The Context bar should scroll into view before it is clicked")
-        contextBar.click()
+        // #231: the scroll above is NOT enough — Cloud reached the assertion
+        // below with the bar hittable and the drawer still open, so the click
+        // itself is what failed to land. Activation is the documented
+        // candidate; see `clickInWindow` for how far it has been verified.
+        MurmurUITests.clickInWindow(contextBar, in: app)
         XCTAssertTrue(MurmurUITests.waitForElementToDisappear(panel, timeout: 3),
                       "Collapsing the Context bar should unmount the drawer")
     }
