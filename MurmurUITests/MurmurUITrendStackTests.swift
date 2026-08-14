@@ -63,6 +63,16 @@ final class MurmurUITrendStackTests: XCTestCase {
         let contextBar = app.descendants(matching: .any)
             .matching(identifier: "context-bar").firstMatch
         XCTAssertTrue(contextBar.waitForExistence(timeout: 5))
+        // The bar rides the same scrolling context as the stack, and callers
+        // arrive here AFTER `ensureTrendStackExpanded` may have scrolled the
+        // stack into view — which carries the bar off the TOP of the
+        // viewport. Clicking a scrolled-out element doesn't error on macOS:
+        // XCUI resolves a hit point outside the window, the click lands
+        // nowhere, and the drawer just stays open — which is exactly how this
+        // presented on Cloud's short display, as a bare "Collapsing the
+        // Context bar should unmount the drawer" with no click error above it.
+        XCTAssertTrue(MurmurUITests.scrollUntilHittable(contextBar, in: app),
+                      "The Context bar should scroll into view before it is clicked")
         contextBar.click()
         XCTAssertTrue(MurmurUITests.waitForElementToDisappear(panel, timeout: 3),
                       "Collapsing the Context bar should unmount the drawer")
@@ -162,10 +172,21 @@ final class MurmurUITrendStackTests: XCTestCase {
     /// window, so this asserts the RENDERED value column equals it — catching
     /// a binding slip between `RollingLFHFContext` and the screen that a
     /// green unit suite would miss (the X52 §5 pattern).
+    ///
+    /// Forced short window, like `testLanesMenuRemovesALane` — but pinned to
+    /// 1220×678, NOT that test's 1000×600. Measured, because the two sizes do
+    /// NOT behave alike and the intuitive one is the wrong one: at 1000×600
+    /// the Lanes menu is reachable and this test passes with no scroll at all,
+    /// which is why its 1000×600 sibling has always been green on Cloud while
+    /// this one was not. 1220×678 is what X100's no-flag default RESOLVES to
+    /// on Cloud's 1280×768 VMs, and it reproduces the CI failure verbatim on a
+    /// developer display: "Not hittable: MenuButton … 'trend-lanes-menu'",
+    /// frame at y=786 in a 678-pt window.
     @MainActor
     func testLFHFLaneRendersInjectedSeries() throws {
         let app = XCUIApplication()
-        app.launchArguments += ["--ui-test-sample", "--ui-test-inject-lfhf-lane"]
+        app.launchArguments += ["--ui-test-sample", "--ui-test-inject-lfhf-lane",
+                                "--ui-test-window=1220x678"]
         app.launch()
         ensureTrendStackExpanded(app)
 
@@ -185,6 +206,12 @@ final class MurmurUITrendStackTests: XCTestCase {
         let menu = app.descendants(matching: .any)
             .matching(identifier: "trend-lanes-menu").firstMatch
         XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        // Bottom-of-stack chrome on a short display: existence is not reach.
+        // Omitting this is what failed on Cloud ("Not hittable: MenuButton …
+        // identifier: 'trend-lanes-menu'"), and the injected LF/HF lane makes
+        // it worse by growing the stack a row taller than the fold allows.
+        XCTAssertTrue(MurmurUITests.scrollUntilHittable(menu, in: app),
+                      "The Lanes menu should scroll into view")
         menu.click()
         XCTAssertTrue(app.menuItems["trend-lane-toggle-lfhf"].waitForExistence(timeout: 5),
                       "The Lanes menu should offer LF / HF when the series exists")
@@ -224,10 +251,16 @@ final class MurmurUITrendStackTests: XCTestCase {
     /// the RENDERED value column equals the computed rate, catching a
     /// binding slip between `BeatHeartRateSeries` and the screen that a
     /// green unit suite would miss.
+    ///
+    /// Pinned to Cloud's resolved default (1220×678), for the reason spelled
+    /// out on `testLFHFLaneRendersInjectedSeries`. This test clicks both the
+    /// Context bar and the Lanes menu, and injects two lanes on top of the
+    /// fixture's own — the tallest stack any of these tests build.
     @MainActor
     func testBeatDerivedHRLaneRendersComputedRate() throws {
         let app = XCUIApplication()
-        app.launchArguments += ["--ui-test-sample", "--ui-test-inject-qtc-lane=455"]
+        app.launchArguments += ["--ui-test-sample", "--ui-test-inject-qtc-lane=455",
+                                "--ui-test-window=1220x678"]
         app.launch()
         ensureTrendStackExpanded(app)
 
