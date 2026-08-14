@@ -16,6 +16,7 @@
 //  looks exactly like "this record has no lanes".
 //
 
+import AppKit
 import XCTest
 
 final class MurmurUITrendStackTests: XCTestCase {
@@ -89,6 +90,46 @@ final class MurmurUITrendStackTests: XCTestCase {
     /// `launchWithDrawerOpen`. It does not need a second, accidental home
     /// here.
     private static let drawerShut = ["--ui-test-context-drawer-collapsed"]
+
+    /// What XCUI can actually see with the Lanes menu open, as one line.
+    ///
+    /// DIAGNOSTIC, not a guard. #236 fails on Cloud at
+    /// `menuItems["trend-lane-toggle-hr-beats"]` while two sibling tests click
+    /// the same menu and read their own toggles successfully — so the menu
+    /// opens and XCUI sees its items in general. The failing test is simply
+    /// the one with the LONGEST menu: `--ui-test-inject-qtc-lane=455` adds two
+    /// lanes on top of the fixture's own, and the menu renders a toggle per
+    /// lane.
+    ///
+    /// The leading hypothesis is that the menu is clipped by the SCREEN, which
+    /// would be invisible locally: `--ui-test-window` reproduces a short
+    /// window, but macOS anchors menus to the display, and a 1220×678 window on
+    /// a developer's tall screen still shows the whole menu. Cloud's screen is
+    /// 768 pt. That regime cannot be forced from here, so the next build has to
+    /// report it.
+    ///
+    /// Attached to the assertion's failure message on purpose: the check-run
+    /// `output.text` that Xcode Cloud publishes to GitHub carries failure
+    /// messages and nothing else, so a message is the only channel out. It is
+    /// an `@autoclosure`, so none of this runs unless the assertion fails.
+    ///
+    /// Three-way discriminator:
+    ///   - `toggles=[]` and `total=0` → the menu never opened
+    ///   - toggles listed WITHOUT `hr-beats` → the lane has no menu row
+    ///   - `hr-beats` present but the assertion still failed → XCUI can see it
+    ///     but not resolve it by subscript, i.e. reachability, not existence
+    @MainActor
+    private static func menuInventory(_ app: XCUIApplication, menu: XCUIElement) -> String {
+        let all = app.menuItems.allElementsBoundByIndex
+        let toggles = all
+            .map(\.identifier)
+            .filter { $0.hasPrefix("trend-lane-toggle") }
+            .joined(separator: ",")
+        let screen = NSScreen.main.map { "\(Int($0.frame.height))pt (visible \(Int($0.visibleFrame.height))pt)" }
+            ?? "unknown"
+        return "total=\(all.count) toggles=[\(toggles)] "
+            + "menuButton=\(menu.frame) window=\(app.windows.firstMatch.frame) screen=\(screen)"
+    }
 
     /// The drawer really is shut. Cheap, and it fails HERE — naming the
     /// precondition — rather than fifty lines later as an unreachable menu.
@@ -318,7 +359,8 @@ final class MurmurUITrendStackTests: XCTestCase {
         // once. A build cycle traded for a definitive answer.
         MurmurUITests.clickInWindow(menu, in: app)
         XCTAssertTrue(app.menuItems["trend-lane-toggle-hr-beats"].waitForExistence(timeout: 5),
-                      "The Lanes menu should offer the beat-derived HR lane")
+                      "The Lanes menu should offer the beat-derived HR lane — "
+                      + Self.menuInventory(app, menu: menu))
         app.typeKey(.escape, modifierFlags: [])
     }
 
