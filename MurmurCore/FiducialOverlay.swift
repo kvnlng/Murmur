@@ -194,7 +194,17 @@ struct FiducialOverlay: View {
 
     /// Where the glyph band ends and the trace's space begins — the X93
     /// hairlines start here so the confidence dots stay legible.
-    private static let hairlineTopInset: CGFloat = 28
+    /// #226 widened the band to hold the larger dot. Internal because
+    /// `SnapshotTests.belowGlyphBand` crops at exactly this line to ask
+    /// "did anything reach the trace" — it had its own copy of the number,
+    /// so widening the band here silently moved the test's crop into the
+    /// glyph band and failed an assertion about the trace.
+    static let hairlineTopInset: CGFloat = 31
+
+    /// The confidence dot. #226: was 4 pt filled / 5 pt hollow, which is
+    /// under the size of a small grid square — at that scale a mark reads as
+    /// a printing artifact rather than as a statement about a boundary.
+    private static let dotDiameter: CGFloat = 7
 
     /// A short tick + optional dot for a boundary fiducial (P/QRS/T).
     /// Confidence modulates alpha; low-confidence gets a hollow ring
@@ -217,27 +227,30 @@ struct FiducialOverlay: View {
         focused: Bool = false
     ) -> some View {
         if let x = xPosition(forSample: fiducial.sampleIndex) {
-            // Alpha bottoms out at 0.30 so even low-confidence marks
-            // stay visible (analyst can then click to edit).
-            let alpha = max(0.30, fiducial.confidence)
+            // #226: the floor rises from 0.30. On pale-pink paper a deep ink
+            // at 30% is a grey suggestion — and it landed on exactly the
+            // marks the analyst most needs to see, since low confidence is
+            // what a fiducial edit pass goes looking for.
+            let alpha = max(0.60, fiducial.confidence)
             let color = colorStyle.color.opacity(alpha)
             let isLowConfidence = fiducial.confidence < 0.6
             Rectangle()
                 .fill(color)
-                .frame(width: 1, height: 8)
-                .offset(x: x - 0.5, y: 14)
+                .frame(width: 1.5, height: 8)
+                .offset(x: x - 0.75, y: 13)
             // Confidence marker: filled dot for confident, hollow ring
-            // for unsure.
+            // for unsure. #226 enlarged both — at 4 pt the dot was smaller
+            // than the grid squares it sat on.
             if isLowConfidence {
                 Circle()
-                    .strokeBorder(color, lineWidth: 1)
-                    .frame(width: 5, height: 5)
-                    .offset(x: x - 2.5, y: 22)
+                    .strokeBorder(color, lineWidth: 1.5)
+                    .frame(width: Self.dotDiameter, height: Self.dotDiameter)
+                    .offset(x: x - Self.dotDiameter / 2, y: 21)
             } else {
                 Circle()
                     .fill(color)
-                    .frame(width: 4, height: 4)
-                    .offset(x: x - 2, y: 22.5)
+                    .frame(width: Self.dotDiameter, height: Self.dotDiameter)
+                    .offset(x: x - Self.dotDiameter / 2, y: 21)
             }
             if detailLevel == .fullFiducials, canvasSize.height > Self.hairlineTopInset {
                 Rectangle()
@@ -252,9 +265,15 @@ struct FiducialOverlay: View {
     /// Faint for context, stronger where the analyst is looking. Confidence
     /// still modulates — an unsure boundary must not paint an authoritative
     /// line — but within a band that stays visible on the red ECG paper.
+    ///
+    /// #226 raised the band from 0.10–0.22. It did not stay visible: at 0.10,
+    /// in the paper's own hue, a one-point line was indistinguishable from
+    /// the grid it crossed. The hierarchy the comment describes is preserved,
+    /// an octave up — context lines still read as context, the focused beat's
+    /// still read as stronger, and both are now actually on screen.
     private func hairlineAlpha(confidence: Double, focused: Bool) -> Double {
-        let base = 0.10 + 0.12 * min(max(confidence, 0), 1)
-        return focused ? min(0.45, base * 2) : base
+        let base = 0.22 + 0.16 * min(max(confidence, 0), 1)
+        return focused ? min(0.60, base * 1.7) : base
     }
 
     // MARK: - Coordinate mapping
@@ -272,16 +291,48 @@ struct FiducialOverlay: View {
 
     // MARK: - Color palette
 
-    private enum FiducialColor {
+    /// The boundary palette. Internal rather than private so
+    /// `FiducialPaletteTests` can hold it to the one rule that matters:
+    /// stay off the graph paper's hue.
+    ///
+    /// #226. QRS shipped at hue 0.02 — red-orange, which is the ECG paper's
+    /// own colour family (`WaveformStyle.paper` is (1.00, 0.93, 0.93) under a
+    /// red grid ladder). A one-point line in the grid's own hue, at the low
+    /// end of the alpha band, is grid. The analyst reading this overlay did
+    /// not know the marks were on screen at all.
+    ///
+    /// Two changes, and the second is the one that generalises: QRS moves to
+    /// green, and every layer moves DARKER. Brightness 0.85–0.90 was pastel
+    /// ink on pale-pink paper — the old palette was competing on hue while
+    /// giving away the contrast that actually separates a mark from its
+    /// background on a light surface.
+    ///
+    /// Colour is the only channel distinguishing the three, so green and teal
+    /// sit closer together than is ideal for red-green colour vision
+    /// deficiency. Distinct dot SHAPES per layer would fix that properly and
+    /// are not in this change.
+    enum FiducialColor: CaseIterable {
         case p
         case qrs
         case t
 
+        /// The hue the ECG paper and its grid ladder occupy. Nothing drawn on
+        /// top of them may sit near it.
+        static let paperHue: Double = 0.0
+
+        var hue: Double {
+            switch self {
+            case .p:   return 0.76   // violet
+            case .qrs: return 0.36   // green
+            case .t:   return 0.55   // teal
+            }
+        }
+
         var color: Color {
             switch self {
-            case .p:   return Color(hue: 0.75, saturation: 0.55, brightness: 0.85)  // violet
-            case .qrs: return Color(hue: 0.02, saturation: 0.65, brightness: 0.90)  // red-orange
-            case .t:   return Color(hue: 0.55, saturation: 0.55, brightness: 0.80)  // teal
+            case .p:   return Color(hue: hue, saturation: 0.65, brightness: 0.62)
+            case .qrs: return Color(hue: hue, saturation: 0.75, brightness: 0.50)
+            case .t:   return Color(hue: hue, saturation: 0.70, brightness: 0.60)
             }
         }
     }

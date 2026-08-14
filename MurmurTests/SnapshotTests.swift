@@ -972,7 +972,11 @@ extension SnapshotTests {
     /// catch a regression back to that state.
     private func belowGlyphBand(_ tiff: Data?) -> Data? {
         guard let tiff, let rep = NSBitmapImageRep(data: tiff) else { return nil }
-        let bandBottom = Int(28 * (CGFloat(rep.pixelsHigh) / 120))
+        // Read from the overlay rather than restated: this was a literal 28,
+        // and #226's larger confidence dot moved the real band to 31 — which
+        // put three points of glyph inside the crop and failed the
+        // no-hairlines assertion with a change that added no hairline.
+        let bandBottom = Int(FiducialOverlay.hairlineTopInset * (CGFloat(rep.pixelsHigh) / 120))
         guard let cg = rep.cgImage?.cropping(
             to: CGRect(x: 0, y: bandBottom, width: rep.pixelsWide,
                        height: rep.pixelsHigh - bandBottom)) else { return nil }
