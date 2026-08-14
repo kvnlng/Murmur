@@ -87,24 +87,27 @@ final class MurmurUITrendStackTests: XCTestCase {
         // Context bar should unmount the drawer" with no click error above it.
         XCTAssertTrue(MurmurUITests.scrollUntilHittable(contextBar, in: app),
                       "The Context bar should scroll into view before it is clicked")
-        contextBar.click()
-        // THE ONLY CHANGE THIS TEST CARRIES FOR #231, deliberately. Three
-        // hypotheses were live; two of them (the app not being frontmost, the
-        // bar's frame moving between the hit test and the click) could not be
-        // reproduced on a developer machine and are parked on the issue with
-        // their measurements. Shipping all three would have made a green Cloud
-        // run unreadable — no way to say which one mattered — so this test
-        // changes ONE variable and the next build is an experiment with an
-        // answer.
+        // Activation, and it is the one variable this build changes.
         //
-        // The variable: 3 s was the old budget and the one Cloud blew.
-        // Collapsing runs a 0.18 s animation and then UNMOUNTS ContextDrawer —
-        // notes, demographics, morphology summary — after which the
-        // accessibility tree has to be rebuilt before `exists` goes false.
-        // Fast on a developer machine, unbounded on a contended VM, and unlike
-        // the other two it needs no exotic mechanism to produce a
-        // timeout-shaped failure. If this still fails on Cloud, hypothesis 3
-        // is dead and the parked two are next.
+        // The previous build settled #231's timeout hypothesis by killing it:
+        // raised to 10 s, the drawer STILL had not unmounted. Ten seconds is
+        // not slowness, it is "never" — the collapse is not happening at all,
+        // so the click is not landing.
+        //
+        // What promotes activation from plausible to likely is the other half
+        // of that same build: #232's recents row, whose ONLY change was
+        // `clickInWindow`, went green. That is the in-window-click-swallowed
+        // mechanism demonstrated on Cloud hardware rather than merely quoted
+        // from `MurmurUIPurchaseTests` — and this bar is the one site the
+        // guard was deliberately stripped from when the experiment was cut to
+        // one variable per test. Same signature, same runner, now with a
+        // worked example next door.
+        MurmurUITests.clickInWindow(contextBar, in: app)
+        // Left at 10 s ON PURPOSE, though hypothesis 3 is dead. Reverting it
+        // to 3 s would change two things at once; and since 10 s alone has
+        // already been shown insufficient, it cannot be credited if this
+        // passes. Attribution stays clean. Fold it back to 3 s once activation
+        // is confirmed.
         XCTAssertTrue(MurmurUITests.waitForElementToDisappear(panel, timeout: 10),
                       "Collapsing the Context bar should unmount the drawer")
     }
