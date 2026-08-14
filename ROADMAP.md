@@ -730,6 +730,8 @@ not against a population cutoff.
       3 s and 30 s viewport thresholds.
 - [x] Focus-beat calipers — hover a beat → docked `BeatCalipers`
       readout beside the pinned trace with PR/QRS/QT/QTc + deltas.
+      Click a beat to PIN the card open (#225); hover still previews any
+      other beat and the pinned one returns when the pointer leaves.
 - [ ] Toggleable layers (P / QRS / T / ST / intervals) so a QT study
       and a conduction study each show only what's relevant.
 - [x] QTc formula is a user-set parameter (Fridericia default;

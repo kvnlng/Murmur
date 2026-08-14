@@ -548,6 +548,15 @@ struct BedsideView: View {
         .onKeyPress("x") {
             return dispositionFocused(.reset) ? .handled : .ignored
         }
+        // #225: release the pinned beat. `.ignored` when nothing is pinned,
+        // so Escape keeps whatever meaning the rest of the app gives it —
+        // swallowing it unconditionally would make this the handler for a
+        // key the analyst presses to dismiss things generally.
+        .onKeyPress(.escape) {
+            guard markingsContext.pinnedBeatSampleIndex != nil else { return .ignored }
+            markingsContext.clearPin()
+            return .handled
+        }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("bedside-view")
         // X22: publish the bedside actions as a focused SCENE value so the
@@ -2174,15 +2183,23 @@ struct BedsideView: View {
     private var dockedBeatCard: some View {
         if let focusIdx = markingsContext.focusedBeatSampleIndex,
            let beat = markingsContext.beats.first(where: { $0.rPeakSampleIndex == focusIdx }) {
-            BeatCalipers(
-                beat: beat,
-                sampleRate: markingsContext.sampleRate,
-                template: markingsContext.template,
-                modes: markingsContext.modes,
-                qtcFormula: markingsContext.qtcFormula,
-                kind: caliperKind(for: beat),
-                qtWithheldReason: markingsContext.qtWithheldReason
-            )
+            VStack(alignment: .leading, spacing: 4) {
+                BeatCalipers(
+                    beat: beat,
+                    sampleRate: markingsContext.sampleRate,
+                    template: markingsContext.template,
+                    modes: markingsContext.modes,
+                    qtcFormula: markingsContext.qtcFormula,
+                    kind: caliperKind(for: beat),
+                    qtWithheldReason: markingsContext.qtWithheldReason
+                )
+                pinFooter(showing: beat.rPeakSampleIndex)
+            }
+            // `children: .contain` is load-bearing: without it the wrapper
+            // collapses into one element and the footer's own identifier is
+            // swallowed, so no test can ask whether the card says it's
+            // pinned (X51 §4, same fault as the Layers chip's).
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("docked-beat-inspector")
         }
         // X71: no empty state. The card is simply absent until a beat is
@@ -2190,6 +2207,35 @@ struct BedsideView: View {
         // the column is a fixed 186 pt frame now, so there is nothing left to
         // hold, and what it cost was a permanently-occupied card explaining
         // how to use the trace.
+    }
+
+    /// One line under the card saying whether what you are reading will still
+    /// be there when you move the mouse (#225).
+    ///
+    /// The pin is otherwise invisible state: the card looks identical pinned
+    /// and hovered, and the difference — does this survive the pointer
+    /// leaving the trace — is the entire reason the pin exists. Naming it
+    /// also carries the gesture, which nothing else on screen does.
+    @ViewBuilder
+    private func pinFooter(showing sample: Int64) -> some View {
+        if markingsContext.pinnedBeatSampleIndex == sample {
+            Button {
+                markingsContext.clearPin()
+            } label: {
+                Label("Pinned — click to release", systemImage: "pin.fill")
+                    .font(.caption2)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("This beat stays on screen when the pointer leaves the trace. Escape also releases it.")
+            .accessibilityIdentifier("beat-card-unpin")
+        } else {
+            Text("Click the beat to pin this open")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("beat-card-pin-hint")
+        }
     }
 
     /// Menu chip that toggles P / QRS / T fiducial overlays. R marks

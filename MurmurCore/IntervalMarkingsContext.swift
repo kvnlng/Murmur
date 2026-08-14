@@ -500,10 +500,34 @@ public final class IntervalMarkingsContext {
     public private(set) var renderPolicy: FiducialRenderPolicy =
         .resolve(tier: .inspect, detailLevel: .fullFiducials)
 
-    /// Currently focused beat — the one the calipers panel is pinned
-    /// on, or the one under the cursor when nothing is pinned. `nil`
-    /// when nothing is under focus.
-    public private(set) var focusedBeatSampleIndex: Int64?
+    /// The beat under the cursor. Transient by construction: the canvas
+    /// clears it on mouse-exit, because a hover that outlived the pointer
+    /// would be a lie about where the analyst is looking.
+    public private(set) var hoveredBeatSampleIndex: Int64?
+
+    /// The beat the analyst CHOSE, by clicking it. Survives the pointer
+    /// leaving the trace — which is the whole point (#225).
+    ///
+    /// Until this existed, the docked beat card was driven by hover alone,
+    /// so moving the pointer toward the card in order to read it was exactly
+    /// the gesture that closed it. Every measurement on that card was
+    /// legible only out of the corner of an eye. This property's absence was
+    /// recorded in the doc comment of the thing it should have been beside
+    /// — "the one the calipers panel is pinned on, or the one under the
+    /// cursor when nothing is pinned" — describing a pin nothing implemented.
+    public private(set) var pinnedBeatSampleIndex: Int64?
+
+    /// The beat every surface should be showing: the hover when there is
+    /// one, otherwise the pin.
+    ///
+    /// Hover WINS over the pin, rather than the pin freezing the surfaces.
+    /// The alternative reading — pin ?? hover — makes a pinned beat
+    /// un-leaveable and kills the compare-against-this-one workflow the pin
+    /// is for. This order gives both: hover to preview any beat, leave the
+    /// trace and the pinned one comes back.
+    public var focusedBeatSampleIndex: Int64? {
+        hoveredBeatSampleIndex ?? pinnedBeatSampleIndex
+    }
 
     /// A "please jump to this sample" signal from a command / menu
     /// item to the viewport. Written by the deviation-navigation
@@ -618,7 +642,11 @@ public final class IntervalMarkingsContext {
         beats = []
         sampleRate = 0
         template = nil
-        focusedBeatSampleIndex = nil
+        // A pin belongs to the record it was placed in. Carrying it across a
+        // record change would leave the card reporting a sample index the
+        // new recording knows nothing about.
+        hoveredBeatSampleIndex = nil
+        pinnedBeatSampleIndex = nil
         qtWithheldReason = nil
         modes = []
     }
@@ -633,16 +661,34 @@ public final class IntervalMarkingsContext {
 
     // MARK: - Focus / caliper state
 
+    /// Report the beat under the cursor, or `nil` on mouse-exit.
     public func focus(beatSampleIndex: Int64?) {
-        focusedBeatSampleIndex = beatSampleIndex
+        hoveredBeatSampleIndex = beatSampleIndex
+    }
+
+    /// Pin the beat the analyst clicked, or unpin it if it is already the
+    /// pinned one — clicking the same beat twice is the cheapest possible
+    /// "put it away", and the only one discoverable without a legend.
+    public func togglePin(beatSampleIndex: Int64) {
+        pinnedBeatSampleIndex = pinnedBeatSampleIndex == beatSampleIndex ? nil : beatSampleIndex
+    }
+
+    /// Release the pin — Escape, or a record change.
+    public func clearPin() {
+        pinnedBeatSampleIndex = nil
     }
 
     /// Post a jump request to be picked up by the viewport observer.
-    /// Also focuses the target beat so the calipers surface immediately.
+    ///
+    /// PINS the target rather than hover-focusing it. A jump arrives from
+    /// `J`/`K`, the deviation shortcuts, or a click on an interval-trend bin
+    /// — in every case the analyst asked for that specific beat, and under
+    /// the old behaviour the card carrying it was erased by the next
+    /// mouse-exit, often before they had read it.
     public func requestJump(toSampleIndex sample: Int64) {
         jumpCounter += 1
         pendingJumpRequest = JumpRequest(sampleIndex: sample, counter: jumpCounter)
-        focusedBeatSampleIndex = sample
+        pinnedBeatSampleIndex = sample
     }
 
     /// Acknowledge and clear the current pending jump. Called by the

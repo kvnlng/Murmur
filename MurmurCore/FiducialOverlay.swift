@@ -46,6 +46,12 @@ struct FiducialOverlay: View {
     /// calipers panel, or nil when nothing is focused.
     let focusedRPeakSampleIndex: Int64?
 
+    /// The beat the analyst pinned (#225), if any. Drawn with a filled cap
+    /// on its R-tick so the pin is findable while the cursor is elsewhere —
+    /// without it, hovering another beat moves the focus locator away and
+    /// nothing on the trace says which beat the card will return to.
+    var pinnedRPeakSampleIndex: Int64?
+
     /// Layers the analyst has enabled. R-peak marks always render;
     /// P / QRS / T marks only render when their layer is in this
     /// set AND the current detail level permits them.
@@ -184,11 +190,22 @@ struct FiducialOverlay: View {
     @ViewBuilder
     private func rTick(atSample sample: Int64, focused: Bool) -> some View {
         if let x = xPosition(forSample: sample) {
+            let pinned = sample == pinnedRPeakSampleIndex
             let color = focused ? Color.accentColor : Color.accentColor.opacity(0.65)
             Rectangle()
                 .fill(color)
                 .frame(width: focused ? 2 : 1.2, height: 12)
                 .offset(x: x - (focused ? 1 : 0.6), y: 0)
+            // The pin's own mark (#225): a filled cap at the head of the
+            // R-tick. Deliberately NOT a colour change — the pinned beat is
+            // frequently also the focused one, and a treatment that collided
+            // with focus would vanish exactly when both are true.
+            if pinned {
+                Circle()
+                    .fill(Color.accentColor)
+                    .frame(width: 6, height: 6)
+                    .offset(x: x - 3, y: -1)
+            }
         }
     }
 
