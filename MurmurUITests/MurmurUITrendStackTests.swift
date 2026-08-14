@@ -55,6 +55,20 @@ final class MurmurUITrendStackTests: XCTestCase {
     /// inherits — and an expanded drawer pushes the Lanes menu below the
     /// fold, where XCUI reports it "not hittable". Tests that CLICK stack
     /// chrome collapse the drawer first; existence-only tests don't care.
+    ///
+    /// #231, and the reason it is CI-shaped: `murmur.notesDrawerExpanded`
+    /// DEFAULTS TO FALSE, so on a clean machine `panel.exists` is false and
+    /// this whole body returns early without clicking anything. The path only
+    /// executes when an earlier test in the same run left the drawer open —
+    /// `MurmurUINotesDrawerTests` does, and it sorts before this file. Running
+    /// the trend-stack tests alone, which is what local debugging does, skips
+    /// the code CI fails in. Reproduce with:
+    ///
+    ///     defaults write com.kevinlong.murmur murmur.notesDrawerExpanded -bool true
+    ///
+    /// (Done. The path then runs, and passes, on a developer machine — so the
+    /// suite-order dependency explains the local/CI split but is not by itself
+    /// the fault.)
     @MainActor
     private func collapseContextDrawer(_ app: XCUIApplication) {
         let panel = app.descendants(matching: .any)
@@ -73,8 +87,28 @@ final class MurmurUITrendStackTests: XCTestCase {
         // Context bar should unmount the drawer" with no click error above it.
         XCTAssertTrue(MurmurUITests.scrollUntilHittable(contextBar, in: app),
                       "The Context bar should scroll into view before it is clicked")
-        contextBar.click()
-        XCTAssertTrue(MurmurUITests.waitForElementToDisappear(panel, timeout: 3),
+        // #231: the scroll above is NOT enough — Cloud reached the assertion
+        // below with the bar hittable and the drawer still open, so the click
+        // itself is what failed to land. Two candidates, neither reproducible
+        // on a developer machine: the app not being frontmost (documented in
+        // MurmurUIPurchaseTests, but XCUI would not let the regime be staged
+        // locally), and the bar's frame moving between the hit test and the
+        // click as lanes mount. `clickInWindow` covers both. The settle result
+        // is ASSERTED rather than discarded here because movement is the
+        // leading suspect in this specific test — if Cloud fails on this line
+        // instead of the one below, that is the answer.
+        XCTAssertTrue(MurmurUITests.clickInWindow(contextBar, in: app),
+                      "The Context bar's frame never stopped moving — a click "
+                      + "resolved against it could land anywhere")
+        // 3 s was the old budget and it is the one Cloud blew. Collapsing runs
+        // a 0.18 s animation and then UNMOUNTS ContextDrawer — notes,
+        // demographics, morphology summary — after which the accessibility
+        // tree has to be rebuilt before `exists` goes false. That is fast on a
+        // developer machine and unbounded on a contended VM, and unlike the
+        // activation and frame-movement theories it needs no exotic mechanism
+        // to explain a timeout-shaped failure. Cheapest credible fix; 10 s
+        // costs nothing on a run that passes.
+        XCTAssertTrue(MurmurUITests.waitForElementToDisappear(panel, timeout: 10),
                       "Collapsing the Context bar should unmount the drawer")
     }
 
@@ -157,7 +191,7 @@ final class MurmurUITrendStackTests: XCTestCase {
         // context — bring it into view the way an analyst would.
         XCTAssertTrue(MurmurUITests.scrollUntilHittable(menu, in: app),
                       "The Lanes menu never became clickable, even after scrolling the stack into view")
-        menu.click()
+        MurmurUITests.clickInWindow(menu, in: app)
 
         let toggle = app.menuItems["trend-lane-toggle-hr"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 5),
@@ -212,7 +246,7 @@ final class MurmurUITrendStackTests: XCTestCase {
         // it worse by growing the stack a row taller than the fold allows.
         XCTAssertTrue(MurmurUITests.scrollUntilHittable(menu, in: app),
                       "The Lanes menu should scroll into view")
-        menu.click()
+        MurmurUITests.clickInWindow(menu, in: app)
         XCTAssertTrue(app.menuItems["trend-lane-toggle-lfhf"].waitForExistence(timeout: 5),
                       "The Lanes menu should offer LF / HF when the series exists")
         app.typeKey(.escape, modifierFlags: [])
@@ -282,7 +316,7 @@ final class MurmurUITrendStackTests: XCTestCase {
         XCTAssertTrue(menu.waitForExistence(timeout: 5))
         XCTAssertTrue(MurmurUITests.scrollUntilHittable(menu, in: app),
                       "The Lanes menu should scroll into view")
-        menu.click()
+        MurmurUITests.clickInWindow(menu, in: app)
         XCTAssertTrue(app.menuItems["trend-lane-toggle-hr-beats"].waitForExistence(timeout: 5),
                       "The Lanes menu should offer the beat-derived HR lane")
         app.typeKey(.escape, modifierFlags: [])

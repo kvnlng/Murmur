@@ -325,22 +325,16 @@ final class MurmurUIBypassTests: XCTestCase {
     func testPhysioNetLinkTargetsMITBIH() throws {
         // Guards: welcome-screen PhysioNet button → URLLauncher path.
         // Different from the Help menu items because the trigger is a
-        // SwiftUI Button in the WelcomeView, not a Command — and that
-        // difference is the whole failure mode. The Help tests reach their
-        // targets through `app.menuItems`, which activates the app on the way
-        // in; this one clicks INSIDE the window, and the headless Cloud
-        // runner routinely leaves the app "Running Background". A click on an
-        // inactive macOS window activates it and stops there — no error, no
-        // responder-chain delivery, no URL. That is exactly how this failed on
-        // Cloud: XCUI reported no problem with the click and the probe was
-        // still '' three seconds later. `MurmurUIPurchaseTests` hit the same
-        // wall and solved it the same way.
+        // SwiftUI Button in the WelcomeView, not a Command — which also makes
+        // it the only URL test that clicks INSIDE the window rather than
+        // through `app.menuItems`. What Cloud reported was a click XCUI was
+        // happy with and a probe still '' three seconds later; the activation
+        // mechanism in `clickInWindow` is the leading explanation for that,
+        // but read its status note — it is documented and plausible, not
+        // demonstrated. The scroll below is the part that is measured.
         let app = XCUIApplication()
         app.launchArguments += ["--ui-test-record-urls"]
         app.launch()
-        app.activate()
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5),
-                      "A click in the window only reaches the control once the app is frontmost")
 
         let probe = app.descendants(matching: .any)
             .matching(identifier: "ui-test-last-launched-url").firstMatch
@@ -360,7 +354,7 @@ final class MurmurUIBypassTests: XCTestCase {
         // documents.
         XCTAssertTrue(MurmurUITests.scrollUntilHittable(physioNet, in: app),
                       "The PhysioNet link should scroll into view")
-        physioNet.click()
+        MurmurUITests.clickInWindow(physioNet, in: app)
 
         let expected = "https://www.physionet.org/content/mitdb/1.0.0/"
         let predicate = NSPredicate(format: "label == %@", expected)
