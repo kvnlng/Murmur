@@ -2088,12 +2088,10 @@ struct BedsideView: View {
             if !markingsContext.beats.isEmpty {
                 fiducialLayersChip
             }
-            // X71: the beat readout appears ONLY when a beat is focused. It
-            // used to be backed by a placeholder card reading "Hover the trace
-            // to focus a beat", whose job was to hold the column's width so
-            // the trace didn't reflow — but the column is a fixed frame, so
-            // nothing reflows and the placeholder was spending a permanent
-            // card on instructions the analyst reads once.
+            // #246: the beat readout is ALWAYS mounted — focused, empty, or
+            // beat-less record — one card, one size, values withheld as "—"
+            // when there is nothing to measure. (X71 briefly made it
+            // focus-only; the history of that reversal is on dockedBeatCard.)
             dockedBeatCard
             keyboardHint
         }
@@ -2206,34 +2204,42 @@ struct BedsideView: View {
         .accessibilityIdentifier("calibration-controls")
     }
 
-    @ViewBuilder
     private var dockedBeatCard: some View {
-        if let focusIdx = markingsContext.focusedBeatSampleIndex,
-           let beat = markingsContext.beats.first(where: { $0.rPeakSampleIndex == focusIdx }) {
-            VStack(alignment: .leading, spacing: 4) {
-                BeatCalipers(
-                    beat: beat,
-                    sampleRate: markingsContext.sampleRate,
-                    template: markingsContext.template,
-                    modes: markingsContext.modes,
-                    qtcFormula: markingsContext.qtcFormula,
-                    kind: caliperKind(for: beat),
-                    qtWithheldReason: markingsContext.qtWithheldReason
-                )
-                pinFooter(showing: beat.rPeakSampleIndex)
-            }
-            // `children: .contain` is load-bearing: without it the wrapper
-            // collapses into one element and the footer's own identifier is
-            // swallowed, so no test can ask whether the card says it's
-            // pinned (X51 §4, same fault as the Layers chip's).
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("docked-beat-inspector")
+        // #246: the card renders in EVERY state — focused, unfocused, even a
+        // record with no beats — always the same slots, so it never pops in
+        // or out and never changes height under the analyst's eye.
+        //
+        // This reverses X71's "no empty state". X71 was answering a layout
+        // question (the placeholder's job was to hold the column's width, and
+        // the fixed 186 pt frame made that moot) and concluded the card could
+        // simply be absent. TestFlight said otherwise: to an analyst mid-read,
+        // a card that vanishes when the pointer strays reads as breakage, and
+        // one that holds still is scannable. The empty card is no longer
+        // instructions-as-furniture; it is the same instrument showing "—".
+        let focused = markingsContext.focusedBeatSampleIndex.flatMap { idx in
+            markingsContext.beats.first(where: { $0.rPeakSampleIndex == idx })
         }
-        // X71: no empty state. The card is simply absent until a beat is
-        // focused. The placeholder existed to hold the column's layout width;
-        // the column is a fixed 186 pt frame now, so there is nothing left to
-        // hold, and what it cost was a permanently-occupied card explaining
-        // how to use the trace.
+        return VStack(alignment: .leading, spacing: 4) {
+            BeatCalipers(
+                beat: focused,
+                sampleRate: markingsContext.sampleRate,
+                template: markingsContext.template,
+                modes: markingsContext.modes,
+                qtcFormula: markingsContext.qtcFormula,
+                kind: focused.map { caliperKind(for: $0) } ?? .unknown,
+                qtWithheldReason: markingsContext.qtWithheldReason,
+                placeholderNote: markingsContext.beats.isEmpty
+                    ? "No beats in this record"
+                    : "Hover the trace to focus a beat"
+            )
+            pinFooter(showing: focused?.rPeakSampleIndex)
+        }
+        // `children: .contain` is load-bearing: without it the wrapper
+        // collapses into one element and the footer's own identifier is
+        // swallowed, so no test can ask whether the card says it's
+        // pinned (X51 §4, same fault as the Layers chip's).
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("docked-beat-inspector")
     }
 
     /// One line under the card saying whether what you are reading will still
@@ -2244,13 +2250,16 @@ struct BedsideView: View {
     /// leaving the trace — is the entire reason the pin exists. Naming it
     /// also carries the gesture, which nothing else on screen does.
     @ViewBuilder
-    private func pinFooter(showing sample: Int64) -> some View {
-        if markingsContext.pinnedBeatSampleIndex == sample {
+    private func pinFooter(showing sample: Int64?) -> some View {
+        // #246: both variants are ONE line so pinning and releasing cannot
+        // change the card's height — the hint used to wrap freely.
+        if let sample, markingsContext.pinnedBeatSampleIndex == sample {
             Button {
                 markingsContext.clearPin()
             } label: {
                 Label("Pinned — click to release", systemImage: "pin.fill")
                     .font(.caption2)
+                    .lineLimit(1)
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
@@ -2260,7 +2269,8 @@ struct BedsideView: View {
             Text("Click the beat to pin this open")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(1)
+                .help("A pinned beat stays on screen when the pointer leaves the trace.")
                 .accessibilityIdentifier("beat-card-pin-hint")
         }
     }

@@ -56,6 +56,51 @@ struct LayoutFitTests {
                 "The beat card demands \(demanded.width) pt inside a \(BedsideGeometry.dockedColumnWidth) pt column")
     }
 
+    /// #246: the card's height is a constant across every per-beat state.
+    /// The TestFlight complaint was the card popping and resizing under the
+    /// analyst's eye; the fix routes every per-beat difference through a
+    /// reserved line or a "—" row. This pins that property the way #205
+    /// pinned the width: measure what the view INSISTS on, state by state,
+    /// and demand one answer. Record-stable inputs (template, withheld
+    /// reason, modes) are held fixed — those MAY move the height, once per
+    /// record; the beat must not.
+    @Test("The caliper card's height does not depend on the beat")
+    func caliperCardHeightIsBeatInvariant() {
+        let proposal = CGSize(width: BedsideGeometry.dockedColumnWidth, height: 4000)
+        func height(of beat: MarkingsBeat?, kind: BeatCaliperKind = .unknown) -> CGFloat {
+            demandedSize(
+                BeatCalipers(beat: beat, sampleRate: 360, template: template(),
+                             qtcFormula: .fridericia, kind: kind),
+                proposal: proposal
+            ).height
+        }
+        let normal = height(of: beat())
+        let states: [(String, CGFloat)] = [
+            ("no beat focused", height(of: nil)),
+            ("ectopic", height(of: beat(), kind: .ectopic)),
+            ("wide QRS with JT", height(of: MarkingsBeat(
+                rPeakSampleIndex: 12500, prMs: 155.0, qrsMs: 148.0,
+                qtMs: 470.0, qtcMs: 465.0, precedingRRMs: 820.0,
+                jtMs: 322.0, jtcMs: 317.0))),
+            ("implausible", height(of: MarkingsBeat(
+                rPeakSampleIndex: 12500, prMs: 155.0, qrsMs: 92.0,
+                qtMs: 410.0, qtcMs: 445.0, precedingRRMs: 820.0,
+                isImplausible: true))),
+            ("unreliable T-offset", height(of: MarkingsBeat(
+                rPeakSampleIndex: 12500, prMs: 155.0, qrsMs: 92.0,
+                qtMs: 410.0, qtcMs: 445.0, precedingRRMs: 820.0,
+                isUnreliable: true))),
+            ("censored with CI", height(of: MarkingsBeat(
+                rPeakSampleIndex: 12500, prMs: 155.0, qrsMs: 92.0,
+                qtMs: 410.0, qtcMs: 445.0, precedingRRMs: 820.0,
+                tOffsetCensored: true, qtCalibratedHalfWidthMs: 22.0))),
+        ]
+        for (name, h) in states {
+            #expect(abs(h - normal) < 0.5,
+                    "State '\(name)' demands \(h) pt against the normal beat's \(normal) pt — the card changed size (#246)")
+        }
+    }
+
     @Test("The column arithmetic agrees with the column, with slack to spare")
     func caliperColumnBudget() {
         #expect(BeatCalipers.Columns.totalWidth <= BedsideGeometry.dockedColumnWidth)

@@ -526,6 +526,20 @@ final class SnapshotTests: XCTestCase {
         assertSnapshot(of: render(view, size: CGSize(width: 310, height: 200)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 
+    /// #246: the card with no beat focused — same slots as the focused card,
+    /// every value withheld, the status line carrying the hover hint. This is
+    /// the state the card now spends most of its life in, and the state X71
+    /// used to render as nothing at all.
+    func testBeatCalipers_emptyPlaceholder() {
+        let template = MarkingsTemplate(sampleCount: 200,
+            medianPRMs: 148, iqrPRMs: 12, medianQRSMs: 88, iqrQRSMs: 6,
+            medianQTMs: 395, iqrQTMs: 18,
+            qtcFormulaName: "Fridericia", medianQTcMs: 428, iqrQTcMs: 16)
+        let view = BeatCalipers(beat: nil, sampleRate: 360, template: template, qtcFormula: .fridericia)
+            .frame(width: 260).padding().background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 310, height: 220)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
     // MARK: - IntervalTrendLane
 
     /// Builds a canonical trend fixture — 15 bins across one hour with

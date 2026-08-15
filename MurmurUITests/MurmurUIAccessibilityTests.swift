@@ -49,11 +49,12 @@ final class MurmurUIAccessibilityTests: XCTestCase {
             "collapsed-normals-row",             // X51 §1 — X48's target
             "interval-trend-lane-add-guide",     // X51 §3 — RUO disclosure
             "interval-trend-lane-summary",       // X51 §2
-            "variability-lane-summary"           // X51 §2
-            // `docked-beat-inspector-empty` was here until X71 deleted the
-            // placeholder it named. The list is `ifPresent`, so a stale entry
-            // silently passes forever rather than failing — which is exactly
-            // why a removed identifier has to come out of it.
+            "variability-lane-summary",          // X51 §2
+            // Removed when X71 deleted the placeholder; back because #246
+            // revived it — the always-mounted card's empty state. (The list
+            // is `ifPresent`, so a stale entry silently passes forever; an
+            // entry only belongs here while its element can exist.)
+            "docked-beat-inspector-empty"
         ]
         for identifier in mustBeNamedIfPresent {
             let element = app.descendants(matching: .any)

@@ -347,10 +347,9 @@ final class MurmurUINavigationTests: XCTestCase {
         XCTAssertTrue(panel.waitForExistence(timeout: 3),
                       "Trace panel should render inside the pinned stage")
 
-        // X71 removed the empty-state card: with no beat focused the readout
-        // is simply absent, because the column is a fixed frame and no longer
-        // needs a placeholder to hold its width. The column itself still has
-        // to be there, so assert on what it always carries.
+        // #246 re-reversed X71: the readout is always mounted, and with no
+        // beat focused it shows the placeholder state — same card, same
+        // size, values withheld. The identifier X71 deleted is back.
         let controls = app.descendants(matching: .any)
             .matching(identifier: "calibration-controls").firstMatch
         XCTAssertTrue(controls.waitForExistence(timeout: 3),
@@ -358,8 +357,9 @@ final class MurmurUINavigationTests: XCTestCase {
 
         let emptyCard = app.descendants(matching: .any)
             .matching(identifier: "docked-beat-inspector-empty").firstMatch
-        XCTAssertFalse(emptyCard.exists,
-                       "With no beat focused the readout should be absent, not a placeholder")
+        XCTAssertTrue(emptyCard.waitForExistence(timeout: 3),
+                      "#246: with no beat focused the card must hold its place "
+                      + "in the placeholder state, not unmount")
 
         let overview = app.descendants(matching: .any).matching(identifier: "overview-map").firstMatch
         XCTAssertTrue(overview.waitForExistence(timeout: 3),

@@ -25,7 +25,11 @@ final class MurmurUIStageColumnTests: XCTestCase {
     }
 
     @MainActor
-    func testNoBeatFocusedMeansNoBeatCard() throws {
+    /// #246 inverted this test's subject. It used to pin X71's "no empty
+    /// state" — card absent until focus. TestFlight reversed that: the card
+    /// is always mounted, and no-focus is a STATE it shows (the revived
+    /// `docked-beat-inspector-empty`), not an absence.
+    func testNoBeatFocusedShowsThePlaceholderCard() throws {
         let app = XCUIApplication()
         app.launchArguments += ["--ui-test-sample"]
         app.launch()
@@ -37,12 +41,14 @@ final class MurmurUIStageColumnTests: XCTestCase {
         XCTAssertTrue(controls.waitForExistence(timeout: 10),
                       "The stage's right column should render")
 
-        for identifier in ["docked-beat-inspector-empty", "docked-beat-inspector"] {
-            let card = app.descendants(matching: .any)
-                .matching(identifier: identifier).firstMatch
-            XCTAssertFalse(card.exists,
-                           "\(identifier) should be absent with no beat focused")
-        }
+        let card = app.descendants(matching: .any)
+            .matching(identifier: "docked-beat-inspector").firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 5),
+                      "#246: the beat card must be mounted before any beat is focused")
+        let placeholder = app.descendants(matching: .any)
+            .matching(identifier: "docked-beat-inspector-empty").firstMatch
+        XCTAssertTrue(placeholder.exists,
+                      "With no beat focused the card must say so in its status line")
     }
 
     /// The keyboard hint moved here from the retired `summaryHeader`. Without
@@ -110,11 +116,22 @@ final class MurmurUIStageColumnTests: XCTestCase {
         // before asserting a pinned one survives it. Without this the
         // survival assertion passes just as well when the mouse-exit never
         // fired under XCUI — i.e. when the test is measuring nothing.
+        //
+        // #246 changed what "clears" means: the card no longer unmounts —
+        // it holds its frame and returns to the placeholder state
+        // (`docked-beat-inspector-empty`, the identifier X71 deleted and
+        // #246 revived). So the mouse-exit proof is now "the placeholder is
+        // showing", not "the card is gone" — same event, opposite polarity.
         away.hover()
         Thread.sleep(forTimeInterval: 2)
-        XCTAssertFalse(card.exists,
-                       "An UNPINNED card must still clear on mouse-exit — if it "
-                       + "doesn't, the rest of this test proves nothing")
+        XCTAssertTrue(card.exists,
+                      "#246: the card must NOT unmount on mouse-exit — it holds "
+                      + "its place and shows the empty state")
+        let placeholder = app.descendants(matching: .any)
+            .matching(identifier: "docked-beat-inspector-empty").firstMatch
+        XCTAssertTrue(placeholder.exists,
+                      "An UNPINNED card must still clear to the placeholder on "
+                      + "mouse-exit — if it doesn't, the rest of this test proves nothing")
 
         centre.hover()
         XCTAssertTrue(card.waitForExistence(timeout: 5))
@@ -122,8 +139,11 @@ final class MurmurUIStageColumnTests: XCTestCase {
         away.hover()
         Thread.sleep(forTimeInterval: 2)
 
-        XCTAssertTrue(card.exists,
-                      "The card closed as the pointer moved toward it — #225 unfixed")
+        // #246 made `card.exists` a constant, so the pin's survival proof is
+        // the placeholder's ABSENCE: the pinned beat is still being read.
+        XCTAssertFalse(placeholder.exists,
+                       "The pinned beat's readings gave way to the placeholder "
+                       + "as the pointer left — #225 unfixed")
         XCTAssertTrue(
             app.descendants(matching: .any)
                 .matching(identifier: "beat-card-unpin").firstMatch.exists,
