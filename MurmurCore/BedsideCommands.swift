@@ -68,6 +68,34 @@ public struct BedsideCommands {
     /// existing C/D/X behavior.
     public var isEditing: Bool
 
+    /// #236 — which trend lanes this record can show, and which are showing.
+    ///
+    /// The picker used to be a `Menu` in the trend stack's own header. That
+    /// header is the last thing in a long scrolling column, so on a short
+    /// display the control lands at the bottom edge of the screen and its
+    /// dropdown has nowhere to open — it rendered under the Variability
+    /// Metrics strip, and XCUI saw no menu items at all. Relocating it inside
+    /// the window only moves the edge around; the menu bar is the one surface
+    /// that is never near one.
+    ///
+    /// Empty when no record is loaded, or when the record supports no lanes.
+    public var trendLanes: [TrendLaneMenuItem]
+    /// Show or hide one lane by id. No-op for an unknown id.
+    public var toggleTrendLane: (String) -> Void
+
+    /// One row of the View ▸ Trend Lanes menu.
+    public struct TrendLaneMenuItem: Identifiable, Equatable {
+        public let id: String
+        public let label: String
+        public let isVisible: Bool
+
+        public init(id: String, label: String, isVisible: Bool) {
+            self.id = id
+            self.label = label
+            self.isVisible = isVisible
+        }
+    }
+
     public init(
         panLeft: @escaping () -> Void,
         panRight: @escaping () -> Void,
@@ -89,6 +117,8 @@ public struct BedsideCommands {
         previousNote: @escaping () -> Void = {},
         notesAvailable: Bool = false,
         notesDrawerVisible: Bool = false,
+        trendLanes: [TrendLaneMenuItem] = [],
+        toggleTrendLane: @escaping (String) -> Void = { _ in },
         textEntryActive: Bool,
         isEditing: Bool
     ) {
@@ -112,6 +142,8 @@ public struct BedsideCommands {
         self.previousNote = previousNote
         self.notesAvailable = notesAvailable
         self.notesDrawerVisible = notesDrawerVisible
+        self.trendLanes = trendLanes
+        self.toggleTrendLane = toggleTrendLane
         self.textEntryActive = textEntryActive
         self.isEditing = isEditing
     }

@@ -207,6 +207,8 @@ struct MurmurApp: App {
                 Button("Save Session As…") { saveSessionPanel() }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
             }
+            // #236 — the trend-lane picker, appended to the View menu.
+            ViewCommandMenu()
             // X22: hoist the bedside navigation / disposition keys into real
             // menu commands so they dispatch through the responder chain
             // (fixing the intermittent J/K defect) and become discoverable.
@@ -533,5 +535,63 @@ struct BedsideCommandMenu: Commands {
     private var dispositionDisabled: Bool {
         guard let commands else { return true }
         return commands.textEntryActive || !commands.isEditing
+    }
+}
+
+/// The "View" menu — currently just the trend-lane picker (#236).
+///
+/// The picker used to be a `Menu` in the trend stack's own header, which is
+/// the last thing in a long scrolling column. On a short display it landed at
+/// the bottom edge of the screen, and its dropdown had nowhere to open: it
+/// rendered under the Variability Metrics strip, and XCUI found no menu items
+/// at all. Anywhere inside the window has an edge somewhere; the menu bar does
+/// not, which is also why every menu-driven test in this suite has stayed
+/// green while in-window clicks have not.
+///
+/// Lanes are listed only when a record offers them, so the menu never claims a
+/// lane this recording cannot draw. Toggles carry no key equivalents on
+/// purpose — six bare keys would collide with J/K, the deviation steps and the
+/// disposition trio, and lane choice is not a per-beat action.
+///
+/// `CommandGroup(after: .toolbar)`, NOT `CommandMenu("View")`. SwiftUI already
+/// synthesises a View menu for the window's toolbar, so a `CommandMenu` of the
+/// same name adds a SECOND one — the menu bar read
+/// `… | Edit | View | View | Navigate | …` and XCUI refused the ambiguous
+/// subscript ("Multiple matching elements found"). `.toolbar` is the placement
+/// that means "the View menu"; this appends to the one already there.
+struct ViewCommandMenu: Commands {
+    @FocusedValue(\.bedsideCommands) private var commands
+
+    var body: some Commands {
+        CommandGroup(after: .toolbar) {
+            // No `.accessibilityIdentifier` on any of this, deliberately:
+            // identifiers do not reach a menu-bar NSMenuItem. Measured — with
+            // one set, `app.menuItems["trend-lane-toggle-hr"]` did not exist
+            // and the item's `identifier` came back empty, while its `title`
+            // was exactly the label below. Every other menu-bar assertion in
+            // the UI suite matches on title for the same reason; the in-window
+            // `Menu`s that DO carry identifiers are a different surface.
+            let lanes = commands?.trendLanes ?? []
+            if lanes.isEmpty {
+                // Shown DISABLED rather than hidden, the X32 principle: the
+                // analyst can see the capability exists and that THIS record
+                // has no lanes, instead of wondering where the menu went.
+                Button("No Trend Lanes in This Record") {}
+                    .disabled(true)
+            } else {
+                Section("Trend Lanes") {
+                    ForEach(lanes) { lane in
+                        // A Toggle, not a Button: SwiftUI renders it as a
+                        // checked NSMenuItem, which is how macOS spells
+                        // "this pane is showing". The binding only ever
+                        // reports the toggle action; the truth stays in
+                        // BedsideView's `visibleTrendLanes`.
+                        Toggle(lane.label, isOn: Binding(
+                            get: { lane.isVisible },
+                            set: { _ in commands?.toggleTrendLane(lane.id) }))
+                    }
+                }
+            }
+        }
     }
 }

@@ -91,44 +91,73 @@ final class MurmurUITrendStackTests: XCTestCase {
     /// here.
     private static let drawerShut = ["--ui-test-context-drawer-collapsed"]
 
-    /// What XCUI can actually see with the Lanes menu open, as one line.
+    /// Lane rows are matched by TITLE, not identifier. Measured: with
+    /// `.accessibilityIdentifier` set on the menu item, XCUI reported the
+    /// item's `identifier` as empty and `menuItems["trend-lane-toggle-hr"]`
+    /// as non-existent, while `title` was the label exactly. Identifiers
+    /// survive on the in-window `Menu`s this suite also drives; they do not
+    /// survive onto a menu-bar `NSMenuItem`. So these are the labels from
+    /// `BedsideTrendStack.availableLanes` and they are load-bearing.
+    private enum LaneItem {
+        static let hr = "Trends · HR"
+        static let beatHR = "HR · beat-derived"
+        static let lfhf = "LF / HF"
+    }
+
+    /// Open View ▸ Trend Lanes.
     ///
-    /// DIAGNOSTIC, not a guard. #236 fails on Cloud at
-    /// `menuItems["trend-lane-toggle-hr-beats"]` while two sibling tests click
-    /// the same menu and read their own toggles successfully — so the menu
-    /// opens and XCUI sees its items in general. The failing test is simply
-    /// the one with the LONGEST menu: `--ui-test-inject-qtc-lane=455` adds two
-    /// lanes on top of the fixture's own, and the menu renders a toggle per
-    /// lane.
+    /// #236 moved the lane picker out of the trend stack's own header and into
+    /// the menu bar. The old site was a `Menu` at the bottom of the last
+    /// section of a long scrolling column: reaching it needed
+    /// `scrollUntilHittable` plus `clickInWindow`, and on Cloud's 768-pt screen
+    /// the dropdown still had nowhere to open — the diagnostic that shipped in
+    /// #235 came back `toggles=[] total=170`, i.e. the click landed and no menu
+    /// appeared. The user reproduced the same thing by hand at full resolution:
+    /// the dropdown rendered underneath the Variability Metrics strip.
     ///
-    /// The leading hypothesis is that the menu is clipped by the SCREEN, which
-    /// would be invisible locally: `--ui-test-window` reproduces a short
-    /// window, but macOS anchors menus to the display, and a 1220×678 window on
-    /// a developer's tall screen still shows the whole menu. Cloud's screen is
-    /// 768 pt. That regime cannot be forced from here, so the next build has to
-    /// report it.
+    /// Anywhere inside the window has an edge somewhere. The menu bar does not,
+    /// which is also the pattern behind every menu-driven test in this suite
+    /// staying green (X22 hoisted the navigation keys there for the same class
+    /// of reason).
+    @MainActor
+    private func openLanesMenu(_ app: XCUIApplication) {
+        // ONE View menu, not two. `CommandMenu("View")` was the obvious
+        // spelling and it is wrong — SwiftUI already synthesises a View menu
+        // for the toolbar, so the bar read `Edit | View | View | Navigate`
+        // and this subscript failed with "Multiple matching elements found".
+        // The app now appends via `CommandGroup(after: .toolbar)`; the
+        // assertion below is what catches a regression back to two.
+        let views = app.menuBarItems.matching(identifier: "View")
+        XCTAssertTrue(app.menuBarItems["View"].waitForExistence(timeout: 10),
+                      "#236 put the lane picker in the menu bar — the View menu should exist")
+        XCTAssertEqual(views.count, 1,
+                       "Exactly one View menu; a second means someone re-added CommandMenu(\"View\")")
+        app.menuBarItems["View"].click()
+    }
+
+    /// What XCUI can see with the Lanes menu open, as one line.
     ///
-    /// Attached to the assertion's failure message on purpose: the check-run
-    /// `output.text` that Xcode Cloud publishes to GitHub carries failure
-    /// messages and nothing else, so a message is the only channel out. It is
-    /// an `@autoclosure`, so none of this runs unless the assertion fails.
+    /// DIAGNOSTIC, not a guard. Kept from #236's in-window era because it is
+    /// the only channel out of Cloud: the check-run `output.text` that Xcode
+    /// Cloud publishes to GitHub carries failure messages and nothing else. It
+    /// is an `@autoclosure`, so none of this runs unless the assertion fails.
     ///
     /// Three-way discriminator:
-    ///   - `toggles=[]` and `total=0` → the menu never opened
-    ///   - toggles listed WITHOUT `hr-beats` → the lane has no menu row
-    ///   - `hr-beats` present but the assertion still failed → XCUI can see it
-    ///     but not resolve it by subscript, i.e. reachability, not existence
+    ///   - `items=[]` → the View menu never opened
+    ///   - items listed without the lane asked for → that lane has no row,
+    ///     i.e. `availableTrendLanes` didn't offer it
+    ///   - the title is present but the assertion failed → XCUI sees it and
+    ///     cannot resolve it by subscript, i.e. reachability, not existence
     @MainActor
-    private static func menuInventory(_ app: XCUIApplication, menu: XCUIElement) -> String {
-        let all = app.menuItems.allElementsBoundByIndex
-        let toggles = all
-            .map(\.identifier)
-            .filter { $0.hasPrefix("trend-lane-toggle") }
+    private static func menuInventory(_ app: XCUIApplication) -> String {
+        let items = app.menuBarItems["View"].menus.firstMatch
+            .menuItems.allElementsBoundByIndex
+            .map(\.title)
+            .filter { !$0.isEmpty }
             .joined(separator: ",")
         let screen = NSScreen.main.map { "\(Int($0.frame.height))pt (visible \(Int($0.visibleFrame.height))pt)" }
             ?? "unknown"
-        return "total=\(all.count) toggles=[\(toggles)] "
-            + "menuButton=\(menu.frame) window=\(app.windows.firstMatch.frame) screen=\(screen)"
+        return "items=[\(items)] window=\(app.windows.firstMatch.frame) screen=\(screen)"
     }
 
     /// The drawer really is shut. Cheap, and it fails HERE — naming the
@@ -214,18 +243,11 @@ final class MurmurUITrendStackTests: XCTestCase {
         XCTAssertTrue(hrLane.waitForExistence(timeout: 20))
         assertContextDrawerShut(app)
 
-        let menu = app.descendants(matching: .any)
-            .matching(identifier: "trend-lanes-menu").firstMatch
-        XCTAssertTrue(menu.waitForExistence(timeout: 5))
-        // Short window: the trend stack sits past the fold of the scrolling
-        // context — bring it into view the way an analyst would.
-        XCTAssertTrue(MurmurUITests.scrollUntilHittable(menu, in: app),
-                      "The Lanes menu never became clickable, even after scrolling the stack into view")
-        MurmurUITests.clickInWindow(menu, in: app)
+        openLanesMenu(app)
 
-        let toggle = app.menuItems["trend-lane-toggle-hr"]
+        let toggle = app.menuItems[LaneItem.hr]
         XCTAssertTrue(toggle.waitForExistence(timeout: 5),
-                      "The Lanes menu should offer the HR lane")
+                      "The Lanes menu should offer the HR lane — " + Self.menuInventory(app))
         toggle.click()
 
         XCTAssertTrue(MurmurUITests.waitForElementToDisappear(hrLane, timeout: 5),
@@ -237,15 +259,13 @@ final class MurmurUITrendStackTests: XCTestCase {
     /// a binding slip between `RollingLFHFContext` and the screen that a
     /// green unit suite would miss (the X52 §5 pattern).
     ///
-    /// Forced short window, like `testLanesMenuRemovesALane` — but pinned to
-    /// 1220×678, NOT that test's 1000×600. Measured, because the two sizes do
-    /// NOT behave alike and the intuitive one is the wrong one: at 1000×600
-    /// the Lanes menu is reachable and this test passes with no scroll at all,
-    /// which is why its 1000×600 sibling has always been green on Cloud while
-    /// this one was not. 1220×678 is what X100's no-flag default RESOLVES to
-    /// on Cloud's 1280×768 VMs, and it reproduces the CI failure verbatim on a
-    /// developer display: "Not hittable: MenuButton … 'trend-lanes-menu'",
-    /// frame at y=786 in a 678-pt window.
+    /// Pinned to 1220×678 — what X100's no-flag default RESOLVES to on Cloud's
+    /// 1280×768 VMs. Kept after #236 even though the picker moved to the menu
+    /// bar and the geometry no longer decides whether this test can reach it:
+    /// a short window is the regime where a lane row is most likely to be
+    /// squeezed out of the stack entirely, and that is what the value
+    /// assertion above is for. The 678 also documents the size Cloud actually
+    /// runs, which nothing else in this file records.
     @MainActor
     func testLFHFLaneRendersInjectedSeries() throws {
         let app = XCUIApplication()
@@ -267,18 +287,10 @@ final class MurmurUITrendStackTests: XCTestCase {
 
         // The Lanes menu offers the lane once the series exists.
         assertContextDrawerShut(app)
-        let menu = app.descendants(matching: .any)
-            .matching(identifier: "trend-lanes-menu").firstMatch
-        XCTAssertTrue(menu.waitForExistence(timeout: 5))
-        // Bottom-of-stack chrome on a short display: existence is not reach.
-        // Omitting this is what failed on Cloud ("Not hittable: MenuButton …
-        // identifier: 'trend-lanes-menu'"), and the injected LF/HF lane makes
-        // it worse by growing the stack a row taller than the fold allows.
-        XCTAssertTrue(MurmurUITests.scrollUntilHittable(menu, in: app),
-                      "The Lanes menu should scroll into view")
-        MurmurUITests.clickInWindow(menu, in: app)
-        XCTAssertTrue(app.menuItems["trend-lane-toggle-lfhf"].waitForExistence(timeout: 5),
-                      "The Lanes menu should offer LF / HF when the series exists")
+        openLanesMenu(app)
+        XCTAssertTrue(app.menuItems[LaneItem.lfhf].waitForExistence(timeout: 5),
+                      "The Lanes menu should offer LF / HF when the series exists — "
+                      + Self.menuInventory(app))
         app.typeKey(.escape, modifierFlags: [])
     }
 
@@ -341,26 +353,14 @@ final class MurmurUITrendStackTests: XCTestCase {
 
         // The Lanes menu offers the lane once beats exist.
         assertContextDrawerShut(app)
-        let menu = app.descendants(matching: .any)
-            .matching(identifier: "trend-lanes-menu").firstMatch
-        XCTAssertTrue(menu.waitForExistence(timeout: 5))
-        XCTAssertTrue(MurmurUITests.scrollUntilHittable(menu, in: app),
-                      "The Lanes menu should scroll into view")
-        // #236. Hittability is already handled by the scroll above and it
-        // passes — the click reaches the element and the menu does not open,
-        // which is the in-window-click-swallowed signature for the third time
-        // on this runner (#232 and #231 both went green on activation alone).
-        //
-        // These sites briefly had this guard: added in #233, reverted in #234
-        // as speculative spread, because they were not failing and activation
-        // had no evidence behind it then. That call was right on the evidence
-        // available — unevidenced guards are what made #233 unreadable — but
-        // it queued this failure up behind #231 instead of clearing both at
-        // once. A build cycle traded for a definitive answer.
-        MurmurUITests.clickInWindow(menu, in: app)
-        XCTAssertTrue(app.menuItems["trend-lane-toggle-hr-beats"].waitForExistence(timeout: 5),
+        // #236 was reported against THIS assertion. The picker now lives in
+        // the menu bar, so there is no scroll and no in-window click left to
+        // swallow: the diagnostic below stays only to name the failure if the
+        // lane itself stops being offered.
+        openLanesMenu(app)
+        XCTAssertTrue(app.menuItems[LaneItem.beatHR].waitForExistence(timeout: 5),
                       "The Lanes menu should offer the beat-derived HR lane — "
-                      + Self.menuInventory(app, menu: menu))
+                      + Self.menuInventory(app))
         app.typeKey(.escape, modifierFlags: [])
     }
 
