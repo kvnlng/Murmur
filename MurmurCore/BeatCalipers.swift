@@ -46,8 +46,13 @@ public enum BeatCaliperKind: Sendable, Equatable {
 
 struct BeatCalipers: View {
 
-    /// The beat whose numbers to display.
-    let beat: MarkingsBeat
+    /// The beat whose numbers to display. Nil renders the SAME card with
+    /// every value withheld — #246: the card holds its place and size even
+    /// with nothing to show, because a card that pops in and out under the
+    /// analyst's eye reads as breakage, and one that holds still is
+    /// scannable. (This reverses X71's "no empty state"; see the comment at
+    /// the BedsideView call site.)
+    let beat: MarkingsBeat?
 
     /// Sample rate of the source channel — converts `beat.rPeakSampleIndex`
     /// into a wall-clock second label.
@@ -65,7 +70,8 @@ struct BeatCalipers: View {
 
     /// The baseline this beat's deltas actually compare against.
     private var deltaTemplate: MarkingsTemplate? {
-        IntervalMarkingsContext.deltaTemplate(for: beat, modes: modes, fallback: template)
+        guard let beat else { return template }
+        return IntervalMarkingsContext.deltaTemplate(for: beat, modes: modes, fallback: template)
     }
 
     /// QTc formula in use — echoed into the QTc row's label.
@@ -82,25 +88,28 @@ struct BeatCalipers: View {
     /// as a status rather than an error.
     var qtWithheldReason: String?
 
+    /// #246: what the status line says when no beat is focused. The caller
+    /// distinguishes "hover to focus" from "this record has no beats".
+    var placeholderNote: String = "Hover the trace to focus a beat"
+
+    // #246: every slot below renders in EVERY state, so the card's height
+    // cannot change under the analyst's eye. What varies per beat — the
+    // status, the mode basis, JT applicability — varies inside a reserved
+    // line or a row that renders "—", never by mounting and unmounting. The
+    // only inputs that move the height are record-stable ones (template
+    // arrival, a record-wide QT withholding, mode endorsement), which change
+    // once per record, not once per hover.
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             header
             qtcFormulaSubtitle
-            // An impossible measurement takes precedence over the ectopic note
-            // — it's the stronger statement about why the numbers are absent.
-            if beat.isImplausible {
-                excludedSubtitle
-            } else if kind == .ectopic {
-                ectopicSubtitle
-            } else if beat.isUnreliable {
-                unreliableSubtitle
-            }
+            statusLine
             Divider().opacity(0.4)
             row("PR",  value: prValueForRendering, delta: prDeltaForRendering,
                 undefined: suppressRepolarisationIntervals)
-            row("QRS", value: beat.isImplausible ? nil : beat.qrsMs,
-                delta: beat.isImplausible ? nil : delta(beat.qrsMs, vs: deltaTemplate?.medianQRSMs),
-                undefined: beat.isImplausible)
+            row("QRS", value: beatIsImplausible ? nil : beat?.qrsMs,
+                delta: beatIsImplausible ? nil : delta(beat?.qrsMs, vs: deltaTemplate?.medianQRSMs),
+                undefined: beatIsImplausible)
             row("QT",  value: qtValueForRendering, delta: qtDeltaForRendering,
                 undefined: suppressRepolarisationIntervals,
                 censored: qtIsCensored,
@@ -113,20 +122,26 @@ struct BeatCalipers: View {
             // widened depolarisation, so also surface JT (QT − QRS) and JTc —
             // repolarisation with depolarisation removed. Transcription of
             // already-measured intervals, no BBB adjustment applied.
-            if showsJT {
-                row("JT",  value: beat.jtMs,  delta: nil)
-                row("JTc", value: beat.jtcMs, delta: nil)
-            }
+            // #246: the rows now render on every beat — muted "—" when the
+            // beat is narrow — so the card cannot grow two rows when the
+            // pointer crosses a wide-QRS beat. X54's presentation rule holds:
+            // values still appear only where the research frames JT.
+            row("JT",  value: showsJT ? beat?.jtMs  : nil, delta: nil, undefined: !showsJT)
+            row("JTc", value: showsJT ? beat?.jtcMs : nil, delta: nil, undefined: !showsJT)
             // X112c §6: with ≥ 2 endorsed modes, name the baseline these
             // deltas compare against — the beat's own conduction mode.
-            if modes.count > 1, let modeName = beat.nearestModeName {
-                Text("Δ vs mode \(modeName)")
+            // Reserved (not mounted) per #246: `nearestModeName` is per-beat.
+            if modes.count > 1 {
+                Text(beat?.nearestModeName.map { "Δ vs mode \($0)" } ?? " ")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1, reservesSpace: true)
                     .accessibilityIdentifier("beat-calipers-mode-basis")
             }
             // X109 (§2.4): the QT/QTc dashes above are a deliberate
             // withholding, not a delineation failure — say so, plainly.
+            // Record-wide, so it renders identically with and without a
+            // focused beat and cannot flicker the height.
             if let reason = qtWithheldReason {
                 Text(reason)
                     .font(.caption2)
@@ -139,8 +154,57 @@ struct BeatCalipers: View {
         .padding(.horizontal, Columns.horizontalPadding)
         .padding(.vertical, 8)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        // `children: .contain` per X51 §4: an identifier-bearing wrapper
+        // without it collapses into ONE element and swallows every
+        // identifier inside — measured here as `docked-beat-inspector-empty`
+        // existing in the view and XCUI reporting it absent (#246).
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("beat-calipers")
     }
+
+    // MARK: - Status line (#246)
+
+    /// The one reserved line where per-beat statements live. An impossible
+    /// measurement takes precedence over the ectopic note — it's the
+    /// stronger statement about why the numbers are absent — and the
+    /// placeholder note takes the slot when no beat is focused. Truncated to
+    /// one line with the full text in `.help`, so a long statement changes
+    /// what the line says, never how tall the card is.
+    private var statusLine: some View {
+        Text(statusText ?? " ")
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+            .lineLimit(1, reservesSpace: true)
+            .truncationMode(.tail)
+            .help(statusText ?? "")
+            .accessibilityIdentifier(statusIdentifier)
+    }
+
+    private var statusText: String? {
+        guard let beat else { return placeholderNote }
+        if beat.isImplausible {
+            return "Excluded — QT physically impossible; withheld from aggregates"
+        }
+        if kind == .ectopic { return "Ectopic — PR / QT undefined" }
+        if beat.isUnreliable {
+            return "T-offset unreliable — QT/QTc withheld from aggregates"
+        }
+        return nil
+    }
+
+    /// Same per-state identifiers the three retired subtitle views carried
+    /// (X53 / X79 tests find them by name), plus the revived
+    /// `docked-beat-inspector-empty` — the identifier X71 deleted with the
+    /// placeholder card, back because the placeholder is back.
+    private var statusIdentifier: String {
+        guard let beat else { return "docked-beat-inspector-empty" }
+        if beat.isImplausible { return "beat-calipers-excluded-subtitle" }
+        if kind == .ectopic { return "beat-calipers-ectopic-subtitle" }
+        if beat.isUnreliable { return "beat-calipers-unreliable-subtitle" }
+        return "beat-calipers-status-clear"
+    }
+
+    private var beatIsImplausible: Bool { beat?.isImplausible ?? false }
 
     /// The measurement row's column widths, in ONE place, with the budget
     /// they have to live inside stated next to them.
@@ -173,9 +237,9 @@ struct BeatCalipers: View {
     /// — QT / QTc are lower bounds ("≥ X ms"), NOT confident point
     /// estimates. Ectopic beats already suppress QT/QTc as undefined so
     /// the censored treatment yields to that.
-    private var qtIsCensored: Bool { beat.tOffsetCensored && kind != .ectopic && !beat.isImplausible }
+    private var qtIsCensored: Bool { (beat?.tOffsetCensored ?? false) && kind != .ectopic && !beatIsImplausible }
     private var qtHalfWidthForRendering: Double? {
-        kind == .ectopic ? nil : beat.qtCalibratedHalfWidthMs
+        kind == .ectopic ? nil : beat?.qtCalibratedHalfWidthMs
     }
 
     /// C4: the per-patient normal template's provenance — how many beats
@@ -183,16 +247,20 @@ struct BeatCalipers: View {
     /// ectopic record this is a methods choice a reviewer will interrogate,
     /// so it's surfaced in the inspector (and persisted to `.mur`). Factual,
     /// engineered measurement — no clinical verdict.
+    /// #246: always rendered. The provenance text is record-stable — it can
+    /// wrap to however many lines it needs, because it never changes on
+    /// hover; what it must not do is mount and unmount. Without a template
+    /// the slot states that instead (absorbing the header's old "(no
+    /// template yet)" suffix).
     @ViewBuilder
     private var templateProvenanceFooter: some View {
-        if let template {
-            Divider().opacity(0.4)
-            Text(Self.templateProvenanceText(template, sampleRate: sampleRate))
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("beat-calipers-template-provenance")
-        }
+        Divider().opacity(0.4)
+        Text(template.map { Self.templateProvenanceText($0, sampleRate: sampleRate) }
+             ?? "No per-patient normal template yet")
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("beat-calipers-template-provenance")
     }
 
     /// Internal (not private) so the wording — methods provenance the
@@ -226,42 +294,12 @@ struct BeatCalipers: View {
         return String(format: "%d:%02d", total / 60, total % 60)
     }
 
-    private var ectopicSubtitle: some View {
-        Text("Ectopic — PR / QT undefined")
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
-            .accessibilityIdentifier("beat-calipers-ectopic-subtitle")
-    }
-
-    /// X53: this beat's QT measurement is physically impossible, so it was
-    /// excluded from the bin medians and the patient-normal template. State the
-    /// fact — a factual statement about the MEASUREMENT, never a verdict about
-    /// the patient — rather than rendering an absurd interval.
-    private var excludedSubtitle: some View {
-        Text("Excluded — QT physically impossible; withheld from aggregates")
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
-            .fixedSize(horizontal: false, vertical: true)
-            .accessibilityIdentifier("beat-calipers-excluded-subtitle")
-    }
-
-    /// X79: the delineator flagged this beat's T-offset as unreliable, so its
-    /// QT/QTc were withheld from the bin medians, the template, and the
-    /// departure ranking. The values still RENDER (with their calibrated CI)
-    /// — exclude-and-count shows its work, and the analyst holding the
-    /// threshold needs to see what the gate withheld — but the statement of
-    /// withholding travels with them.
-    private var unreliableSubtitle: some View {
-        Text("T-offset unreliable — QT/QTc withheld from aggregates")
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
-            .fixedSize(horizontal: false, vertical: true)
-            .accessibilityIdentifier("beat-calipers-unreliable-subtitle")
-    }
+    // The X53 (excluded) / X79 (unreliable) subtitle prose now lives in
+    // `statusText` — one reserved line, same identifiers, full text in .help.
 
     /// PR / QT / QTc are meaningless on either an ectopic OR a physically
     /// impossible beat, so both collapse the interval to "—".
-    private var suppressRepolarisationIntervals: Bool { kind == .ectopic || beat.isImplausible }
+    private var suppressRepolarisationIntervals: Bool { kind == .ectopic || beatIsImplausible }
 
     /// The QRS-duration boundary (ms) above which QRS is conventionally "wide"
     /// — the standard ECG definition of QRS prolongation, not a Murmur-chosen
@@ -274,8 +312,8 @@ struct BeatCalipers: View {
     /// stays uncluttered; nothing is hidden that a normal beat needs.
     private var showsJT: Bool {
         !suppressRepolarisationIntervals
-            && beat.jtMs != nil
-            && (beat.qrsMs ?? 0) >= Self.wideQRSThresholdMs
+            && beat?.jtMs != nil
+            && (beat?.qrsMs ?? 0) >= Self.wideQRSThresholdMs
     }
 
     /// QTc rate-correction formula identifier, rendered once beneath
@@ -294,30 +332,26 @@ struct BeatCalipers: View {
     /// hitting `row(...)` so the renderer prints "—" and skips the
     /// delta — matching the existing low-confidence style used by
     /// the T-offset in FiducialOverlay / interval-markings mockup.
-    private var prValueForRendering: Double?  { suppressRepolarisationIntervals ? nil : beat.prMs }
-    private var qtValueForRendering: Double?  { suppressRepolarisationIntervals ? nil : beat.qtMs }
-    private var qtcValueForRendering: Double? { suppressRepolarisationIntervals ? nil : beat.qtcMs }
-    private var prDeltaForRendering: Double?  { suppressRepolarisationIntervals ? nil : delta(beat.prMs, vs: deltaTemplate?.medianPRMs) }
-    private var qtDeltaForRendering: Double?  { suppressRepolarisationIntervals ? nil : delta(beat.qtMs, vs: deltaTemplate?.medianQTMs) }
-    private var qtcDeltaForRendering: Double? { suppressRepolarisationIntervals ? nil : delta(beat.qtcMs, vs: deltaTemplate?.medianQTcMs) }
+    private var prValueForRendering: Double?  { suppressRepolarisationIntervals ? nil : beat?.prMs }
+    private var qtValueForRendering: Double?  { suppressRepolarisationIntervals ? nil : beat?.qtMs }
+    private var qtcValueForRendering: Double? { suppressRepolarisationIntervals ? nil : beat?.qtcMs }
+    private var prDeltaForRendering: Double?  { suppressRepolarisationIntervals ? nil : delta(beat?.prMs, vs: deltaTemplate?.medianPRMs) }
+    private var qtDeltaForRendering: Double?  { suppressRepolarisationIntervals ? nil : delta(beat?.qtMs, vs: deltaTemplate?.medianQTMs) }
+    private var qtcDeltaForRendering: Double? { suppressRepolarisationIntervals ? nil : delta(beat?.qtcMs, vs: deltaTemplate?.medianQTcMs) }
 
     // MARK: - Header
 
     private var header: some View {
-        HStack(spacing: 6) {
-            Text(headerLabel)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.primary)
-                .accessibilityIdentifier("beat-calipers-anchor")
-            if template == nil {
-                Text("(no template yet)")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-        }
+        // The "(no template yet)" suffix that used to sit here moved to the
+        // always-rendered footer (#246), which states it in full.
+        Text(headerLabel)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.primary)
+            .accessibilityIdentifier("beat-calipers-anchor")
     }
 
     private var headerLabel: String {
+        guard let beat else { return "Beat —" }
         let seconds = sampleRate > 0
             ? Double(beat.rPeakSampleIndex) / sampleRate
             : 0
