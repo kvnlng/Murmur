@@ -353,6 +353,13 @@ struct BedsideView: View {
             previousNote: { stepNote(by: -1) },
             notesAvailable: !anchoredNotes.isEmpty,
             notesDrawerVisible: contextDrawerIsOpen,
+            trendLanes: availableTrendLanes.map {
+                BedsideCommands.TrendLaneMenuItem(
+                    id: $0.id,
+                    label: $0.label,
+                    isVisible: visibleTrendLanes.contains($0.id))
+            },
+            toggleTrendLane: { toggleTrendLane($0) },
             textEntryActive: notesEditorFocused,
             isEditing: isEditing
         )
@@ -1802,9 +1809,12 @@ struct BedsideView: View {
     /// the bar reports what's inside (the shown-lane count) and the Lanes
     /// menu hides: configuring rows that aren't rendered is a control that
     /// appears to do nothing.
-    @ViewBuilder
-    private var trendStackHeader: some View {
-        let available = BedsideTrendStack.availableLanes(
+    /// The lanes THIS record can offer. Shared by the header (which reports
+    /// the shown count) and by `bedsideCommands`, which publishes them to the
+    /// View ▸ Trend Lanes menu — one source, so the menu can never disagree
+    /// with the stack about what exists.
+    var availableTrendLanes: [(id: String, label: String)] {
+        BedsideTrendStack.availableLanes(
             heartRate: lowRatePartition.heartRate,
             quality: qualityChannels,
             beatHR: !markingsContext.beats.isEmpty,
@@ -1812,56 +1822,60 @@ struct BedsideView: View {
             interval: !markingsContext.beats.isEmpty,
             lfhf: !lfhfContext.samples.isEmpty
         )
+    }
+
+    /// Show or hide one lane. The View menu's action; also the single place
+    /// the visibility set is mutated.
+    func toggleTrendLane(_ id: String) {
+        guard availableTrendLanes.contains(where: { $0.id == id }) else { return }
+        if visibleTrendLanes.contains(id) {
+            visibleTrendLanes.remove(id)
+        } else {
+            visibleTrendLanes.insert(id)
+        }
+    }
+
+    @ViewBuilder
+    private var trendStackHeader: some View {
+        let available = availableTrendLanes
         if !available.isEmpty {
             let shown = available.count(where: { visibleTrendLanes.contains($0.id) })
-            HStack(spacing: 8) {
-                Button {
-                    withAnimation(.snappy(duration: 0.18)) {
-                        trendStackExpanded.toggle()
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: trendStackExpanded ? "chevron.down" : "chevron.right")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Text("Trend stack")
-                            .font(.subheadline.weight(.semibold))
-                        Text(trendStackExpanded
-                             ? "one axis · click the HR or quality lane to move the trace"
-                             : "\(shown) lane\(shown == 1 ? "" : "s")")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Spacer(minLength: 8)
-                    }
-                    .contentShape(Rectangle())
+            // #236: the lane picker used to live HERE, as a `Menu` beside the
+            // fold chevron — which is why this was an HStack. That header is
+            // the last thing in a long scrolling column, so on a short display
+            // it lands at the bottom edge of the screen and the dropdown has
+            // nowhere to open: observed rendering under the Variability
+            // Metrics strip, with XCUI finding no menu items at all. Moving it
+            // elsewhere in the window only relocates the edge.
+            //
+            // It now lives in the menu bar: View ▸ Trend Lanes, published
+            // through `BedsideCommands`. The menu bar is the one surface that
+            // is never near a screen edge, it is discoverable, and it keeps the
+            // original principle intact — a control that governs which rows
+            // exist should not sit among the rows.
+            Button {
+                withAnimation(.snappy(duration: 0.18)) {
+                    trendStackExpanded.toggle()
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Trend stack. \(shown) lane\(shown == 1 ? "" : "s")")
-                .accessibilityIdentifier("trend-stack-bar")
-                if trendStackExpanded {
-                    Menu {
-                        ForEach(available, id: \.id) { lane in
-                            Button {
-                                if visibleTrendLanes.contains(lane.id) {
-                                    visibleTrendLanes.remove(lane.id)
-                                } else {
-                                    visibleTrendLanes.insert(lane.id)
-                                }
-                            } label: {
-                                Label(lane.label,
-                                      systemImage: visibleTrendLanes.contains(lane.id) ? "checkmark" : "")
-                            }
-                            .accessibilityIdentifier("trend-lane-toggle-\(lane.id)")
-                        }
-                    } label: {
-                        Text("Lanes")
-                            .font(.caption)
-                    }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
-                    .accessibilityIdentifier("trend-lanes-menu")
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: trendStackExpanded ? "chevron.down" : "chevron.right")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("Trend stack")
+                        .font(.subheadline.weight(.semibold))
+                    Text(trendStackExpanded
+                         ? "one axis · click the HR or quality lane to move the trace"
+                         : "\(shown) lane\(shown == 1 ? "" : "s")")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
                 }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Trend stack. \(shown) lane\(shown == 1 ? "" : "s")")
+            .accessibilityIdentifier("trend-stack-bar")
         }
     }
 
