@@ -3,7 +3,8 @@
 //  MurmurCore
 //
 //  Indirection layer around `NSWorkspace.shared.open(_:)` so URL launches from
-//  Help menu commands and welcome-screen links can be intercepted by UI tests.
+//  Help menu commands can be intercepted by UI tests. (Until #242 the welcome
+//  screen's PhysioNet link routed through here too — the pattern outlived it.)
 //  Production behavior: open the URL via NSWorkspace (browser, mail client,
 //  whatever the system has registered for the scheme).
 //

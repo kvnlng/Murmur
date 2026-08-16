@@ -17,21 +17,25 @@ nav_order: 2
 
 Murmur Studio is distributed through the Mac App Store. Install it via
 [the App Store listing](https://apps.apple.com/us/app/murmur-studio/id6782092325)
-and launch it from Applications or Spotlight. The welcome screen offers
-four entry points.
+and launch it from Applications or Spotlight.
 
 ## Loading a record
 
-The welcome screen on first launch gives you four ways in:
+On launch the window shows an idle viewer — a flatline and a single
+pointer at the one action that matters. Two ways in, both in the File
+menu:
 
-- **Open Record Folder** opens the system file picker.
-- **Try a sample recording** generates a small 8-lead 10 s WFDB fixture
-  on the fly — useful for kicking the tires before downloading real data.
-- **Recent** — folders you've opened before are listed under the card
-  and reopen with one click. Sandbox-safe: each row stores a
-  security-scoped bookmark, not a raw path.
-- **Drag a folder onto the window** — drop either the record folder
-  itself, or any file inside it, and the app opens the enclosing folder.
+- **File ▸ Open Record… (⌘O)** opens the system file picker. The same
+  action is inline in the empty window ("Open Record Folder…") and in
+  the toolbar's `⋯` menu.
+- **File ▸ Open Recent** — folders you've opened before reopen with one
+  click. Sandbox-safe: each entry stores a security-scoped bookmark,
+  not a raw path.
+
+You'll need a WFDB record to open — see [Requirements](#requirements)
+above for PhysioNet's MIT-BIH Arrhythmia Database, the canonical test
+set. **Help ▸ Getting Started** brings you back to this page from
+inside the app.
 
 Once a folder is open:
 
