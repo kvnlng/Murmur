@@ -102,12 +102,26 @@ need an API key; see "Reading results from the terminal" below.
 
 Once both workflows are saved:
 
-- Every push to `main` triggers the test workflow. You'll get an
-  email on first failure (success emails are suppressed by default
-  unless you opt in). Test runs ~5–10 minutes per OS-version.
+- The test workflow is **started manually**, not on every push to
+  `main`. The branch-changes start condition was removed deliberately:
+  a run should happen when the work is ready to be judged, not on every
+  commit that lands. Start one with `scripts/xcode-cloud.rb start
+  <branch>` (below), or from App Store Connect. Test runs take ~5–10
+  minutes per OS-version.
 - Every `v*` tag triggers an archive that lands in TestFlight
   automatically. The smoke-test checklist in `RELEASE.md` still
   applies — Xcode Cloud just removes the manual upload step.
+
+Because runs are manual, a branch's tests are only exercised on the
+runner when someone asks — and Xcode Cloud does not run on pull
+requests either, so a branch nobody starts has never been near the
+runner at all.
+
+Merging first and running once on `main` is the normal flow, and the
+cheaper one: a single run judges the accumulated work instead of
+spending quota per branch. Build a branch directly when you want to
+isolate it — a change you suspect, or one you would rather not have
+`main` red for while you find out.
 
 ## Updating the release process
 
@@ -284,6 +298,26 @@ One trap: a `crash_log_bundle_*` artifact does **not** imply the app
 crashed. `MetricMeasurementHelper` is Apple's own XCTest
 performance-metrics helper and aborts routinely on the hosted runners;
 check the `.ips` `bundleID` before reading anything into it.
+
+## Starting a run
+
+```
+scripts/xcode-cloud.rb start <branch> [workflow-name]
+```
+
+Defaults to the `Default` workflow. The branch must already be pushed —
+Xcode Cloud builds a git reference it knows about, not your working
+tree — and the command refuses an unknown branch or workflow rather
+than starting the wrong thing.
+
+This is the only subcommand that spends compute against the monthly
+quota, which is why it is explicit and why nothing else does it as a
+side effect. Watch it with `scripts/xcode-cloud.rb run latest`.
+
+Usually you want `main`, after merging: one run judges everything that
+landed. Naming a branch is for when you want a change isolated from the
+rest — which is what the argument is there for, not a standing
+instruction to build every branch.
 
 ## When something fails
 
