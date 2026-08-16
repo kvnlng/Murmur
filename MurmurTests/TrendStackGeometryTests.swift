@@ -406,6 +406,44 @@ struct TrendStackGeometryTests {
         }
     }
 
+    // MARK: - ⌥drag zoom math
+
+    @Test("An option-drag maps to the swept data range, direction-agnostic")
+    func optionDragMapsToDataRange() {
+        let range = 0.0...1000.0
+        // Cell 745 pt wide → 700 pt of data after the 45 pt gutter.
+        // Sweep from the gutter edge to 30% across the data.
+        let forward = TrendStack.optionDragRange(
+            startX: TrendStack.axisGutter, endX: TrendStack.axisGutter + 210,
+            plotCellWidth: TrendStack.axisGutter + 700, recordingRange: range)
+        #expect(forward == 0.0...300.0)
+        // The same sweep right-to-left zooms to the same range — the
+        // analyst's sweep direction is not information.
+        let backward = TrendStack.optionDragRange(
+            startX: TrendStack.axisGutter + 210, endX: TrendStack.axisGutter,
+            plotCellWidth: TrendStack.axisGutter + 700, recordingRange: range)
+        #expect(backward == forward)
+    }
+
+    @Test("A sub-4pt option-drag is a click, not a zoom")
+    func wobblyOptionClickDoesNotZoom() {
+        let range = 0.0...1000.0
+        #expect(TrendStack.optionDragRange(
+            startX: 100, endX: 103.5,
+            plotCellWidth: 745, recordingRange: range) == nil)
+    }
+
+    @Test("Drag endpoints past the cell edges clamp to the recording")
+    func optionDragClampsAtEdges() {
+        let range = 0.0...1000.0
+        // Start inside the gutter, end past the trailing edge: the range
+        // must clamp to the whole recording, never run outside it.
+        let swept = TrendStack.optionDragRange(
+            startX: 0, endX: 2000,
+            plotCellWidth: TrendStack.axisGutter + 700, recordingRange: range)
+        #expect(swept == range)
+    }
+
     /// A row built the way `TrendStack.laneRow` builds one, for measuring
     /// what the row does with a rail taller than the declared height.
     private func laneRow(rail: Rail, plotHeight: CGFloat) -> some View {

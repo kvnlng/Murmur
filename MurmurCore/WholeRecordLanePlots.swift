@@ -78,6 +78,19 @@ struct HeartRateLanePlot: View {
                 func y(_ v: Double) -> CGFloat { size.height - CGFloat(v - lo) * scale }
                 let step = size.width / CGFloat(max(1, columns.count))
 
+                // Gridlines at the gutter's tick fractions (13a, #261) —
+                // the Charts lanes get these from `trendLaneYAxis()`'s
+                // AxisGridLine, and a stack where some lanes have rules
+                // and some don't reads as two kinds of chart. Same ink
+                // as Charts draws: secondary at 15%.
+                var grid = Path()
+                for fraction in [0.0, 0.5, 1.0] {
+                    let gy = min(max(y(lo + fraction * (hi - lo)), 0.5), size.height - 0.5)
+                    grid.move(to: CGPoint(x: 0, y: gy))
+                    grid.addLine(to: CGPoint(x: size.width, y: gy))
+                }
+                ctx.stroke(grid, with: .color(.secondary.opacity(0.15)), lineWidth: 1)
+
                 var band = Path()
                 var mean = Path()
                 var started = false

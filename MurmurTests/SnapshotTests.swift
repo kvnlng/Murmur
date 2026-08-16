@@ -266,6 +266,56 @@ final class SnapshotTests: XCTestCase {
         assertSnapshot(of: render(view, size: CGSize(width: 552, height: 120)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 
+    func testTrendStack_withLegendRowAndGridlines() {
+        // Phase 3 of #261: the HR Canvas lane draws gridlines at its
+        // tick fractions (matching the Charts lanes' AxisGridLine ink),
+        // and the legend row renders mark-type swatches under the axis.
+        // Both lane families present so every legend section renders,
+        // plus a low-quality span for the shading entry.
+        let hrSamples: [Float] = (0..<1500).map { 60 + 12 * Float(sin(Double($0) / 40)) }
+        let laneSamples: [VariabilityLaneSample] = (0..<200).map {
+            VariabilityLaneSample(windowStartSeconds: Double($0) * 30,
+                                  windowEndSeconds: Double($0) * 30 + 300,
+                                  value: 40 + 30 * sin(Double($0) / 9),
+                                  isEligible: true)
+        }
+        let stack = TrendStack(
+            lanes: [
+                TrendStackLane(id: "hr", title: "Trends · HR",
+                               subtitle: "bpm · trend channel only",
+                               value: "75.1", unit: "bpm", height: 86, seekable: true,
+                               accent: TrendStackLane.hrAccent) {
+                    HeartRateLanePlot(samples: hrSamples, sampleRate: 0.25,
+                                      recordingRange: 0...6000)
+                },
+                TrendStackLane(id: "rmssd", title: "RMSSD",
+                               subtitle: "ms · 5-min window · 30 s step",
+                               value: "42.0", unit: "ms", height: 86,
+                               accent: TrendStackLane.variabilityAccent) {
+                    LFHFLanePlot(samples: laneSamples, recordingRange: 0...6000,
+                                 stepSeconds: 30)
+                },
+            ],
+            recordingRange: 0...6000,
+            viewportRange: 1500...2200,
+            lowQualitySpans: [1800...2250],
+            caption: "one axis · every lane",
+            legend: [
+                TrendStackLegendEntry(swatch: .ribbon, label: "rolling IQR (p25–p75)"),
+                TrendStackLegendEntry(swatch: .dashed, label: "p5 / p95"),
+                TrendStackLegendEntry(swatch: .line, label: "rolling median"),
+                TrendStackLegendEntry(swatch: .dot, label: "bin median"),
+                TrendStackLegendEntry(swatch: .thickBar, label: "bin IQR"),
+                TrendStackLegendEntry(swatch: .thinBar, label: "bin range"),
+                TrendStackLegendEntry(swatch: .stub, label: "bin excluded — stub only"),
+                TrendStackLegendEntry(swatch: .shading, label: "low quality — shades every lane"),
+            ]
+        )
+        let view = stack.frame(width: 700).padding().background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 732, height: 320)),
+                       as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
     func testVariabilityLane_withPercentileRibbon() {
         // The 13a ribbon (#261): filled p25–p75 + dashed p5/p95 around
         // the median line. The middle third carries no band — the

@@ -29,6 +29,9 @@ struct BedsideTrendStack: View {
     /// The ECG sample rate `beats`' R-peak indices are expressed in.
     let beatSampleRate: Double
     var onSeek: ((Double) -> Void)?
+    /// ⌥drag on a seekable lane zooms the viewport to the dragged range
+    /// (13a / #261). Supplied by `BedsideView`, which owns the viewport.
+    var onZoomRange: ((ClosedRange<Double>) -> Void)?
 
     /// These lanes are supplied by the caller, because they carry their own
     /// contexts (and, for RMSSD and the interval trend, control chips) that
@@ -72,8 +75,12 @@ struct BedsideTrendStack: View {
                     viewportRange: viewportRange,
                     lowQualitySpans: lowQualitySpans,
                     caption: caption,
-                    hint: "Click the HR or quality lane to move the trace.",
-                    onSeek: onSeek
+                    hint: onZoomRange == nil
+                        ? "Click the HR or quality lane to move the trace."
+                        : "Click the HR or quality lane to move the trace · ⌥drag to zoom.",
+                    legend: legendEntries,
+                    onSeek: onSeek,
+                    onZoomRange: onZoomRange
                 )
             }
         }
@@ -170,6 +177,30 @@ struct BedsideTrendStack: View {
         if interval { out.append(("interval-trend", "Interval trend")) }
         if lfhf { out.append((lfhfLaneID, "LF / HF")) }
         if !quality.isEmpty { out.append((qualityLaneID, "Quality")) }
+        return out
+    }
+
+    /// The 13a legend — mark-type entries for the vocabularies actually
+    /// on screen, assembled HERE because only the lane list knows which
+    /// mark types exist. A legend naming marks no lane draws would teach
+    /// the eye shapes it cannot find.
+    private var legendEntries: [TrendStackLegendEntry] {
+        var out: [TrendStackLegendEntry] = []
+        let ids = Set(lanes.map(\.id))
+        if ids.contains("rmssd") || ids.contains(Self.lfhfLaneID) {
+            out.append(TrendStackLegendEntry(swatch: .ribbon, label: "rolling IQR (p25–p75)"))
+            out.append(TrendStackLegendEntry(swatch: .dashed, label: "p5 / p95"))
+            out.append(TrendStackLegendEntry(swatch: .line, label: "rolling median"))
+        }
+        if ids.contains("interval-trend") {
+            out.append(TrendStackLegendEntry(swatch: .dot, label: "bin median"))
+            out.append(TrendStackLegendEntry(swatch: .thickBar, label: "bin IQR"))
+            out.append(TrendStackLegendEntry(swatch: .thinBar, label: "bin range"))
+            out.append(TrendStackLegendEntry(swatch: .stub, label: "bin excluded — stub only"))
+        }
+        if !lowQualitySpans.isEmpty {
+            out.append(TrendStackLegendEntry(swatch: .shading, label: "low quality — shades every lane"))
+        }
         return out
     }
 

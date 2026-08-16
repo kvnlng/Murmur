@@ -28,6 +28,7 @@
 //  trimmed to save space.
 //
 
+import AppKit
 import Charts
 import SwiftUI
 
@@ -168,6 +169,77 @@ extension TrendStackLane {
     static let qualityAccent = Color(red: 154 / 255, green: 163 / 255, blue: 173 / 255)
 }
 
+/// One legend entry: a small swatch drawn in the mark's own vocabulary,
+/// then its name. The 13a legend names MARK TYPES, not lanes — the lane
+/// labels already name the lanes, and a legend that repeated them would
+/// be the #209 duplication again one row lower.
+struct TrendStackLegendEntry: Identifiable {
+    enum Swatch {
+        /// Filled p25–p75 ribbon.
+        case ribbon
+        /// Dashed p5/p95 outline.
+        case dashed
+        /// Solid median polyline.
+        case line
+        /// Bin-median dot.
+        case dot
+        /// Thick IQR segment.
+        case thickBar
+        /// Thin full-range segment.
+        case thinBar
+        /// Excluded-bin stub.
+        case stub
+        /// Cross-lane low-quality shading.
+        case shading
+    }
+
+    let swatch: Swatch
+    let label: String
+    var id: String { label }
+}
+
+/// Leading-aligned wrapping row for the legend. Exists because the
+/// legend must stay width-compliant: the stack answers every width
+/// proposal with exactly that width (`stackIsNotGreedyHorizontally`),
+/// and a fixed HStack of ~8 chips would put a ~700 pt floor under the
+/// whole card — X97's split-view overflow again, via the legend.
+struct TrendLegendFlow: Layout {
+    var hSpacing: CGFloat = 12
+    var vSpacing: CGFloat = 3
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0, usedWidth: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > maxWidth {
+                x = 0
+                y += rowHeight + vSpacing
+                rowHeight = 0
+            }
+            rowHeight = max(rowHeight, size.height)
+            usedWidth = max(usedWidth, x + size.width)
+            x += size.width + hSpacing
+        }
+        return CGSize(width: maxWidth.isFinite ? maxWidth : usedWidth, height: y + rowHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX, y = bounds.minY, rowHeight: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > bounds.minX, x + size.width > bounds.maxX {
+                x = bounds.minX
+                y += rowHeight + vSpacing
+                rowHeight = 0
+            }
+            subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            rowHeight = max(rowHeight, size.height)
+            x += size.width + hSpacing
+        }
+    }
+}
+
 struct TrendStack: View {
     let lanes: [TrendStackLane]
     /// The shared domain, in seconds from the recording start. Every lane's
@@ -183,7 +255,16 @@ struct TrendStack: View {
     /// Interaction hint, kept separate from provenance so the two can be
     /// styled differently without splitting the caption string.
     var hint: String?
+    /// The 13a legend row (#261). Supplied by the assembler, because the
+    /// stack cannot infer mark types from `AnyView` plots — only the code
+    /// that chose the lanes knows which mark vocabulary is on screen.
+    /// Empty renders no row.
+    var legend: [TrendStackLegendEntry] = []
     var onSeek: ((Double) -> Void)?
+    /// ⌥drag on a seekable lane zooms the viewport to the dragged range
+    /// (13a / handoff README: "⌥drag on a band or lane zooms to the
+    /// dragged range"). Nil disables the gesture; plain clicks still seek.
+    var onZoomRange: ((ClosedRange<Double>) -> Void)?
 
     // 13a lane-row grid: [4 pt accent rail | 114 pt label | y-gutter | plot |
     // 66 pt value]. The wireframe's y-gutter is 30 pt; ours stays `axisGutter`
@@ -216,7 +297,9 @@ struct TrendStack: View {
     // and no way for a lane to hold a private one.
 
     /// Leading strip of every plot cell, reserved for the lane's y-scale.
-    static let axisGutter: CGFloat = 45
+    /// `nonisolated`: immutable and Sendable, and `optionDragRange` — a
+    /// pure function tests call off the main actor — depends on it.
+    nonisolated static let axisGutter: CGFloat = 45
     /// The label box inside that gutter. Four monospaced digits at
     /// `.caption2` — the interval lane plots RR in ms and reaches four
     /// figures, and a label box that clips is a scale that lies.
@@ -261,6 +344,9 @@ struct TrendStack: View {
             // that view's size, which is what "drawn across the lanes" means.
             .overlay { crossLaneOverlay }
             axisRow
+            if !legend.isEmpty {
+                legendRow
+            }
             if let caption {
                 Text(caption)
                     .font(.caption2)
@@ -386,18 +472,37 @@ struct TrendStack: View {
                     // shared x-mapping, so the click math here cannot drift
                     // from what was drawn — as long as it subtracts the same
                     // gutter the data was inset by (#210).
-                    if lane.seekable, let onSeek {
+                    if lane.seekable, onSeek != nil || onZoomRange != nil {
                         GeometryReader { geo in
                             Color.clear
                                 .contentShape(Rectangle())
                                 .gesture(
                                     DragGesture(minimumDistance: 0)
                                         .onEnded { value in
-                                            let plotWidth = geo.size.width - Self.axisGutter
-                                            guard plotWidth > 0 else { return }
-                                            let f = min(1, max(0, (value.location.x - Self.axisGutter) / plotWidth))
-                                            onSeek(recordingRange.lowerBound
-                                                   + Double(f) * (recordingRange.upperBound - recordingRange.lowerBound))
+                                            // ⌥drag zooms to the dragged range
+                                            // (13a). The modifier is read at
+                                            // gesture END, matching how the
+                                            // analyst decides: press ⌥, sweep,
+                                            // release. A too-short ⌥drag falls
+                                            // through to seek — a wobbly
+                                            // ⌥click must not zoom to a
+                                            // 4-point sliver.
+                                            if let onZoomRange,
+                                               NSEvent.modifierFlags.contains(.option),
+                                               let range = Self.optionDragRange(
+                                                   startX: value.startLocation.x,
+                                                   endX: value.location.x,
+                                                   plotCellWidth: geo.size.width,
+                                                   recordingRange: recordingRange
+                                               ) {
+                                                onZoomRange(range)
+                                            } else if let onSeek {
+                                                let plotWidth = geo.size.width - Self.axisGutter
+                                                guard plotWidth > 0 else { return }
+                                                let f = min(1, max(0, (value.location.x - Self.axisGutter) / plotWidth))
+                                                onSeek(recordingRange.lowerBound
+                                                       + Double(f) * (recordingRange.upperBound - recordingRange.lowerBound))
+                                            }
                                         }
                                 )
                         }
@@ -468,6 +573,76 @@ struct TrendStack: View {
             .allowsHitTesting(false)
     }
 
+    /// The 13a legend row: mark-type swatches with names, wrapping at
+    /// narrow widths rather than putting a floor under the card.
+    private var legendRow: some View {
+        TrendLegendFlow(hSpacing: 12, vSpacing: 3) {
+            ForEach(legend) { entry in
+                HStack(spacing: 4) {
+                    swatch(entry.swatch)
+                    Text(entry.label)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .fixedSize()
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.top, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("trend-stack-legend")
+    }
+
+    /// Each swatch is drawn in the mark's own vocabulary at caption
+    /// scale, so the legend teaches the eye the exact shape it will
+    /// find in the lanes rather than a generic color chip.
+    @ViewBuilder
+    private func swatch(_ kind: TrendStackLegendEntry.Swatch) -> some View {
+        switch kind {
+        case .ribbon:
+            RoundedRectangle(cornerRadius: 1)
+                .fill(Color.accentColor.opacity(0.25))
+                .frame(width: 14, height: 7)
+        case .dashed:
+            Canvas { ctx, size in
+                var path = Path()
+                path.move(to: CGPoint(x: 0, y: size.height / 2))
+                path.addLine(to: CGPoint(x: size.width, y: size.height / 2))
+                ctx.stroke(path, with: .color(.accentColor.opacity(0.55)),
+                           style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
+            }
+            .frame(width: 14, height: 7)
+        case .line:
+            Rectangle()
+                .fill(Color.accentColor)
+                .frame(width: 14, height: 1.5)
+        case .dot:
+            Circle()
+                .fill(Color.primary)
+                .frame(width: 4, height: 4)
+        case .thickBar:
+            Capsule()
+                .fill(Color.primary.opacity(0.65))
+                .frame(width: 3, height: 10)
+        case .thinBar:
+            Rectangle()
+                .fill(Color.primary.opacity(0.35))
+                .frame(width: 1, height: 12)
+        case .stub:
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.4))
+                    .frame(width: 8, height: 3)
+            }
+            .frame(width: 8, height: 10)
+        case .shading:
+            Rectangle()
+                .fill(Color.secondary.opacity(0.14))
+                .frame(width: 10, height: 10)
+        }
+    }
+
     private var axisRow: some View {
         HStack(spacing: 0) {
             Color.clear.frame(width: Self.plotOriginX)
@@ -511,5 +686,31 @@ struct TrendStack: View {
         let span = recordingRange.upperBound - recordingRange.lowerBound
         guard span > 0 else { return 0 }
         return CGFloat(min(1, max(0, (seconds - recordingRange.lowerBound) / span)))
+    }
+
+    /// Pure mapping for the ⌥drag zoom: cell-local drag endpoints → the
+    /// time range to zoom to, or nil when the drag is too short to be a
+    /// deliberate sweep (< 4 pt — a wobbly ⌥click stays a seek). Uses
+    /// the same gutter subtraction as the seek path, so the zoomed range
+    /// is exactly the stretch of DATA the analyst swept, direction-
+    /// agnostic. `nonisolated` + static so tests exercise the math
+    /// without a gesture.
+    nonisolated static func optionDragRange(
+        startX: CGFloat,
+        endX: CGFloat,
+        plotCellWidth: CGFloat,
+        recordingRange: ClosedRange<Double>
+    ) -> ClosedRange<Double>? {
+        let plotWidth = plotCellWidth - axisGutter
+        guard plotWidth > 0, abs(endX - startX) >= 4 else { return nil }
+        func time(atX x: CGFloat) -> Double {
+            let f = min(1, max(0, (x - axisGutter) / plotWidth))
+            return recordingRange.lowerBound
+                + Double(f) * (recordingRange.upperBound - recordingRange.lowerBound)
+        }
+        let a = time(atX: startX)
+        let b = time(atX: endX)
+        guard a != b else { return nil }
+        return min(a, b)...max(a, b)
     }
 }
