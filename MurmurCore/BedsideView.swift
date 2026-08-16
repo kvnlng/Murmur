@@ -1705,6 +1705,20 @@ struct BedsideView: View {
                 onSeek: { seconds in
                     viewport.center(onSample: Int64(seconds * max(1, viewport.sampleRate)))
                 },
+                onZoomRange: { range in
+                    // ⌥drag zoom (13a / #261): width first, then start —
+                    // `setWidth` clamps to the viewport's own floor, and
+                    // `setStart` re-clamps against the clamped width, so a
+                    // sliver-sized sweep lands on the minimum window centered
+                    // where the analyst swept rather than trapping or
+                    // over-zooming. Same `setWidth` path as pinch and the
+                    // zoom ladder, so it inherits their hold semantics.
+                    let rate = max(1, viewport.sampleRate)
+                    let width = (range.upperBound - range.lowerBound) * rate
+                    guard width.isFinite, width < Double(Int64.max) else { return }
+                    viewport.setWidth(Int64(width), anchorFraction: 0)
+                    viewport.setStart(Int64(range.lowerBound * rate))
+                },
                 rmssdLane: rmssdLane,
                 intervalLane: intervalLane,
                 lfhfLane: lfhfLane
