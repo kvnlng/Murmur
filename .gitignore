@@ -45,5 +45,14 @@ Carthage/Build/
 *.xcresult
 *.playground/timeline.xctimeline
 
+# Credentials — never commit, this repo is public. App Store Connect API
+# keys live in ~/.appstoreconnect/private_keys/ (see XCODE_CLOUD.md); these
+# patterns exist so a key that strays into the working tree can't be added
+# by a wildcard `git add`. Apple issues each .p8 exactly once — a leaked one
+# must be revoked in App Store Connect, not rotated in place.
+*.p8
+AuthKey_*
+issuer_id
+
 # Memory / agent artifacts (not part of the project)
 memory/

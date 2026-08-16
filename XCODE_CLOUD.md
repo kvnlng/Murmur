@@ -19,9 +19,11 @@ Already in place:
 - Tests green locally: 191 unit + 7 UI = 198 total at the time of
   writing
 
-You don't need any local CLI or Apple-side credential setup — the
-workflow is created in App Store Connect's web UI, and Apple manages
-all signing certificates and provisioning profiles automatically.
+You don't need any local CLI or Apple-side credential setup to *create*
+the workflows — that happens in App Store Connect's web UI, and Apple
+manages all signing certificates and provisioning profiles
+automatically. Reading build results from the terminal afterwards does
+need an API key; see "Reading results from the terminal" below.
 
 ## Initial workflow
 
@@ -29,9 +31,9 @@ all signing certificates and provisioning profiles automatically.
 2. Top tabs → **Xcode Cloud**
 3. **Get Started** (first time) or **Manage Workflows** (subsequent)
 4. **Connect repository** → GitHub → grant Apple's GitHub App access
-   to `kvnlng/Murmur`. Since the repo is private, this step requires
-   accepting the OAuth scope; Apple only needs read access plus
-   webhook installation.
+   to `kvnlng/Murmur`. Apple only needs read access plus webhook
+   installation. (This step predates the repo going public and used to
+   note the private-repo OAuth scope; the grant is the same either way.)
 5. After the repo connects, Xcode Cloud creates a default workflow.
    Edit it.
 
@@ -149,6 +151,83 @@ Additional script hooks (currently unused): `ci_pre_xcodebuild.sh` /
 automatic SPM resolution, so a missing resolved file fails the build
 with "a resolved file is required". The `.gitignore` has an explicit
 note about this.
+
+## Why the test plan retries
+
+`Murmur.xctestplan` sets `testRepetitionMode: retryOnFailure` with
+`maximumTestRepetitions: 3`. The plan is JSON and cannot carry a
+comment, so the reasoning lives here.
+
+The hosted runner is an `Apple Virtual Machine`, and UI tests time
+differently there than on real hardware. Across seven consecutive Cloud
+failures the pattern was always the same: one or two UI tests fail, a
+*different* pair each time, and every one of them passes locally on
+repeat runs. Build 138's two failures
+(`testAPinnedBeatCardSurvivesThePointerLeavingTheTrace`,
+`testAbstentionNullStateAndManualCaliperOverride`) each passed 3/3
+locally and had never failed on Cloud before. With no retry policy, a
+single such flake failed the whole build and burned a re-run of the
+quota.
+
+Retries only fire on failure, so the green path costs nothing.
+
+**The cost, stated plainly:** a real regression that fails
+intermittently will now be retried into a pass and go unnoticed. That
+is a deliberate trade — made because the observed failures were all
+flakes and none were real. If a test starts needing its retries to go
+green, that is a signal to investigate, not to raise the repetition
+count. `scripts/xcode-cloud.rb` is how you check whether a passing
+build needed retries to get there.
+
+## Reading results from the terminal
+
+The failure email and the GitHub check-run summary give you the
+assertion message and nothing else. The console log, the `.xcresult`,
+and any crash logs live behind the App Store Connect API.
+`scripts/xcode-cloud.rb` reads them. It needs system Ruby and nothing
+else — no gems, no Homebrew.
+
+**One-time key setup.** In App Store Connect → Users and Access →
+Integrations → App Store Connect API → **Team Keys**, create a key with
+the **Developer** role (verified sufficient for every Xcode Cloud read
+endpoint; you do not need App Manager). Copy the **Issuer ID** from the
+top of that page, then download the `.p8` — Apple allows that download
+exactly once, and a lost key must be revoked and reissued rather than
+recovered.
+
+```
+mkdir -p ~/.appstoreconnect/private_keys
+chmod 700 ~/.appstoreconnect ~/.appstoreconnect/private_keys
+mv ~/Downloads/AuthKey_*.p8 ~/.appstoreconnect/private_keys/
+chmod 600 ~/.appstoreconnect/private_keys/*.p8
+printf '%s\n' '<ISSUER-ID>' > ~/.appstoreconnect/issuer_id
+chmod 600 ~/.appstoreconnect/issuer_id
+```
+
+The key never enters this repo — the script reads it from the home
+directory at runtime, and `.gitignore` carries `*.p8` / `AuthKey_*` so
+a stray copy can't be committed by a wildcard `git add`. This matters
+more than usual: the repo is public.
+
+**Triaging a failure.** Start from the newest run and walk down:
+
+```
+scripts/xcode-cloud.rb run latest              # actions + their ids
+scripts/xcode-cloud.rb artifacts <action-id>   # what's downloadable
+scripts/xcode-cloud.rb download <artifact-id> /tmp/build
+```
+
+The `RESULT_BUNDLE` artifact is the one worth the download — unzip it
+and `xcrun xcresulttool get test-results summary --path <bundle>` gives
+pass/fail counts, then `... test-details --test-id <id>` gives the
+per-test failure with attachments. `LOG_BUNDLE` is the raw build log.
+Skip `TEST_PRODUCTS` unless you intend to re-run the suite locally; it
+is ~126 MB of built binaries.
+
+One trap: a `crash_log_bundle_*` artifact does **not** imply the app
+crashed. `MetricMeasurementHelper` is Apple's own XCTest
+performance-metrics helper and aborts routinely on the hosted runners;
+check the `.ips` `bundleID` before reading anything into it.
 
 ## When something fails
 
