@@ -102,12 +102,20 @@ need an API key; see "Reading results from the terminal" below.
 
 Once both workflows are saved:
 
-- Every push to `main` triggers the test workflow. You'll get an
-  email on first failure (success emails are suppressed by default
-  unless you opt in). Test runs ~5–10 minutes per OS-version.
+- The test workflow is **started manually**, not on every push to
+  `main`. The branch-changes start condition was removed deliberately:
+  a run should happen when the work is ready to be judged, not on every
+  commit that lands. Start one with `scripts/xcode-cloud.rb start
+  <branch>` (below), or from App Store Connect. Test runs take ~5–10
+  minutes per OS-version.
 - Every `v*` tag triggers an archive that lands in TestFlight
   automatically. The smoke-test checklist in `RELEASE.md` still
   applies — Xcode Cloud just removes the manual upload step.
+
+Because runs are manual, a branch's tests are only exercised on the
+runner when someone asks. Ask BEFORE merging — a branch can be built
+directly, and finding out on `main` afterwards is how two failing UI
+tests reached the trunk (#277).
 
 ## Updating the release process
 
@@ -228,6 +236,26 @@ One trap: a `crash_log_bundle_*` artifact does **not** imply the app
 crashed. `MetricMeasurementHelper` is Apple's own XCTest
 performance-metrics helper and aborts routinely on the hosted runners;
 check the `.ips` `bundleID` before reading anything into it.
+
+## Starting a run
+
+```
+scripts/xcode-cloud.rb start <branch> [workflow-name]
+```
+
+Defaults to the `Default` workflow. The branch must already be pushed —
+Xcode Cloud builds a git reference it knows about, not your working
+tree — and the command refuses an unknown branch or workflow rather
+than starting the wrong thing.
+
+This is the only subcommand that spends compute against the monthly
+quota, which is why it is explicit and why nothing else does it as a
+side effect. Watch it with `scripts/xcode-cloud.rb run latest`.
+
+Build a PR branch before merging it. Xcode Cloud's workflows do not run
+on pull requests, so a branch that has never been started has never had
+its tests near the runner — and the runner is where this project's UI
+tests fail.
 
 ## When something fails
 

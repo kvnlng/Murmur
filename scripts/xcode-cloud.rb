@@ -106,6 +106,22 @@ module ASC
     JSON.parse(response.body)
   end
 
+  def post(path, body)
+    uri = URI("https://#{API_HOST}#{path}")
+    request = Net::HTTP::Post.new(uri)
+    request["Authorization"] = "Bearer #{token}"
+    request["Content-Type"] = "application/json"
+    request.body = JSON.generate(body)
+    response = Net::HTTP.start(uri.host, uri.port, use_ssl: true) do |http|
+      http.request(request)
+    end
+    # 201 Created is the success case for starting a build run.
+    unless %w[200 201].include?(response.code)
+      abort "HTTP #{response.code} for POST #{uri.path}\n#{response.body}"
+    end
+    JSON.parse(response.body)
+  end
+
   # The only product is Murmur, but resolve it rather than hardcoding the UUID
   # so this keeps working if the product is ever recreated.
   def product_id
@@ -203,12 +219,51 @@ def cmd_get(args)
   puts JSON.pretty_generate(ASC.get(args.first))
 end
 
+# Start a build on a branch. Xcode Cloud's workflows start on changes to
+# `main`, so a PR branch gets no run of its own — this is how you exercise a
+# branch's tests on the runner BEFORE merging, rather than discovering the
+# result on main afterwards. Costs compute against the monthly quota, so it is
+# an explicit command and not something any other subcommand does implicitly.
+def cmd_start(args)
+  abort "usage: start <branch> [workflow-name]" if args.empty?
+  branch = args[0]
+  workflow_name = args[1] || "Default"
+
+  workflows = ASC.get("/v1/ciProducts/#{ASC.product_id}/workflows")["data"]
+  workflow = workflows.find { |w| w["attributes"]["name"] == workflow_name }
+  abort "No workflow named #{workflow_name.inspect}. Have: " \
+        "#{workflows.map { |w| w['attributes']['name'] }.join(', ')}" unless workflow
+
+  repos = ASC.get("/v1/ciProducts/#{ASC.product_id}/primaryRepositories")["data"]
+  abort "No repository attached to the product" if repos.empty?
+  refs = ASC.get("/v1/scmRepositories/#{repos.first['id']}/gitReferences?limit=200")["data"]
+  ref = refs.find do |r|
+    r["attributes"]["kind"] == "BRANCH" && r["attributes"]["name"] == branch
+  end
+  abort "Branch #{branch.inspect} is not known to Xcode Cloud — push it first" unless ref
+
+  created = ASC.post("/v1/ciBuildRuns", {
+    "data" => {
+      "type" => "ciBuildRuns",
+      "attributes" => {},
+      "relationships" => {
+        "workflow" => { "data" => { "type" => "ciWorkflows", "id" => workflow["id"] } },
+        "sourceBranchOrTag" => { "data" => { "type" => "scmGitReferences", "id" => ref["id"] } }
+      }
+    }
+  })
+  attrs = created["data"]["attributes"]
+  puts "started #{workflow_name} on #{branch} — build ##{attrs['number']}"
+  puts created["data"]["id"]
+end
+
 COMMANDS = {
   "builds" => method(:cmd_builds),
   "run" => method(:cmd_run),
   "issues" => method(:cmd_issues),
   "artifacts" => method(:cmd_artifacts),
   "download" => method(:cmd_download),
+  "start" => method(:cmd_start),
   "get" => method(:cmd_get)
 }.freeze
 
