@@ -78,6 +78,26 @@ enum CalibrationMath {
         return gain.isFinite && gain > 0 ? gain : nil
     }
 
+    /// Canvas height in points needed to render `span` mV at `gain` mm/mV.
+    ///
+    /// The inverse of `millivoltHalfSpan`, and the direction a floor has to be
+    /// computed in: a canvas shorter than this cannot show that mV range at
+    /// that gain, so either the gain drops below standard or the range is
+    /// clipped. Both make the graticule decorative — the trace stops being
+    /// something an amplitude can be read off by eye, which is the whole
+    /// reason the app draws to mm in the first place. nil for degenerate
+    /// input, so a display whose physical size cannot be trusted falls back
+    /// to the fixed floor rather than a computed nonsense one.
+    static func canvasHeightPoints(
+        millivoltSpan span: Double,
+        gainMillimetersPerMillivolt gain: Double,
+        millimetersPerPoint mmPerPoint: Double
+    ) -> Double? {
+        guard span > 0, gain > 0, mmPerPoint > 0 else { return nil }
+        let height = span * gain / mmPerPoint
+        return height.isFinite && height > 0 ? height : nil
+    }
+
     /// Viewport width in samples that renders `speed` mm/s across a canvas
     /// `widthPoints` wide. nil for degenerate input — the caller then leaves
     /// the viewport alone rather than snapping to a nonsense width.

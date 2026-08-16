@@ -93,4 +93,26 @@ public enum BedsideGeometry {
     /// pins that. A view wider than this draws past the stage and under the
     /// review-queue inspector, which is #205.
     public static let dockedColumnWidth: CGFloat = 186
+
+    /// The mV range the focus canvas must be able to show **at standard gain
+    /// (10 mm/mV)**, and therefore the number that sets the canvas's minimum
+    /// height in points on any given display.
+    ///
+    /// This is a CLINICAL parameter, not a layout one. It is the promise the
+    /// graticule makes: that a reader can measure an amplitude off the screen
+    /// the way they would off paper. A canvas too short to keep it forces the
+    /// app to either drop below 10 mm/mV or clip the range — and a trace drawn
+    /// at 83% of standard gain (measured on Xcode Cloud's short VM, #277) is
+    /// not a smaller version of the right answer, it is the wrong one.
+    ///
+    /// 3.0 mV covers ordinary diagnostic morphology centred on the baseline
+    /// (roughly −1.0 to +2.0). It does NOT cover every pathological R wave;
+    /// those still need the amplitude control, which is why fitting amplitude
+    /// remains available as an explicit choice rather than a silent fallback.
+    ///
+    /// Height in points is display-dependent by construction — the same 3 mV
+    /// needs more points on a denser display — which is exactly why a fixed
+    /// point count could never have been right. See
+    /// `CalibrationMath.canvasHeightPoints`.
+    public static let minimumMillivoltSpanAtStandardGain: Double = 3.0
 }

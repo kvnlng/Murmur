@@ -1723,6 +1723,49 @@ struct CalibrationMathTests {
         #expect(abs((half ?? 0) - 3.6) < 1e-9)
     }
 
+    @Test("Canvas height is the height that renders the span at the gain")
+    func canvasHeightForSpan() {
+        // 3 mV at 10 mm/mV is 30 mm; at 0.2 mm/pt that is 150 pt.
+        let height = CalibrationMath.canvasHeightPoints(
+            millivoltSpan: 3, gainMillimetersPerMillivolt: 10, millimetersPerPoint: 0.2
+        )
+        #expect(height != nil)
+        #expect(abs((height ?? 0) - 150) < 1e-9)
+    }
+
+    /// The property that matters clinically: a canvas built to this height
+    /// really does render the span at the gain. Pins the two directions
+    /// against each other rather than restating one of their formulas — the
+    /// #205/#208 lesson about parallel arithmetic drifting.
+    @Test("Canvas height and half-span are inverses at standard gain")
+    func canvasHeightRoundTripsWithHalfSpan() {
+        let gain = CalibrationReading.standardMillimetersPerMillivolt
+        for mmPerPoint in [0.35, 0.2635, 0.174, 0.09] {
+            let span = BedsideGeometry.minimumMillivoltSpanAtStandardGain
+            guard let height = CalibrationMath.canvasHeightPoints(
+                    millivoltSpan: span,
+                    gainMillimetersPerMillivolt: gain,
+                    millimetersPerPoint: mmPerPoint),
+                  let half = CalibrationMath.millivoltHalfSpan(
+                    gainMillimetersPerMillivolt: gain,
+                    canvasHeightPoints: height,
+                    millimetersPerPoint: mmPerPoint)
+            else {
+                Issue.record("no answer at \(mmPerPoint) mm/pt")
+                continue
+            }
+            #expect(abs(half * 2 - span) < 1e-9,
+                    "A \(height) pt canvas at \(mmPerPoint) mm/pt shows \(half * 2) mV at standard gain, not \(span)")
+        }
+    }
+
+    @Test("Canvas height rejects degenerate inputs")
+    func canvasHeightDegenerate() {
+        #expect(CalibrationMath.canvasHeightPoints(millivoltSpan: 0, gainMillimetersPerMillivolt: 10, millimetersPerPoint: 0.2) == nil)
+        #expect(CalibrationMath.canvasHeightPoints(millivoltSpan: 3, gainMillimetersPerMillivolt: 0, millimetersPerPoint: 0.2) == nil)
+        #expect(CalibrationMath.canvasHeightPoints(millivoltSpan: 3, gainMillimetersPerMillivolt: 10, millimetersPerPoint: 0) == nil)
+    }
+
     @Test("mV half-span rejects degenerate inputs")
     func millivoltHalfSpanDegenerate() {
         #expect(CalibrationMath.millivoltHalfSpan(gainMillimetersPerMillivolt: 0, canvasHeightPoints: 360, millimetersPerPoint: 0.2) == nil)
