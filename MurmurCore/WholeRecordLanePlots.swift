@@ -214,10 +214,42 @@ struct LFHFLanePlot: View {
         return out
     }
 
+    /// Ribbon runs (#262): contiguous banded samples, split by the SAME
+    /// time-adjacency rule as the line — and further wherever a sample
+    /// carries no band, so the ribbon breaks while the line continues.
+    /// A ribbon bridging either kind of gap would fabricate spread
+    /// nobody computed.
+    private var bandedRuns: [[VariabilityLaneSample]] {
+        var out: [[VariabilityLaneSample]] = []
+        var current: [VariabilityLaneSample] = []
+        var previousCenter: Double?
+        for sample in samples.filter(\.isEligible) {
+            let center = sample.windowCenterSeconds
+            let adjacent = previousCenter.map { center - $0 <= stepSeconds * 1.5 } ?? true
+            if sample.band == nil || !adjacent {
+                if !current.isEmpty { out.append(current) }
+                current = []
+            }
+            if sample.band != nil { current.append(sample) }
+            previousCenter = center
+        }
+        if !current.isEmpty { out.append(current) }
+        return out
+    }
+
     /// Autoscale padded so a flat series doesn't hug an edge — the same
-    /// rule the Canvas renderer used.
+    /// rule the Canvas renderer used. Covers the band extremes as well
+    /// as the line (#262): a ribbon clipped at the plot edge reads as
+    /// saturation, a claim the data never made.
     private var yDomain: ClosedRange<Double> {
-        let values = samples.filter(\.isEligible).map(\.value)
+        let eligible = samples.filter(\.isEligible)
+        var values = eligible.map(\.value)
+        for s in eligible {
+            if let band = s.band {
+                values.append(band.p5)
+                values.append(band.p95)
+            }
+        }
         guard let lo = values.min(), let hi = values.max() else { return 0...1 }
         let pad = Swift.max((hi - lo) * 0.1, 0.05)
         return (lo - pad)...(hi + pad)
@@ -225,6 +257,39 @@ struct LFHFLanePlot: View {
 
     var body: some View {
         Chart {
+            // The 13a percentile ribbon (#262), drawn FIRST so the
+            // median line stays legible on top of it — the same layering
+            // as the RMSSD lane's ribbon.
+            ForEach(bandedRuns.indices, id: \.self) { idx in
+                ForEach(bandedRuns[idx]) { sample in
+                    if let band = sample.band {
+                        AreaMark(
+                            x: .value("t", sample.windowCenterSeconds),
+                            yStart: .value("p25", band.p25),
+                            yEnd: .value("p75", band.p75),
+                            series: .value("band-run", "iqr-\(idx)")
+                        )
+                        .interpolationMethod(.linear)
+                        .foregroundStyle(Color.accentColor.opacity(0.16))
+                        LineMark(
+                            x: .value("t", sample.windowCenterSeconds),
+                            y: .value("p5", band.p5),
+                            series: .value("band-run", "p5-\(idx)")
+                        )
+                        .interpolationMethod(.linear)
+                        .lineStyle(StrokeStyle(lineWidth: 0.8, dash: [3, 2]))
+                        .foregroundStyle(Color.accentColor.opacity(0.55))
+                        LineMark(
+                            x: .value("t", sample.windowCenterSeconds),
+                            y: .value("p95", band.p95),
+                            series: .value("band-run", "p95-\(idx)")
+                        )
+                        .interpolationMethod(.linear)
+                        .lineStyle(StrokeStyle(lineWidth: 0.8, dash: [3, 2]))
+                        .foregroundStyle(Color.accentColor.opacity(0.55))
+                    }
+                }
+            }
             ForEach(runs.indices, id: \.self) { idx in
                 ForEach(runs[idx]) { sample in
                     LineMark(
