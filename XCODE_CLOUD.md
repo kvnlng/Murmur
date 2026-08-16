@@ -6,8 +6,8 @@ plan captured in `ROADMAP.md`.
 
 Xcode Cloud is free for paid Apple Developer Program members up to a
 generous compute-hour cap. For this project the day-to-day load is
-small — tests run on push, archives run on tags — and we're nowhere
-near the cap.
+small — every run is started by hand, so nothing accumulates on its
+own — and we're nowhere near the cap.
 
 ## Prerequisites
 
@@ -37,80 +37,54 @@ need an API key; see "Reading results from the terminal" below.
 5. After the repo connects, Xcode Cloud creates a default workflow.
    Edit it.
 
-## Workflow: test on every push to main
+## The workflows, as they are actually configured
 
-**Name:** `Test on main`
+Read from the API rather than from memory — an earlier version of this
+file described two workflows by names that do not exist, with start
+conditions that had been removed. Re-read it the same way before
+trusting it:
 
-**Start conditions:**
-- Branch: **main**
-- Start: **Branch changes**
-- Files and folders changed: (leave empty — run on every push)
+```
+scripts/xcode-cloud.rb get /v1/ciProducts/<product-id>/workflows
+```
 
-**Environment:**
-- Xcode: **Latest Release**
-- macOS: **Latest Release** (the test action's matrix below will
-  also add older versions)
+**`Default`** — enabled. Actions: **Test — macOS** (scheme `Murmur`,
+which picks up both unit and UI suites via the `Murmur` test plan) and
+**Archive — macOS** (`ANY_MAC`). This is the one to start for a normal
+verification run; it both tests and archives.
 
-**Actions:**
+**`Release Build`** — enabled. Actions: **Archive** only.
 
-1. **Test** action
-   - Scheme: `Murmur`
-   - Destination: configure the matrix:
-     - **macOS, Latest Release** (Tahoe 26 / current)
-     - **macOS, Sequoia 15.x** (if available — gives one-version-back coverage)
-     - Skip **Sonoma 14.x** unless we lower the deployment target
-       (currently `MACOSX_DEPLOYMENT_TARGET = 26.5` in pbxproj, so
-       older OSes won't even install the build — confirm in the
-       Murmur target's Build Settings before adding older
-       destinations)
-   - Test plan: the default `Murmur` plan picks up both unit and UI
-     suites
+**Both are manual-start.** Neither carries a branch, tag, pull-request,
+or scheduled start condition — `manualBranchStartCondition` matching all
+branches is the only condition on either. Nothing in this repository
+triggers a build by being pushed, tagged, or merged.
 
-**Post-actions:**
-- **Notify** → Email on success and failure to `long.kevin@gmail.com`
+That is a deliberate choice: a run should happen when the work is ready
+to be judged. It does mean nothing is watching, so a regression sits
+undiscovered until someone starts a build.
 
-**Save.**
+### If you are setting this up from scratch
 
-## Workflow: archive + TestFlight on git tag
+In App Store Connect the workflow editor covers environment (Xcode and
+macOS both **Latest Release**), actions, and post-actions — email
+notification to `long.kevin@gmail.com` is set on completion.
 
-**Name:** `Archive on tag`
-
-**Start conditions:**
-- Tag: **Any Tag** matching `v*` (we tag releases as `v1.1`, `v1.2`,
-  etc. per RELEASE.md)
-- Start: **Tag changes**
-
-**Environment:** Latest Release / Latest Release.
-
-**Actions:**
-
-1. **Test** — same as the push workflow, but only on the latest macOS
-   (don't burn matrix runs on releases)
-2. **Archive** action
-   - Scheme: `Murmur`
-   - Distribution: **App Store Connect**
-   - Deployment preparation: **TestFlight Internal Testing**
-
-**Post-actions:**
-- **TestFlight Internal Testing** — distributes to the internal
-  tester group you set up earlier
-- **Notify** → Email on completion
-
-**Save.**
+One constraint worth knowing before adding an OS matrix: the deployment
+target is `MACOSX_DEPLOYMENT_TARGET = 26.5` in the pbxproj, so older
+macOS versions will not install the build at all. Confirm the target in
+the Murmur target's Build Settings before adding older destinations.
 
 ## What's automatic from here
 
-Once both workflows are saved:
+Nothing. That is the whole answer, and this section used to say the
+opposite in both directions.
 
-- The test workflow is **started manually**, not on every push to
-  `main`. The branch-changes start condition was removed deliberately:
-  a run should happen when the work is ready to be judged, not on every
-  commit that lands. Start one with `scripts/xcode-cloud.rb start
-  <branch>` (below), or from App Store Connect. Test runs take ~5–10
-  minutes per OS-version.
-- Every `v*` tag triggers an archive that lands in TestFlight
-  automatically. The smoke-test checklist in `RELEASE.md` still
-  applies — Xcode Cloud just removes the manual upload step.
+Neither workflow has an automatic start condition. Pushing to `main`
+starts nothing; tagging `v1.1` starts nothing; opening a pull request
+starts nothing. A build happens when a person asks for one, via
+`scripts/xcode-cloud.rb start <branch>` or App Store Connect. A test run
+takes ~5–10 minutes per OS-version.
 
 Because runs are manual, a branch's tests are only exercised on the
 runner when someone asks — and Xcode Cloud does not run on pull
@@ -130,11 +104,14 @@ section in `RELEASE.md` simplifies to:
 
 1. Bump version numbers (still manual)
 2. `git tag v1.1 && git push --tags`
-3. Wait for the Xcode Cloud archive email (~10–15 min)
+3. **Start the archive yourself** — `scripts/xcode-cloud.rb start main
+   "Release Build"`. The tag does not trigger it; `Release Build` has no
+   tag start condition. Wait for the archive email (~10–15 min).
 4. Smoke-test the build in the TestFlight app
 5. Promote in App Store Connect when ready
 
-No more Product → Archive → Organizer → Distribute clicks.
+No more Product → Archive → Organizer → Distribute clicks — but step 3
+is a step, not a consequence of step 2.
 
 ## Cost / quota notes
 
