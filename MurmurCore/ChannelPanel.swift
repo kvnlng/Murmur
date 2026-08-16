@@ -51,7 +51,13 @@ struct ChannelPanel: View {
         /// smallest window-height the analyst is likely to ever want.
         case focus
 
-        var canvasMinHeight: CGFloat {
+        /// Fallback floor, in points, for when the display's physical size
+        /// cannot be substantiated. The real focus floor is derived from the
+        /// display — see `ChannelPanel.canvasMinHeight` — because the height
+        /// needed to draw 3 mV at 10 mm/mV depends on how big a point is.
+        /// These are the pre-#277 constants, kept as the honest fallback
+        /// rather than a computed number nothing measured.
+        var canvasMinHeightFallback: CGFloat {
             switch self {
             case .strip: return 130
             case .focus: return 360
@@ -162,12 +168,33 @@ struct ChannelPanel: View {
     private static let yMin: Double = -5
     private static let yMax: Double =  5
 
+    /// The canvas's minimum height, in points, on THIS display.
+    ///
+    /// A hard floor, deliberately. The window may widen as side columns are
+    /// dismissed and it may grow taller, but it may not shrink the trace below
+    /// the height at which `minimumMillivoltSpanAtStandardGain` still renders
+    /// at 10 mm/mV — otherwise the mV and time graticule stops being something
+    /// a reader can measure against, and the trace is just lines.
+    ///
+    /// Strips keep their fixed floor: they are a scan surface, not a
+    /// measurement one, and the calibration readout is a focus-mode surface.
+    private var canvasMinHeight: CGFloat {
+        guard sizing == .focus,
+              let mmPerPoint = DisplayMetrics.millimetersPerPoint(),
+              let required = CalibrationMath.canvasHeightPoints(
+                  millivoltSpan: BedsideGeometry.minimumMillivoltSpanAtStandardGain,
+                  gainMillimetersPerMillivolt: CalibrationReading.standardMillimetersPerMillivolt,
+                  millimetersPerPoint: mmPerPoint)
+        else { return sizing.canvasMinHeightFallback }
+        return max(sizing.canvasMinHeightFallback, CGFloat(required))
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             header
             HStack(alignment: .top, spacing: 0) {
                 WaveformVoltageAxis(yMin: displayRange.lowerBound, yMax: displayRange.upperBound, durationSeconds: durationSeconds)
-                    .frame(minHeight: sizing.canvasMinHeight)
+                    .frame(minHeight: canvasMinHeight)
                 canvasArea
             }
             .frame(maxHeight: sizing.expands ? .infinity : nil)
@@ -695,7 +722,7 @@ struct ChannelPanel: View {
                 publishCalibrationGeometry(canvasSize: liveSize)
             }
         }
-        .frame(minHeight: sizing.canvasMinHeight, maxHeight: sizing.expands ? .infinity : nil)
+        .frame(minHeight: canvasMinHeight, maxHeight: sizing.expands ? .infinity : nil)
     }
 
     // MARK: Hover hit-testing
