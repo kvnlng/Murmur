@@ -383,6 +383,43 @@ final class SnapshotTests: XCTestCase {
                        as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 
+    func testLFHFLanePlot_withPercentileRibbon() {
+        // #262: filled p25–p75 + dashed p5/p95 around the ratio line.
+        // Three regions prove the run rules: banded samples (ribbon),
+        // a band-less stretch (line continues, ribbon breaks), and the
+        // mid-series hole (both break). The band widens with time so
+        // the fill is visibly distinct from the line's own drift.
+        let samples: [VariabilityLaneSample] = (0..<30).compactMap { i in
+            if (12...14).contains(i) { return nil }   // the hole
+            let t = Double(i) * 60.0
+            let v = 1.2 + 0.8 * sin(Double(i) * 0.5)
+            let spread = 0.15 + Double(i) * 0.02
+            let band: VariabilityLaneBand? = (20...24).contains(i) ? nil : VariabilityLaneBand(
+                p5: v - spread * 1.8,
+                p25: v - spread,
+                p75: v + spread,
+                p95: v + spread * 1.8
+            )
+            return VariabilityLaneSample(
+                windowStartSeconds: t - 150,
+                windowEndSeconds: t + 150,
+                value: v,
+                isEligible: true,
+                band: band
+            )
+        }
+        let view = LFHFLanePlot(
+            samples: samples,
+            recordingRange: 0...1800,
+            stepSeconds: 60
+        )
+        .frame(width: 520, height: 86)
+        .padding()
+        .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 552, height: 118)),
+                       as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
     func testVariabilityLane_withHoverHighlight() {
         // Same 30-sample sinusoid as the all-eligible case but with an
         // externalHoverTimeSeconds pinned in the middle. Baseline
