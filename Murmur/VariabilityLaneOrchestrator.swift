@@ -45,6 +45,11 @@ struct VariabilityLaneOrchestrator: View {
     /// floor and renders dimmed on the lane. Matches the default
     /// documented in `project_variability_lane_design.md`.
     private static let maxArtifactFraction: Double = 0.20
+    /// 13a ribbon sub-window width. 1 min against the 5-min default
+    /// window gives 49 sub-values per band at the computer's 5 s
+    /// sub-step — the "spread of the indicator itself" decision on
+    /// #261 (2026-08-16).
+    private static let bandSubWindowSeconds: Double = 60
 
     /// Task key that changes whenever recompute is warranted. Includes
     /// the recording identity, the entitlement flag, and the lane
@@ -111,14 +116,22 @@ struct VariabilityLaneOrchestrator: View {
             stepSeconds: stepSeconds,
             minimumBeatCount: Self.minimumBeatCount,
             artifactMask: artifactMask,
-            maxArtifactFraction: Self.maxArtifactFraction
+            maxArtifactFraction: Self.maxArtifactFraction,
+            // 13a ribbon (#261): percentiles of 1-min sub-window RMSSD
+            // inside each window. The computer opts itself out when the
+            // sub-window isn't strictly narrower than the window, which
+            // is exactly the 1-min preset's case — no gating needed here.
+            bandSubWindowSeconds: Self.bandSubWindowSeconds
         )
         let laneSamples: [VariabilityLaneSample] = rolling.map { s in
             VariabilityLaneSample(
                 windowStartSeconds: s.windowStartSeconds,
                 windowEndSeconds: s.windowEndSeconds,
                 value: s.value,
-                isEligible: s.meetsMinimum
+                isEligible: s.meetsMinimum,
+                band: s.band.map {
+                    VariabilityLaneBand(p5: $0.p5, p25: $0.p25, p75: $0.p75, p95: $0.p95)
+                }
             )
         }
         if laneSamples.isEmpty {
@@ -128,7 +141,11 @@ struct VariabilityLaneOrchestrator: View {
                 samples: laneSamples,
                 metricLabel: Self.metricLabel,
                 unit: Self.metricUnit,
-                windowCaption: makeCaption(windowSeconds: windowSeconds, stepSeconds: stepSeconds)
+                windowCaption: makeCaption(
+                    windowSeconds: windowSeconds,
+                    stepSeconds: stepSeconds,
+                    hasBands: laneSamples.contains { $0.band != nil }
+                )
             )
         }
     }
@@ -137,7 +154,7 @@ struct VariabilityLaneOrchestrator: View {
     /// echoed into the lane header. Also the string "Copy citation"
     /// emits for the lane's active config per the citation-strategy
     /// memory.
-    private func makeCaption(windowSeconds: Double, stepSeconds: Double) -> String {
+    private func makeCaption(windowSeconds: Double, stepSeconds: Double, hasBands: Bool) -> String {
         let windowText: String = {
             if windowSeconds >= 60 && windowSeconds.truncatingRemainder(dividingBy: 60) == 0 {
                 return "\(Int(windowSeconds / 60))-min window"
@@ -150,6 +167,14 @@ struct VariabilityLaneOrchestrator: View {
             }
             return String(format: "%.0f s step", stepSeconds)
         }()
-        return "\(windowText) · \(stepText)"
+        // The band is provenance-labelled where it renders (#261): the
+        // ribbon summarizes 1-min sub-window RMSSD, and a band whose
+        // population isn't stated invites reading it as a confidence
+        // interval, which it is not. DATA-driven, not config-driven —
+        // the caption may only advertise a band some sample actually
+        // carries, which also makes the caption the end-to-end UI
+        // assertion surface for the whole compute → map → render chain.
+        let bandText: String? = hasBands ? "1-min band" : nil
+        return ([windowText, stepText, bandText].compactMap { $0 }).joined(separator: " · ")
     }
 }

@@ -67,9 +67,10 @@ public final class IntervalTrendLaneContext {
         didSet { persist() }
     }
 
-    /// How to render each bin (median-only / median+IQR / per-beat
-    /// scatter). Default is median+IQR — the spec's "visible honesty
-    /// beats false precision" call.
+    /// How to render each bin. Default is dot-and-range (13a, #261) —
+    /// one independent mark per bin, whose thin range segment is the
+    /// only rendering that shows a threshold excursion the bin median
+    /// hides. A persisted analyst choice always wins over the default.
     public var showMode: IntervalTrendShowMode {
         didSet { persist() }
     }
@@ -96,10 +97,12 @@ public final class IntervalTrendLaneContext {
         self.metric = IntervalTrendMetric(rawValue: metricRaw) ?? .qtc
         let binRaw = defaults.string(forKey: Keys.bin) ?? IntervalTrendBinPreset.twoMinute.rawValue
         self.binPreset = IntervalTrendBinPreset(rawValue: binRaw) ?? .twoMinute
-        // X88: the default read is a plain median line, matching the other
-        // location-finder lanes; the ribbons live behind "median + IQR".
-        let modeRaw = defaults.string(forKey: Keys.showMode) ?? IntervalTrendShowMode.medianOnly.rawValue
-        self.showMode = IntervalTrendShowMode(rawValue: modeRaw) ?? .medianOnly
+        // 13a (#261) supersedes X88's plain-line default: bins are
+        // independent measurements and render as independent marks.
+        // Only the fallback moved — an analyst's persisted pick still
+        // decodes and wins.
+        let modeRaw = defaults.string(forKey: Keys.showMode) ?? IntervalTrendShowMode.dotAndRange.rawValue
+        self.showMode = IntervalTrendShowMode(rawValue: modeRaw) ?? .dotAndRange
         let cv = defaults.object(forKey: Keys.rrCVFlag) as? Double
             ?? Self.defaultRRCVFlagPercent
         self.rrCVFlagPercent = min(max(cv, 0), 100)
