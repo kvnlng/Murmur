@@ -7832,9 +7832,11 @@ struct BeatDelineatorPVCTests {
 // Two layers, tested where each lives. The SLICER (`RollingWindows`) is
 // MurmurCore and needs no metrics import. The per-window SPECTRUM is
 // `FrequencyDomainHRVAnalyzer` (public package API, fair game per the note
-// at the top of this section); the composition test drives the analyzer over
-// placed windows exactly as `RollingLFHFOrchestrator.computeSeries` does —
-// the orchestrator itself is App-target code MurmurTests cannot link.
+// at the top of this section). The COMPOSITION moved into MurmurMetrics
+// with #262 (`RollingLFHFSeriesComputer`, tested in the extensions repo) —
+// until then it lived in the app-target orchestrator this suite cannot
+// link, and these tests were its only, indirect, coverage. They stay as
+// the analyzer-semantics guard (windows use only their own beats).
 
 /// RR tachogram whose intervals oscillate at `modulationHz` — spectral power
 /// concentrates there, so a window over this series has a KNOWN dominant

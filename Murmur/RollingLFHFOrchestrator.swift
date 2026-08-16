@@ -11,10 +11,14 @@
 //  Same pattern and boundary as `VariabilityLaneOrchestrator`: the App target
 //  is the only place MurmurCore and MurmurMetrics meet, so it owns the
 //  entitlement gate — the free viewer never sees the lane because the series
-//  is simply never computed without the entitlement. The SPECTRUM itself
-//  stays `FrequencyDomainHRVAnalyzer`'s; this file owns only the windowing,
-//  which is the same slicing the QTVI summary already does in
-//  `VariabilityMetricsOrchestrator`.
+//  is simply never computed without the entitlement.
+//
+//  The windowing moved into MurmurMetrics with #262
+//  (`RollingLFHFSeriesComputer`, Murmur-Extensions v0.27.0): this file's
+//  window loop was App-target code MurmurTests cannot link, so it was only
+//  ever covered by a parallel reconstruction — and both paid rolling lanes
+//  now share one set of placement rules. What remains here is extraction,
+//  the entitlement gate, and the sample/caption mapping.
 //
 //  A window the analyzer declines — too few clean beats, zero variance,
 //  under 20 s of span — is simply absent from the series. The lane draws a
@@ -23,7 +27,8 @@
 //
 //  Unlike the RMSSD lane this computes OFF the main actor: a 72 h record at
 //  a 1-minute step is ~4,300 Lomb–Scargle windows, three orders of magnitude
-//  more arithmetic than the O(N) rolling time-domain pass.
+//  more arithmetic than the O(N) rolling time-domain pass — more still with
+//  the ~13 sub-window re-estimates each band adds.
 //
 
 import Foundation
@@ -41,6 +46,12 @@ struct RollingLFHFOrchestrator: View {
     /// Task Force's short-term analysis length.
     static let windowSeconds: Double = 300
     static let stepSeconds: Double = 60
+    /// 13a ribbon sub-window width (#262). 2 min, not the RMSSD band's
+    /// 1 min: the LF floor is 0.04 Hz, and a sub-window much under two
+    /// minutes holds too few LF cycles for the re-estimate to mean
+    /// anything — the same Task Force reasoning that puts the parent
+    /// window at five.
+    static let bandSubWindowSeconds: Double = 120
 
     private struct Key: Hashable {
         let recordingID: UUID?
@@ -93,47 +104,50 @@ struct RollingLFHFOrchestrator: View {
         if samples.isEmpty {
             lfhfContext.clear()
         } else {
+            // The band is provenance-labelled where it renders (#262,
+            // same rule as the RMSSD caption): DATA-driven, advertised
+            // only when some computed sample actually carries one — a
+            // band whose population isn't stated invites reading it as
+            // a confidence interval, which it is not. Short records
+            // legitimately band nothing (a 5-min window over 3 min of
+            // data fits 5 of the 8 required sub-estimates) and their
+            // caption says nothing.
+            let hasBands = samples.contains { $0.band != nil }
             lfhfContext.set(
                 samples: samples,
-                caption: RollingLFHFContext.provenanceCaption
+                caption: hasBands
+                    ? RollingLFHFContext.provenanceCaption + " · 2-min band"
+                    : RollingLFHFContext.provenanceCaption
             )
         }
     }
 
-    /// Slice the RR series into rolling windows (`RollingWindows.place`, the
-    /// unit-tested slicer in MurmurCore) and run the frequency-domain
-    /// analyzer on each. A window yields a sample only when the analyzer
-    /// returns an LF/HF ratio — the analyzer owns every validity rule (min
-    /// beats, min span, zero variance, artifact exclusion), and duplicating
-    /// any of them here is how two copies diverge.
+    /// Run the tested composition (`RollingLFHFSeriesComputer`, v0.27.0)
+    /// and map its samples onto the lane's wire type. The analyzer owns
+    /// every validity rule and the computer owns the windowing; this
+    /// mapping is deliberately the only code left on this side.
     nonisolated static func computeSeries(
         rr: RRSeries,
         windowSeconds: Double,
         stepSeconds: Double
     ) async -> [VariabilityLaneSample] {
-        let windows = RollingWindows.place(
-            timesSeconds: rr.endTimesSeconds,
+        let rolling = RollingLFHFSeriesComputer.compute(
+            series: rr,
             windowSeconds: windowSeconds,
-            stepSeconds: stepSeconds
+            stepSeconds: stepSeconds,
+            bandSubWindowSeconds: Self.bandSubWindowSeconds,
+            shouldContinue: { !Task.isCancelled }
         )
-        var out: [VariabilityLaneSample] = []
-        out.reserveCapacity(windows.count)
-        for window in windows {
-            if Task.isCancelled { return [] }
-            let slice = RRSeries(
-                intervalsMs: Array(rr.intervalsMs[window.indices]),
-                endTimesSeconds: Array(rr.endTimesSeconds[window.indices])
+        return rolling.map { s in
+            VariabilityLaneSample(
+                windowStartSeconds: s.windowStartSeconds,
+                windowEndSeconds: s.windowEndSeconds,
+                value: s.value,
+                isEligible: s.meetsMinimum,
+                band: s.band.map {
+                    VariabilityLaneBand(p5: $0.p5, p25: $0.p25, p75: $0.p75, p95: $0.p95)
+                }
             )
-            if let fd = FrequencyDomainHRVAnalyzer.analyze(rr: slice),
-               let ratio = fd.lfhfRatio {
-                out.append(VariabilityLaneSample(
-                    windowStartSeconds: window.startSeconds,
-                    windowEndSeconds: window.endSeconds,
-                    value: ratio,
-                    isEligible: true
-                ))
-            }
         }
-        return out
     }
 }
