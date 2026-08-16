@@ -152,6 +152,33 @@ automatic SPM resolution, so a missing resolved file fails the build
 with "a resolved file is required". The `.gitignore` has an explicit
 note about this.
 
+## Why the test plan retries
+
+`Murmur.xctestplan` sets `testRepetitionMode: retryOnFailure` with
+`maximumTestRepetitions: 3`. The plan is JSON and cannot carry a
+comment, so the reasoning lives here.
+
+The hosted runner is an `Apple Virtual Machine`, and UI tests time
+differently there than on real hardware. Across seven consecutive Cloud
+failures the pattern was always the same: one or two UI tests fail, a
+*different* pair each time, and every one of them passes locally on
+repeat runs. Build 138's two failures
+(`testAPinnedBeatCardSurvivesThePointerLeavingTheTrace`,
+`testAbstentionNullStateAndManualCaliperOverride`) each passed 3/3
+locally and had never failed on Cloud before. With no retry policy, a
+single such flake failed the whole build and burned a re-run of the
+quota.
+
+Retries only fire on failure, so the green path costs nothing.
+
+**The cost, stated plainly:** a real regression that fails
+intermittently will now be retried into a pass and go unnoticed. That
+is a deliberate trade — made because the observed failures were all
+flakes and none were real. If a test starts needing its retries to go
+green, that is a signal to investigate, not to raise the repetition
+count. `scripts/xcode-cloud.rb` is how you check whether a passing
+build needed retries to get there.
+
 ## Reading results from the terminal
 
 The failure email and the GitHub check-run summary give you the

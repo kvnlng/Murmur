@@ -12,12 +12,14 @@
     "codeCoverage" : false,
     "defaultTestExecutionTimeAllowance" : 300,
     "maximumTestExecutionTimeAllowance" : 600,
+    "maximumTestRepetitions" : 3,
     "performanceAntipatternCheckerEnabled" : true,
     "targetForVariableExpansion" : {
       "containerPath" : "container:Murmur.xcodeproj",
       "identifier" : "0A9B42CE2FDF06BA0059C903",
       "name" : "Murmur"
     },
+    "testRepetitionMode" : "retryOnFailure",
     "testTimeoutsEnabled" : true
   },
   "testTargets" : [
