@@ -240,9 +240,9 @@ dismissed ones.
 
 | Component | Role |
 |---|---|
-| `WelcomeView` | First-launch card on a faint ECG-paper backdrop. Recents, Try-a-sample, drop-a-folder, and a PhysioNet link. |
+| `LaunchShellView` | The no-record launch shell (#242): an idle flatline over one inline `Open Record Folder…` line. Recents live in File ▸ Open Recent. |
 | `RecentFoldersStore` | Persists up to 10 security-scoped bookmarks to `UserDefaults` so a sandboxed app can re-open a folder next launch. |
-| `ContentView` | App root. Picks between `WelcomeView` (empty), browsing shell (sidebar + detail), and direct-view shell. |
+| `ContentView` | App root. Picks between `LaunchShellView` (empty), browsing shell (sidebar + detail), and direct-view shell. |
 
 The overview ribbon is the one piece in the bedside still using Swift
 Charts, alongside `ChannelTrendStrip`. Both are tiny widgets; replacing

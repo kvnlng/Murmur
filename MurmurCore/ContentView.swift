@@ -422,28 +422,26 @@ public struct ContentView: View {
 
     // MARK: - Shells
 
+    // #242 / 12a: the launch shell. The welcome card that used to render
+    // here is gone — see LaunchShellView's header for the product call and
+    // what happened to each of the card's entry points. Recents live in
+    // File ▸ Open Recent; drag-a-folder and the sample recording were
+    // removed deliberately.
     private var emptyShell: some View {
         NavigationStack {
-            WelcomeView(
-                onOpenFolder: { isImporterPresented = true },
-                onTrySample: sampleAction,
-                recents: recentsStore.entries,
-                onPickRecent: { reopen($0) },
-                onRemoveRecent: { recentsStore.remove($0) },
-                onDropFolder: { openFolder($0) }
-            )
-            .navigationTitle("Murmur")
-            .toolbar(id: MurmurToolbar.identifier) { overflowToolbarItems }
+            LaunchShellView(onOpenFolder: { isImporterPresented = true })
+                .navigationTitle("Murmur")
+                .toolbar(id: MurmurToolbar.identifier) { overflowToolbarItems }
         }
     }
 
-    /// Welcome view's secondary "Try a sample recording" action. Synthesizes
-    /// a small 8-lead WFDB record on demand so first-launch users have an
-    /// instant on-ramp without hunting down a PhysioNet record first.
-    private var sampleAction: (() -> Void)? {
-        { loadSampleFixture() }
-    }
-
+    #if DEBUG
+    /// DEBUG-only since #242: the welcome card's "Try a sample recording"
+    /// button was the last user-reachable caller. The whole UI suite still
+    /// launches through this via `--ui-test-sample`, so the function must
+    /// survive — but a Release ARCHIVE must not compile an uncalled path
+    /// whose only remaining caller sits inside `#if DEBUG` (the exact
+    /// archive-time trap documented on `richVariantParameters` below).
     private func loadSampleFixture() {
         do {
             let directory = try SyntheticRecording.makeFixture()
@@ -453,6 +451,7 @@ public struct ContentView: View {
             errorMessage = error.localizedDescription
         }
     }
+    #endif
 
     #if DEBUG
     // Test-fixture plumbing only — `UITestSupport` (and these two helpers'

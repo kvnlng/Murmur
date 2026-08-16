@@ -321,45 +321,10 @@ final class MurmurUIBypassTests: XCTestCase {
                               "mailto:long.kevin@gmail.com?subject=Murmur%20Studio%20Support")
     }
 
-    @MainActor
-    func testPhysioNetLinkTargetsMITBIH() throws {
-        // Guards: welcome-screen PhysioNet button → URLLauncher path.
-        // Different from the Help menu items because the trigger is a
-        // SwiftUI Button in the WelcomeView, not a Command — which also makes
-        // it the only URL test that clicks INSIDE the window rather than
-        // through `app.menuItems`. What Cloud reported was a click XCUI was
-        // happy with and a probe still '' three seconds later; the activation
-        // mechanism in `clickInWindow` is the leading explanation for that,
-        // but read its status note — it is documented and plausible, not
-        // demonstrated. The scroll below is the part that is measured.
-        let app = XCUIApplication()
-        app.launchArguments += ["--ui-test-record-urls"]
-        app.launch()
-
-        let probe = app.descendants(matching: .any)
-            .matching(identifier: "ui-test-last-launched-url").firstMatch
-        XCTAssertTrue(probe.waitForExistence(timeout: 5))
-
-        // .buttonStyle(.link) makes SwiftUI render the Button as an AppKit
-        // link element, not a button — so search any descendant for the
-        // identifier rather than restricting to .buttons.
-        let physioNet = app.descendants(matching: .any)
-            .matching(identifier: "welcome-physionet-link").firstMatch
-        XCTAssertTrue(physioNet.waitForExistence(timeout: 5))
-        // The link is the LAST row of the welcome card, and the card is pushed
-        // down by however many recents the suite ahead of it left behind — so
-        // its reach is not a constant, and on a short window it goes past the
-        // fold. Scrolling first also drops the click from ~23 s to ~6 s, since
-        // XCUI's own scroll-into-view runs through the hit-test stall X98
-        // documents.
-        XCTAssertTrue(MurmurUITests.scrollUntilHittable(physioNet, in: app),
-                      "The PhysioNet link should scroll into view")
-        MurmurUITests.clickInWindow(physioNet, in: app)
-
-        let expected = "https://www.physionet.org/content/mitdb/1.0.0/"
-        let predicate = NSPredicate(format: "label == %@", expected)
-        let exp = XCTNSPredicateExpectation(predicate: predicate, object: probe)
-        XCTAssertEqual(XCTWaiter.wait(for: [exp], timeout: 3), .completed,
-                       "URLLauncher should record \(expected) for the PhysioNet link (was '\(probe.label)')")
-    }
+    // testPhysioNetLinkTargetsMITBIH was deleted with the welcome card
+    // (#242): the PhysioNet link's surviving route is Help ▸ Getting Started,
+    // whose URL is already pinned by testHelpGettingStartedTargetsDocsGettingStarted
+    // above — the docs page carries the MIT-BIH pointer in its Requirements.
+    // It was also the suite's only in-window URL click; every URL assertion
+    // now drives the menu bar, the surface that stays green on Cloud.
 }

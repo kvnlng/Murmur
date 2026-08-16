@@ -25,33 +25,25 @@ final class MurmurUITests: XCTestCase {
 
     @MainActor
     func testEmptyStateIsVisible() throws {
+        // #242 / 12a: the launch shell is one quiet line under a flatline —
+        // no card, no ScrollView, no recents above it. The identifiers are
+        // the welcome card's, deliberately, so this test survived the
+        // deletion: same contract, new chrome. The scroll dance that used
+        // to live here (steering against min(window.maxY, screenBottom))
+        // moved into `scrollUntilHittable`, where it always belonged.
         let app = XCUIApplication()
         app.launch()
 
         let prompt = app.staticTexts["empty-state-prompt"]
-        XCTAssertTrue(prompt.waitForExistence(timeout: 3), "Empty-state prompt should appear on cold launch")
+        XCTAssertTrue(prompt.waitForExistence(timeout: 3),
+                      "The launch shell's 'No record open' line should appear on cold launch")
 
-        let openButton = app.buttons["empty-state-open-button"]
-        XCTAssertTrue(openButton.exists, "Empty-state Open CSV button should be present")
-        // The welcome card is a ScrollView, and recents left by earlier
-        // suites render above it — on Cloud's short bare-launch window
-        // (production minimums on a 1024×768 VM, window bottom past the
-        // display) that pushed the button below the fold. A real user
-        // scrolls; so does the test — steered by frames against the
-        // smaller of window and screen bottom (per-tick isHittable on a
-        // clipped element is the X98 stall).
-        let welcomeScroll = app.scrollViews
-            .containing(.button, identifier: "empty-state-open-button").firstMatch
-        let screenBottom = NSScreen.main.map {
-            $0.frame.height - ($0.visibleFrame.minY - $0.frame.minY)
-        } ?? .greatestFiniteMagnitude
-        let visibleBottom = min(app.windows.firstMatch.frame.maxY, screenBottom)
-        for _ in 0..<20 {
-            if openButton.frame.maxY <= visibleBottom - 8 { break }
-            welcomeScroll.scroll(byDeltaX: 0, deltaY: -24)
-        }
+        let openButton = app.descendants(matching: .any)
+            .matching(identifier: "empty-state-open-button").firstMatch
+        XCTAssertTrue(openButton.exists, "The inline Open Record Folder action should be present")
         XCTAssertTrue(openButton.isHittable,
-                      "Empty-state Open CSV button should be hittable — button \(openButton.frame), window \(app.windows.firstMatch.frame)")
+                      "The launch shell centers its one action; nothing should ever push it past "
+                      + "the fold — button \(openButton.frame), window \(app.windows.firstMatch.frame)")
     }
 
     /// Opening a record folder stays reachable with NOTHING open — which is
@@ -309,35 +301,43 @@ final class MurmurUITests: XCTestCase {
     // MARK: - Tier 5b: recents
 
     @MainActor
-    func testClickingRecentFolderReopensRecording() throws {
-        // Guards: recents-row click → bookmark resolve → scanFolder →
-        // import → bedside-view. The launch arg seeds one entry in the
-        // recents store pointing at a synthetic WFDB source folder, then
-        // we click the row and assert the bedside view materialises.
+    func testOpeningARecentFolderReopensRecording() throws {
+        // Guards: recents entry → bookmark resolve → scanFolder → import →
+        // bedside-view. The launch arg seeds one entry in the recents store
+        // pointing at a synthetic WFDB source folder.
+        //
+        // #242 deleted the welcome card and its recents rows; File ▸ Open
+        // Recent (X22) is now the ONLY recents surface, so this drives it —
+        // which also retires this test's #232 history: it was the suite's
+        // canonical in-window-click victim, and menu-bar surfaces are the
+        // ones that have stayed green on Cloud throughout (#231/#232/#236).
         let app = XCUIApplication()
         app.launchArguments += ["--ui-test-seed-recent"]
         app.launch()
 
-        // The seed runs inside ContentView's .task, so give it a beat to
-        // land an entry in the store before we look for the row.
-        let recentRow = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "identifier BEGINSWITH 'welcome-recent-'")).firstMatch
-        XCTAssertTrue(recentRow.waitForExistence(timeout: 5),
-                      "Seeded recents entry should render in the welcome view")
-        // #232: this click reached the row locally and did nothing on Cloud,
-        // with no error from XCUI — the in-window-click signature. Activation
-        // is the ONLY guard this test carries, so the next Cloud run says
-        // something either way: still failing means the click was never the
-        // problem, and the security-scoped bookmark (which also has to resolve
-        // on a fresh VM, and fails identically from the outside) is next.
-        MurmurUITests.clickInWindow(recentRow, in: app)
+        let fileMenu = app.menuBarItems["File"]
+        XCTAssertTrue(fileMenu.waitForExistence(timeout: 10))
+        fileMenu.click()
+        let openRecent = app.menuItems["Open Recent"]
+        XCTAssertTrue(openRecent.waitForExistence(timeout: 3),
+                      "File menu should carry Open Recent")
+        openRecent.hover()
+
+        // The seeded entry's title is its folder's display name. Match any
+        // item inside the submenu that is not the Clear Menu affordance.
+        let entry = openRecent.menuItems
+            .matching(NSPredicate(format: "title != 'Clear Menu' AND title != 'No Recent Records'"))
+            .firstMatch
+        XCTAssertTrue(entry.waitForExistence(timeout: 3),
+                      "The seeded recents entry should render in File ▸ Open Recent")
+        entry.click()
 
         // Single-record folders auto-select and auto-import on open, so
         // the bedside view should render once the importer finishes.
         let bedside = app.descendants(matching: .any)
             .matching(identifier: "bedside-view").firstMatch
         XCTAssertTrue(bedside.waitForExistence(timeout: 15),
-                      "Clicking a recents row should open the folder, import the record, and show bedside-view")
+                      "Opening a recent folder should import the record and show bedside-view")
     }
 
     // MARK: - Tier 6: disposition round-trip (lock-gated)
@@ -687,15 +687,29 @@ final class MurmurUITests: XCTestCase {
                 if element.isHittable { break }
                 usleep(1_000_000)   // let in-flight lane mounts land
             }
+            // The surface's own frame can extend past the DISPLAY: on Cloud
+            // the window is taller than the visible screen (#241's geometry
+            // regime — 744 pt of window on a 692 pt visible frame), so an
+            // element inside the scroll viewport can still be under the
+            // Dock's edge where no click lands. Clamp the usable bottom to
+            // the screen. This logic lived by hand in the old welcome-card
+            // launch test; #242 deleted that test's need for it and moved
+            // it here, where every caller gets it.
+            let screenBottom = NSScreen.main.map {
+                $0.frame.height - ($0.visibleFrame.minY - $0.frame.minY)
+            } ?? .greatestFiniteMagnitude
             for _ in 0..<maxTicks {
                 let ef = element.frame
                 let sf = surface.frame
+                let usableMaxY = min(sf.maxY, screenBottom)
                 // Inside the viewport (with a small margin so a row peeking one
                 // pixel past the fold doesn't count) — stop scrolling.
-                if !ef.isEmpty, ef.minY >= sf.minY + 8, ef.maxY <= sf.maxY - 8 { break }
+                if !ef.isEmpty, ef.minY >= sf.minY + 8, ef.maxY <= usableMaxY - 8 { break }
                 // An empty frame means the element isn't realized yet — sweep
-                // down, the historical default; otherwise scroll TOWARD it.
-                let below = ef.isEmpty || ef.midY > sf.midY
+                // down, the historical default; otherwise scroll TOWARD it —
+                // steering on the USABLE region's center, not the surface's,
+                // so a clipped bottom band doesn't invert the direction.
+                let below = ef.isEmpty || ef.midY > (sf.minY + usableMaxY) / 2
                 surface.scroll(byDeltaX: 0, deltaY: below ? -24 : 24)
             }
         }

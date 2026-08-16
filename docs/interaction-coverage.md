@@ -36,17 +36,20 @@ automated, or one moves between buckets.
 
 ---
 
-## Welcome / first-run
+## Launch shell (no record open)
+
+The welcome card, its sample-recording button, drag-drop target, recents
+rows, and PhysioNet link were deleted in #242 (design 12a). Their
+surviving routes and coverage:
 
 | Interaction | Test | Notes |
 | --- | --- | --- |
-| Empty-state prompt visible on cold launch | ✅ `MurmurUITests/testEmptyStateIsVisible` | |
-| Toolbar **Open** button exists on cold launch | ✅ `MurmurUITests/testToolbarOpenButtonExists` | |
-| Click "Try a sample recording" → synthetic fixture loads, bedside renders | ✅ `MurmurUITests/testSyntheticFixtureRendersBedsideView` | Asserts `bedside-view`, `lead-chip-bar`, `channel-panel-I` present and `empty-state-prompt` gone |
-| Click "Open Record Folder" → fileImporter opens, folder selection loads | ✅ `MurmurUIBypassTests/testLaunchArgOpenFolderLoadsRecording` | Bypasses `NSOpenPanel` via `--ui-test-open-folder`; covers the welcome button, toolbar button, and drag-drop paths (all converge on `openFolder(_:)`) |
-| Click a recent-folder row → folder re-opens | ✅ `MurmurUITests/testClickingRecentFolderReopensRecording` | `--ui-test-seed-recent` materialises a synthetic WFDB folder and seeds it as a recents entry; the row click runs the full scanFolder → import → bedside flow |
-| Drag-and-drop a folder onto the welcome view → opens | ✅ `MurmurUIBypassTests/testLaunchArgOpenFolderLoadsRecording` | Shares the `--ui-test-open-folder` bypass; `DropDelegate` → `openFolder(_:)` |
-| Click PhysioNet link → opens browser | ✅ `MurmurUIBypassTests/testPhysioNetLinkTargetsMITBIH` | URL is routed through `URLLauncher`; `--ui-test-record-urls` intercepts the open call and the test asserts the recorded URL |
+| "No record open" line + inline open action on cold launch | ✅ `MurmurUITests/testEmptyStateIsVisible` | Same identifiers as the old card (`empty-state-prompt` / `empty-state-open-button`), new chrome |
+| Open Record Folder reachable from the toolbar `⋯` menu on cold launch | ✅ `MurmurUITests/testOpenRecordFolderIsReachableFromTheOverflowMenu` | X68 moved it into the overflow menu |
+| Synthetic fixture loads, bedside renders | ✅ `MurmurUITests/testSyntheticFixtureRendersBedsideView` | Via `--ui-test-sample` (DEBUG hook — the user-facing sample button was removed deliberately); asserts `empty-state-prompt` gone once loaded |
+| Open Record Folder → fileImporter opens, folder selection loads | ✅ `MurmurUIBypassTests/testLaunchArgOpenFolderLoadsRecording` | Bypasses `NSOpenPanel` via `--ui-test-open-folder`; the inline line, ⌘O, and the toolbar `⋯` item all converge on `openFolder(_:)` |
+| File ▸ Open Recent → folder re-opens | ✅ `MurmurUITests/testOpeningARecentFolderReopensRecording` | `--ui-test-seed-recent` seeds the store; the menu item runs the full bookmark-resolve → scanFolder → import → bedside flow. The menu is the only recents surface since #242 |
+| Where do I get data? | ✅ `MurmurUIBypassTests/testHelpGettingStartedTargetsDocsGettingStarted` | Help ▸ Getting Started opens the docs page whose Requirements carry the MIT-BIH link — the welcome card's PhysioNet link deliberately has no in-window replacement |
 
 ## Canvas / waveform interaction
 
@@ -74,7 +77,7 @@ automated, or one moves between buckets.
 
 | Interaction | Test | Notes |
 | --- | --- | --- |
-| Toolbar **Open** button → fileImporter opens | ✅ `MurmurUIBypassTests/testLaunchArgOpenFolderLoadsRecording` | Shares the `--ui-test-open-folder` bypass with the welcome button (same `openFolder(_:)` path) |
+| Toolbar **Open** button → fileImporter opens | ✅ `MurmurUIBypassTests/testLaunchArgOpenFolderLoadsRecording` | Shares the `--ui-test-open-folder` bypass with the launch shell's inline action (same `openFolder(_:)` path) |
 | Toolbar **Findings** toggle → side panel shows/hides | ✅ `MurmurUITests/testFindingsPanelTogglesViaToolbar` | Toggles `findings-toggle`, verifies `finding-row-*` appears/disappears |
 | Toolbar **Edit mode** latch → unlocks editing surfaces | ✅ `MurmurUITests/testEditModeLatchTogglesDispositionTrio` | Asserts the disposition trio appears/disappears in lock-step with the latch |
 | Toolbar **Attach findings…** → file picker for sidecar JSON | ✅ `MurmurUIBypassTests/testLaunchArgAttachFindingsMergesIntoPanel` | Bypasses the JSON picker via `--ui-test-attach-findings`; the synthetic sidecar lands as `finding-row-ATTACH` |
