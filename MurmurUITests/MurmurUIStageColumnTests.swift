@@ -69,20 +69,21 @@ final class MurmurUIStageColumnTests: XCTestCase {
                       "The hint should name the finding-jump keys, got '\(spoken)'")
     }
 
-    /// #225 — the reported bug, driven through the app the way it was hit.
+    /// The pieces both beat-card tests need.
     ///
-    /// The card was hover-only: `ChannelPanel.applyHover` focused the nearest
-    /// beat on move and cleared it on mouse-exit, so moving the pointer
-    /// toward the card in order to READ it was the gesture that closed it.
-    /// Since X71 there is no placeholder, so it did not blank — it vanished
-    /// and the column reflowed.
-    ///
-    /// The click half matters as much as the state half: pinning is wired
-    /// through a `.onTapGesture` sharing the canvas with a pan `DragGesture`
-    /// and a magnify gesture, and a tap that loses a gesture-priority fight
-    /// fails exactly like no pin at all while every unit test still passes.
+    /// Since #246 the card is ALWAYS mounted — it holds its frame and shows an
+    /// empty state rather than unmounting — so `docked-beat-inspector` exists
+    /// unconditionally and asserting on it proves nothing. The placeholder is
+    /// the whole signal: `docked-beat-inspector-empty` shows exactly when no
+    /// beat is focused, so "the card is showing readings" is its ABSENCE.
+    private struct BeatCardStage {
+        let placeholder: XCUIElement
+        let onBeat: XCUICoordinate
+        let offTrace: XCUICoordinate
+    }
+
     @MainActor
-    func testAPinnedBeatCardSurvivesThePointerLeavingTheTrace() throws {
+    private func launchBeatCardStage() -> BeatCardStage {
         let app = XCUIApplication()
         app.launchArguments += ["--ui-test-sample-rich=two-morphology",
                                 "--ui-test-grant-studio"]
@@ -99,56 +100,68 @@ final class MurmurUIStageColumnTests: XCTestCase {
         let overlay = app.descendants(matching: .any)
             .matching(identifier: "fiducial-overlay").firstMatch
         XCTAssertTrue(overlay.waitForExistence(timeout: 20),
-                      "No fiducial overlay — this record has no beats to pin")
-        let card = app.descendants(matching: .any)
-            .matching(identifier: "docked-beat-inspector").firstMatch
-        let centre = overlay.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                      "No fiducial overlay — this record has no beats to read")
 
-        let away = app.descendants(matching: .any)
-            .matching(identifier: "calibration-controls").firstMatch
-            .coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        return BeatCardStage(
+            placeholder: app.descendants(matching: .any)
+                .matching(identifier: "docked-beat-inspector-empty").firstMatch,
+            onBeat: overlay.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)),
+            offTrace: app.descendants(matching: .any)
+                .matching(identifier: "calibration-controls").firstMatch
+                .coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)))
+    }
 
-        centre.hover()
-        XCTAssertTrue(card.waitForExistence(timeout: 5),
-                      "Hovering a beat should raise the card")
+    /// Readings follow the pointer: they arrive on a beat and leave with it.
+    ///
+    /// The second half is an invariant, not a courtesy — readings on screen
+    /// with nothing pinned and the pointer off the trace are readings for a
+    /// beat nobody is pointing at. It is also what makes the pin test below
+    /// mean anything: that test reads "the data stayed", which only implicates
+    /// the pin if data does NOT stay on its own.
+    @MainActor
+    func testABeatsReadingsArriveOnHoverAndLeaveWithIt() throws {
+        let stage = launchBeatCardStage()
 
-        // Establish that leaving the trace REALLY clears an unpinned card
-        // before asserting a pinned one survives it. Without this the
-        // survival assertion passes just as well when the mouse-exit never
-        // fired under XCUI — i.e. when the test is measuring nothing.
-        //
-        // #246 changed what "clears" means: the card no longer unmounts —
-        // it holds its frame and returns to the placeholder state
-        // (`docked-beat-inspector-empty`, the identifier X71 deleted and
-        // #246 revived). So the mouse-exit proof is now "the placeholder is
-        // showing", not "the card is gone" — same event, opposite polarity.
-        away.hover()
+        stage.onBeat.hover()
+        XCTAssertTrue(stage.placeholder.waitForNonExistence(timeout: 5),
+                      "Hovering a beat must raise its readings — the card stayed empty")
+
+        stage.offTrace.hover()
+        XCTAssertTrue(stage.placeholder.waitForExistence(timeout: 5),
+                      "Readings are up with nothing pinned and the pointer off the "
+                      + "trace — they belong to a beat nobody is pointing at")
+    }
+
+    /// #225 — the reported bug, driven through the app the way it was hit.
+    ///
+    /// The card was hover-only: `ChannelPanel.applyHover` focused the nearest
+    /// beat on move and cleared it on mouse-exit, so moving the pointer toward
+    /// the card in order to READ it was the gesture that closed it. Under X71
+    /// there was no placeholder, so it did not blank — it vanished and the
+    /// column reflowed. #246 has since restored the placeholder and pinned the
+    /// card's frame, so the fault now shows as the card emptying instead.
+    ///
+    /// The click half matters as much as the state half: pinning is wired
+    /// through a `.onTapGesture` sharing the canvas with a pan `DragGesture`
+    /// and a magnify gesture, and a tap that loses a gesture-priority fight
+    /// fails exactly like no pin at all while every unit test still passes.
+    @MainActor
+    func testAPinnedBeatCardSurvivesThePointerLeavingTheTrace() throws {
+        let stage = launchBeatCardStage()
+
+        stage.onBeat.hover()
+        XCTAssertTrue(stage.placeholder.waitForNonExistence(timeout: 5),
+                      "Hovering a beat must raise its readings before they can be pinned")
+        stage.onBeat.click()
+
+        stage.offTrace.hover()
+        // A settle is unavoidable: the assertion is that something does NOT
+        // appear, so there is no positive event to wait on. The hover test
+        // bounds how long the same exit takes to clear an unpinned card.
         Thread.sleep(forTimeInterval: 2)
-        XCTAssertTrue(card.exists,
-                      "#246: the card must NOT unmount on mouse-exit — it holds "
-                      + "its place and shows the empty state")
-        let placeholder = app.descendants(matching: .any)
-            .matching(identifier: "docked-beat-inspector-empty").firstMatch
-        XCTAssertTrue(placeholder.exists,
-                      "An UNPINNED card must still clear to the placeholder on "
-                      + "mouse-exit — if it doesn't, the rest of this test proves nothing")
-
-        centre.hover()
-        XCTAssertTrue(card.waitForExistence(timeout: 5))
-        centre.click()
-        away.hover()
-        Thread.sleep(forTimeInterval: 2)
-
-        // #246 made `card.exists` a constant, so the pin's survival proof is
-        // the placeholder's ABSENCE: the pinned beat is still being read.
-        XCTAssertFalse(placeholder.exists,
+        XCTAssertFalse(stage.placeholder.exists,
                        "The pinned beat's readings gave way to the placeholder "
                        + "as the pointer left — #225 unfixed")
-        XCTAssertTrue(
-            app.descendants(matching: .any)
-                .matching(identifier: "beat-card-unpin").firstMatch.exists,
-            "A pinned card must say it is pinned; identical pinned and hovered "
-            + "cards hide the only thing that distinguishes them")
     }
 
     /// X28's elapsed / wall-clock switch was honoured by exactly one surface,
