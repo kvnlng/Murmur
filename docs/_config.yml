@@ -30,3 +30,10 @@ kramdown:
 plugins:
   - jekyll-remote-theme
   - jekyll-seo-tag
+
+# design/ holds internal design handoffs (wireframe HTML, screenshots,
+# specs) versioned alongside the docs for provenance — the issues that
+# implement them cite these files. They are working material, not product
+# documentation: excluded so the published site never renders them.
+exclude:
+  - design/
