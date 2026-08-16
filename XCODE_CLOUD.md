@@ -113,9 +113,15 @@ Once both workflows are saved:
   applies — Xcode Cloud just removes the manual upload step.
 
 Because runs are manual, a branch's tests are only exercised on the
-runner when someone asks. Ask BEFORE merging — a branch can be built
-directly, and finding out on `main` afterwards is how two failing UI
-tests reached the trunk (#277).
+runner when someone asks — and Xcode Cloud does not run on pull
+requests either, so a branch nobody starts has never been near the
+runner at all.
+
+Merging first and running once on `main` is the normal flow, and the
+cheaper one: a single run judges the accumulated work instead of
+spending quota per branch. Build a branch directly when you want to
+isolate it — a change you suspect, or one you would rather not have
+`main` red for while you find out.
 
 ## Updating the release process
 
@@ -252,10 +258,10 @@ This is the only subcommand that spends compute against the monthly
 quota, which is why it is explicit and why nothing else does it as a
 side effect. Watch it with `scripts/xcode-cloud.rb run latest`.
 
-Build a PR branch before merging it. Xcode Cloud's workflows do not run
-on pull requests, so a branch that has never been started has never had
-its tests near the runner — and the runner is where this project's UI
-tests fail.
+Usually you want `main`, after merging: one run judges everything that
+landed. Naming a branch is for when you want a change isolated from the
+rest — which is what the argument is there for, not a standing
+instruction to build every branch.
 
 ## When something fails
 
