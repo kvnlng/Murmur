@@ -184,7 +184,7 @@ struct TrendStackGeometryTests {
 
         /// Rebuilt from `TrendStack.laneRowContent`'s rail. Duplicated rather
         /// than reached into because the rail is a private detail of a private
-        /// method; the fonts and the 1 pt spacing are the part under test.
+        /// method; the fonts, paddings and line limits are the part under test.
         var view: some View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
@@ -192,10 +192,12 @@ struct TrendStackGeometryTests {
                     .lineLimit(1)
                 Text(subtitle)
                     .font(.caption2)
-                    .lineLimit(2)
+                    .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .frame(width: TrendStack.labelWidth, alignment: .leading)
+            .padding(.vertical, 7)
+            .padding(.horizontal, 9)
+            .frame(width: TrendStack.labelWidth, alignment: .topLeading)
         }
     }
 
@@ -211,15 +213,15 @@ struct TrendStackGeometryTests {
         }
         return TrendStack(
             lanes: [
-                lane("hr", "bpm · trend channel only", height: 46),
-                lane("beat-hr", "bpm · median per 10 s · from R–R", height: 46),
+                lane("hr", "bpm · trend channel only", height: 86),
+                lane("beat-hr", "bpm · median per 10 s · from R–R", height: 86),
                 // The natural-height lane matters to the measurement: it is
                 // the one whose height comes from its content rather than a
                 // literal, so a greedy stack can hide behind it.
                 TrendStackLane(id: "rmssd", title: "RMSSD", subtitle: "ms · 5-min window",
                                value: "42", height: nil) { rmssdLane() },
-                lane(BedsideTrendStack.lfhfLaneID, RollingLFHFContext.provenanceCaption, height: 46),
-                lane(BedsideTrendStack.qualityLaneID, "artifact ratio · outline over 10%", height: 22),
+                lane(BedsideTrendStack.lfhfLaneID, RollingLFHFContext.provenanceCaption, height: 86),
+                lane(BedsideTrendStack.qualityLaneID, "artifact ratio · outline over 10%", height: 26),
             ],
             recordingRange: range,
             viewportRange: 100.0...400.0,
@@ -242,7 +244,8 @@ struct TrendStackGeometryTests {
         //      sized to the container rather than to its 16 pt of axis.
         //
         // Same fault as #208's `maxHeight` claim, wearing two different views.
-        // The stack now settles at ~299 pt for these five lanes.
+        // The stack now settles at ~460 pt for these five lanes at the 13a
+        // heights — still nowhere near the offer, which is the invariant.
         let stack = fiveLaneStack()
         let content = demandedHeightGivenRoom(stack, width: 700)
         #expect(content < 1000,
@@ -256,25 +259,33 @@ struct TrendStackGeometryTests {
                 "Demanded \(small) pt of 700 but \(large) pt of 2000 — the height follows the offer")
     }
 
-    @Test("The LF/HF provenance line fits its label column on one line")
-    func lfhfProvenanceFitsOneLine() {
-        // #216, and the measurement corrects the report: the old subtitle did
-        // not overflow its row — `Lomb–Scargle · 5-min window · 1 min step`
-        // wrapped to two lines for a 40 pt rail in a 46 pt row. What it left
-        // was SIX points between its last line and the Quality lane's title
-        // beneath, and at .caption2 six points reads as one paragraph rather
-        // than two lanes. Crowding, not overflow.
-        //
-        // So the guard is the property the fix actually establishes: the
-        // longest subtitle in the stack fits on one line. Re-word it longer
-        // and it wraps, the clearance drops back to ~6 pt, and this fails.
-        let oneLine = Rail(id: "reference", title: "LF / HF", subtitle: "bpm", height: 46)
+    @Test("The LF/HF provenance line survives the 13a label column untruncated")
+    func lfhfProvenanceIsNotTruncated() {
+        // #216 asked for the provenance subtitle on ONE line, and at the old
+        // 150 pt column in a 46 pt row that was the only wording that didn't
+        // crowd the lane beneath. The 13a grid inverts the trade: the column
+        // narrowed to 114 pt but the row grew to 86, so the subtitle now
+        // WRAPS by design — the property worth guarding is that it wraps
+        // rather than truncates. `lineLimit(3)` is a truncation cliff:
+        // reword the caption longer and the ellipsis quietly eats the step
+        // provenance. So measure the rail free-height against the rail as
+        // shipped — equal means every word landed.
+        let unclamped = demandedHeightGivenRoom(
+            VStack(alignment: .leading, spacing: 1) {
+                Text("LF / HF").font(.caption.weight(.semibold)).lineLimit(1)
+                Text(RollingLFHFContext.provenanceCaption)
+                    .font(.caption2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.vertical, 7)
+            .padding(.horizontal, 9)
+            .frame(width: TrendStack.labelWidth, alignment: .topLeading),
+            width: TrendStack.labelWidth)
         let shipping = Rail(id: BedsideTrendStack.lfhfLaneID, title: "LF / HF",
-                            subtitle: RollingLFHFContext.provenanceCaption, height: 46)
-        let reference = demandedHeightGivenRoom(oneLine.view, width: TrendStack.labelWidth)
+                            subtitle: RollingLFHFContext.provenanceCaption, height: 86)
         let measured = demandedHeightGivenRoom(shipping.view, width: TrendStack.labelWidth)
-        #expect(abs(measured - reference) < 1,
-                "'\(RollingLFHFContext.provenanceCaption)' needs \(measured) pt against \(reference) pt for one line, so it wraps and crowds the lane beneath")
+        #expect(abs(measured - unclamped) < 1,
+                "'\(RollingLFHFContext.provenanceCaption)' needs \(unclamped) pt unclamped but renders \(measured) pt, so the line limit is truncating provenance")
     }
 
     @Test("A lane's row is at least as tall as its own rail")
@@ -291,14 +302,14 @@ struct TrendStackGeometryTests {
         // acceptance test #218 asked for.
         let rows: [Rail] = [
             Rail(id: "hr", title: "Trends · HR",
-                 subtitle: "bpm · trend channel only", height: 46),
+                 subtitle: "bpm · trend channel only", height: 86),
             Rail(id: "beat-hr", title: "HR · beat-derived",
                  subtitle: "bpm · median per \(Int(BeatHeartRateSeries.defaultBinSeconds)) s · from R–R",
-                 height: 46),
+                 height: 86),
             Rail(id: BedsideTrendStack.lfhfLaneID, title: "LF / HF",
-                 subtitle: RollingLFHFContext.provenanceCaption, height: 46),
+                 subtitle: RollingLFHFContext.provenanceCaption, height: 86),
             Rail(id: BedsideTrendStack.qualityLaneID, title: "Quality",
-                 subtitle: "artifact ratio · outline over 10%", height: 22),
+                 subtitle: "artifact ratio · outline over 10%", height: 26),
         ]
         for row in rows {
             let rail = demandedHeightGivenRoom(row.view, width: TrendStack.labelWidth)
@@ -315,10 +326,10 @@ struct TrendStackGeometryTests {
     ///
     /// Measured, then arithmetic: at `WindowSizing.productionMinWidth` the
     /// bedside column is 728 pt (AX sweep, `--ui-test-sample-rich`), and
-    /// `laneRowContent` spends the rail, the value column and 20 pt of padding
-    /// before the cell begins.
+    /// `laneRowContent` spends the accent rail, the label column, the value
+    /// column and its 10 pt trailing padding before the cell begins.
     private var cellWidthAtMinimumWindow: CGFloat {
-        728 - TrendStack.labelWidth - 10 - TrendStack.valueWidth - 10
+        728 - TrendStack.railWidth - TrendStack.labelWidth - TrendStack.valueWidth - 10
     }
 
     @Test("A lane's controls fit the cell the stack gives them")
@@ -399,13 +410,17 @@ struct TrendStackGeometryTests {
     /// what the row does with a rail taller than the declared height.
     private func laneRow(rail: Rail, plotHeight: CGFloat) -> some View {
         HStack(alignment: .top, spacing: 0) {
-            rail.view.padding(.leading, 10)
+            rail.view.padding(.leading, TrendStack.railWidth)
             LFHFLanePlot(samples: laneSamples(), recordingRange: range, stepSeconds: 30)
                 .frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
                 .frame(height: plotHeight)
-            Text("1.50").font(.caption.monospacedDigit())
-                .frame(width: TrendStack.valueWidth, alignment: .trailing)
-                .padding(.trailing, 10)
+            VStack(alignment: .trailing, spacing: 1) {
+                Text("1.50").font(.body.weight(.semibold).monospacedDigit())
+                Text("ratio").font(.caption2)
+            }
+            .padding(.vertical, 7)
+            .frame(width: TrendStack.valueWidth, alignment: .topTrailing)
+            .padding(.trailing, 10)
         }
         .frame(minHeight: plotHeight)
         .fixedSize(horizontal: false, vertical: true)

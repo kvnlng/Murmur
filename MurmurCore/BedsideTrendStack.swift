@@ -95,8 +95,10 @@ struct BedsideTrendStack: View {
                 title: "Trends · HR",
                 subtitle: "\(hr.unit.isEmpty ? "bpm" : hr.unit) · trend channel only",
                 value: currentValue(of: heartRate, rate: heartRateRate),
-                height: 46,
-                seekable: true
+                unit: hr.unit.isEmpty ? "bpm" : hr.unit,
+                height: 86,
+                seekable: true,
+                accent: TrendStackLane.hrAccent
             ) {
                 HeartRateLanePlot(
                     samples: heartRate,
@@ -114,8 +116,10 @@ struct BedsideTrendStack: View {
                 title: "HR · beat-derived",
                 subtitle: "bpm · median per \(Int(BeatHeartRateSeries.defaultBinSeconds)) s · from R–R",
                 value: currentValue(of: beatHR.samples, rate: beatHR.sampleRate),
-                height: 46,
-                seekable: true
+                unit: "bpm",
+                height: 86,
+                seekable: true,
+                accent: TrendStackLane.hrAccent
             ) {
                 HeartRateLanePlot(
                     samples: beatHR.samples,
@@ -133,8 +137,10 @@ struct BedsideTrendStack: View {
                 title: "Quality",
                 subtitle: "artifact ratio · outline over 10%",
                 value: currentValue(of: quality, rate: qualityRate, decimals: 2),
-                height: 22,
-                seekable: true
+                unit: "ratio",
+                height: 26,
+                seekable: true,
+                accent: TrendStackLane.qualityAccent
             ) {
                 QualityLanePlot(
                     samples: quality,
