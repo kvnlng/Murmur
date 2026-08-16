@@ -87,4 +87,30 @@ final class MurmurUISyntheticFixtureTests: XCTestCase {
         XCTAssertTrue(text.contains("beats"),
                       "Provenance should carry a beat count, got: \(text)")
     }
+
+    /// #261 phase 2, end to end: the RMSSD lane's subtitle advertises the
+    /// 1-min percentile band ONLY when some computed sample actually carries
+    /// one — the orchestrator's caption is data-driven, not config-driven —
+    /// so this one string proves the whole chain: RollingMetricComputer's
+    /// sub-window percentiles → the orchestrator's band mapping → the lane
+    /// row's rendered subtitle. No inject flags; the band is computed from
+    /// the fixture's delineated beats like everything else in this suite.
+    @MainActor
+    func testRMSSDLaneAdvertisesTheComputedPercentileBand() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-sample-rich", "--ui-test-grant-studio"]
+        app.launch()
+        ensureTrendStackExpanded(app)
+
+        let row = app.descendants(matching: .any)
+            .matching(identifier: "trend-lane-rmssd").firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 60),
+                      "The RMSSD lane should compute from the fixture's beats under the Studio grant")
+
+        let bandCaption = row.descendants(matching: .staticText)
+            .matching(NSPredicate(format: "label CONTAINS '1-min band' OR value CONTAINS '1-min band'"))
+            .firstMatch
+        XCTAssertTrue(bandCaption.waitForExistence(timeout: 10),
+                      "The subtitle should carry '1-min band' — absent means no computed sample carried a percentile band end to end")
+    }
 }
