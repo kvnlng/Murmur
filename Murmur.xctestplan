@@ -30,7 +30,6 @@
       }
     },
     {
-      "parallelizable" : true,
       "target" : {
         "containerPath" : "container:Murmur.xcodeproj",
         "identifier" : "0A9B42EA2FDF06BB0059C903",
