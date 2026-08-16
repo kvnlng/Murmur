@@ -50,16 +50,26 @@ public enum IntervalTrendMetric: String, CaseIterable, Sendable, Codable {
     public static let launchVisible: [IntervalTrendMetric] = [.qtc]
 }
 
-/// How the lane draws each bin — median-only for a clean read, median
-/// plus IQR ribbon for honesty about noise, or per-beat scatter at
-/// high zoom.
+/// How the lane draws each bin — one independent dot-and-range mark
+/// per bin (the 13a canonical, and the default), median-only for a
+/// clean connected read, median plus IQR ribbon for honesty about
+/// noise, or per-beat scatter at high zoom.
 public enum IntervalTrendShowMode: String, CaseIterable, Sendable, Codable {
+    /// 13a / #261: dot at the bin median on a thick IQR segment and a
+    /// thin full-range segment; excluded bins reduce to a grey stub.
+    /// Chosen as the default because QTc is read against thresholds
+    /// (500 ms Torsades window, >60 ms drift) and the range segment is
+    /// the only mark that shows an excursion the bin median hides. A
+    /// connected line would also fabricate values between bins — each
+    /// 2-min bin is an independent measurement.
+    case dotAndRange
     case medianOnly
     case medianAndIQR
     case perBeatScatter
 
     public var displayName: String {
         switch self {
+        case .dotAndRange:    return "dot + range"
         case .medianOnly:     return "median only"
         case .medianAndIQR:   return "median + IQR"
         case .perBeatScatter: return "per-beat scatter"
@@ -235,6 +245,18 @@ public struct IntervalTrendBin: Sendable, Equatable, Identifiable {
     public var id: Double { (startSeconds + endSeconds) / 2 }
 
     public var centerSeconds: Double { (startSeconds + endSeconds) / 2 }
+
+    /// Extremes of the bin's per-beat values — the 13a thin range
+    /// segment. Falls back to the IQR edges when the per-beat list is
+    /// empty (free-viewer fixtures), so the thin segment degrades to
+    /// coinciding with the thick one rather than inventing a range.
+    public var rangeMinMs: Double {
+        perBeatValues.lazy.filter(\.isFinite).min() ?? q1
+    }
+
+    public var rangeMaxMs: Double {
+        perBeatValues.lazy.filter(\.isFinite).max() ?? q3
+    }
 }
 
 /// Pure-value output type for a trend-lane render pass. Callers keep

@@ -57,16 +57,26 @@ public struct VariabilityLaneSample: Sendable, Equatable, Codable, Identifiable 
     /// ones join the line.
     public let isEligible: Bool
 
+    /// Within-window spread of the metric itself (13a, #261): the
+    /// metric recomputed over sub-windows inside this window,
+    /// percentiled across them. Nil when the producer didn't compute
+    /// one — the lane then renders the plain line, which is also the
+    /// free viewer's state. Like `value`, this arrives computed; the
+    /// arithmetic lives behind the MurmurMetrics boundary.
+    public let band: VariabilityLaneBand?
+
     public init(
         windowStartSeconds: Double,
         windowEndSeconds: Double,
         value: Double,
-        isEligible: Bool
+        isEligible: Bool,
+        band: VariabilityLaneBand? = nil
     ) {
         self.windowStartSeconds = windowStartSeconds
         self.windowEndSeconds = windowEndSeconds
         self.value = value
         self.isEligible = isEligible
+        self.band = band
     }
 
     /// Center of the window — the x-coordinate the lane renders at.
@@ -78,6 +88,24 @@ public struct VariabilityLaneSample: Sendable, Equatable, Codable, Identifiable 
     /// unique per sample by construction (windows placed on a
     /// monotonic stride).
     public var id: Double { windowCenterSeconds }
+}
+
+/// Percentiles of the metric across sub-windows of one sample's window
+/// — the wire shape of `MurmurMetrics.RollingMetricBand`, mirrored here
+/// so MurmurCore renders bands without importing the paid module.
+/// p25–p75 draws as the filled ribbon; p5 / p95 as dashed outlines.
+public struct VariabilityLaneBand: Sendable, Equatable, Codable {
+    public let p5: Double
+    public let p25: Double
+    public let p75: Double
+    public let p95: Double
+
+    public init(p5: Double, p25: Double, p75: Double, p95: Double) {
+        self.p5 = p5
+        self.p25 = p25
+        self.p75 = p75
+        self.p95 = p95
+    }
 }
 
 /// A rolling HRV metric rendered as a lane under the ECG. Time bounds
@@ -271,6 +299,42 @@ struct VariabilityLane: View {
             emptyState
         } else {
             Chart {
+                // 13a percentile ribbon (#261), drawn FIRST so the
+                // median line stays legible on top of it. Chunked the
+                // same way as the line: a ribbon bridging a band-less
+                // or ineligible gap would fabricate spread where none
+                // was computed.
+                ForEach(bandedRuns.indices, id: \.self) { idx in
+                    let run = bandedRuns[idx]
+                    ForEach(run) { sample in
+                        if let band = sample.band {
+                            AreaMark(
+                                x: .value("t", sample.windowCenterSeconds),
+                                yStart: .value("p25", band.p25),
+                                yEnd: .value("p75", band.p75),
+                                series: .value("band-run", "iqr-\(idx)")
+                            )
+                            .interpolationMethod(.linear)
+                            .foregroundStyle(Color.accentColor.opacity(0.16))
+                            LineMark(
+                                x: .value("t", sample.windowCenterSeconds),
+                                y: .value("p5", band.p5),
+                                series: .value("band-run", "p5-\(idx)")
+                            )
+                            .interpolationMethod(.linear)
+                            .lineStyle(StrokeStyle(lineWidth: 0.8, dash: [3, 2]))
+                            .foregroundStyle(Color.accentColor.opacity(0.55))
+                            LineMark(
+                                x: .value("t", sample.windowCenterSeconds),
+                                y: .value("p95", band.p95),
+                                series: .value("band-run", "p95-\(idx)")
+                            )
+                            .interpolationMethod(.linear)
+                            .lineStyle(StrokeStyle(lineWidth: 0.8, dash: [3, 2]))
+                            .foregroundStyle(Color.accentColor.opacity(0.55))
+                        }
+                    }
+                }
                 // Eligible line — chunked into contiguous runs so the
                 // line never bridges across ineligible / gap regions.
                 ForEach(eligibleRuns.indices, id: \.self) { idx in
@@ -410,6 +474,26 @@ struct VariabilityLane: View {
         samples.filter { !$0.isEligible }
     }
 
+    /// Contiguous stretches of eligible samples that CARRY a band —
+    /// the ribbon's run structure. Split more finely than
+    /// `eligibleRuns`: an eligible sample without a band (an edge
+    /// window whose sub-window floor failed) breaks the ribbon while
+    /// the median line above it continues.
+    private var bandedRuns: [[VariabilityLaneSample]] {
+        var runs: [[VariabilityLaneSample]] = []
+        var current: [VariabilityLaneSample] = []
+        for s in samples {
+            if s.isEligible && s.value.isFinite && s.band != nil {
+                current.append(s)
+            } else if !current.isEmpty {
+                runs.append(current)
+                current.removeAll(keepingCapacity: true)
+            }
+        }
+        if !current.isEmpty { runs.append(current) }
+        return runs
+    }
+
     /// The sample that best contains the current hover time.
     /// Duplicates the lookup logic in `VariabilityLaneContext` but
     /// operates on the view's local `samples` slice — the view
@@ -432,9 +516,17 @@ struct VariabilityLane: View {
     // MARK: - Y-axis math
 
     private var yDomain: ClosedRange<Double> {
-        let eligibleValues = samples
-            .filter { $0.isEligible && $0.value.isFinite }
-            .map(\.value)
+        // The domain must cover the band extremes, not just the line —
+        // a ribbon clipped at the plot edge reads as saturation, which
+        // is a claim about the data the data never made.
+        let eligible = samples.filter { $0.isEligible && $0.value.isFinite }
+        var eligibleValues = eligible.map(\.value)
+        for s in eligible {
+            if let band = s.band {
+                eligibleValues.append(band.p5)
+                eligibleValues.append(band.p95)
+            }
+        }
         guard let lo = eligibleValues.min(), let hi = eligibleValues.max() else {
             return 0.0...1.0
         }

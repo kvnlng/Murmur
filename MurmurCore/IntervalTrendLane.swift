@@ -935,14 +935,32 @@ struct IntervalTrendLane: View {
                 // hatch — the fill is subordinate to the median line
                 // without triggering the SwiftUI Canvas re-draw cost
                 // that the previous crosshatch incurred.
-                ForEach(ineligibleBins) { bin in
-                    RectangleMark(
-                        xStart: .value("ineligible-t0", bin.startSeconds),
-                        xEnd: .value("ineligible-t1", bin.endSeconds),
-                        yStart: .value("ineligible-y0", yDomain.lowerBound),
-                        yEnd: .value("ineligible-y1", yDomain.upperBound)
-                    )
-                    .foregroundStyle(Color.primary.opacity(0.12))
+                if effectiveShowMode == .dotAndRange {
+                    // 13a excluded-bin stub: a short grey foot at the
+                    // domain floor — "a bin exists here and was excluded",
+                    // with no median, IQR or range claim. Replaces the
+                    // full-height wash in this mode; roughly half the ink
+                    // is the mode's whole point.
+                    ForEach(ineligibleBins) { bin in
+                        RectangleMark(
+                            xStart: .value("stub-t0", bin.startSeconds),
+                            xEnd: .value("stub-t1", bin.endSeconds),
+                            yStart: .value("stub-y0", yDomain.lowerBound),
+                            yEnd: .value("stub-y1",
+                                         yDomain.lowerBound + (yDomain.upperBound - yDomain.lowerBound) * 0.06)
+                        )
+                        .foregroundStyle(Color.secondary.opacity(0.4))
+                    }
+                } else {
+                    ForEach(ineligibleBins) { bin in
+                        RectangleMark(
+                            xStart: .value("ineligible-t0", bin.startSeconds),
+                            xEnd: .value("ineligible-t1", bin.endSeconds),
+                            yStart: .value("ineligible-y0", yDomain.lowerBound),
+                            yEnd: .value("ineligible-y1", yDomain.upperBound)
+                        )
+                        .foregroundStyle(Color.primary.opacity(0.12))
+                    }
                 }
 
                 // Rate-stability validity marker (X43) — a thin NEUTRAL band
@@ -1020,43 +1038,88 @@ struct IntervalTrendLane: View {
                     }
                 }
 
-                // Median line — always drawn in NEUTRAL ink per ratified
-                // B-RUO color discipline (project_mockup_review_pass.md):
-                // app-computed departures never render in caution hues,
-                // only analyst-marked findings use amber. Chunked into
-                // eligible runs so the line breaks across low-confidence
-                // gaps. Censored bins render the median DASHED, marking
-                // "at least this prolonged, possibly more" — the point
-                // estimate isn't a confident value.
-                ForEach(eligibleRuns.indices, id: \.self) { idx in
-                    let run = eligibleRuns[idx]
-                    ForEach(run) { bin in
-                        LineMark(
+                // Dot-and-range (13a, #261, the default): one INDEPENDENT
+                // mark per bin — dot at the median on a thick IQR segment
+                // and a thin full-range segment. No connecting line: a
+                // 2-min bin is a discrete measurement, and a line would
+                // fabricate values between bin centers. Censored bins keep
+                // their honesty disclosures — the thin segment opens to
+                // the top of the domain ("true extreme ≥ drawn"), matching
+                // the measurement band's open-top treatment, and the
+                // chevron overlay renders in every mode regardless.
+                if effectiveShowMode == .dotAndRange {
+                    ForEach(eligibleFiniteBins) { bin in
+                        BarMark(
                             x: .value("t", bin.centerSeconds),
-                            y: .value("median", bin.median),
-                            series: .value("median-run", idx)
+                            yStart: .value("range-lo", bin.rangeMinMs),
+                            yEnd: .value(
+                                "range-hi",
+                                bin.hasCensoredBeats ? yDomain.upperBound : bin.rangeMaxMs
+                            ),
+                            width: .fixed(1)
                         )
-                        .interpolationMethod(.monotone)
+                        .foregroundStyle(Color.primary.opacity(0.35))
+                        BarMark(
+                            x: .value("t", bin.centerSeconds),
+                            yStart: .value("iqr-lo", bin.q1),
+                            yEnd: .value("iqr-hi", bin.q3),
+                            width: .fixed(3)
+                        )
+                        .foregroundStyle(Color.primary.opacity(0.65))
+                        PointMark(
+                            x: .value("t", bin.centerSeconds),
+                            y: .value("median", bin.median)
+                        )
+                        .symbol(.circle)
+                        .symbolSize(14)
                         .foregroundStyle(Color.primary)
-                        .lineStyle(
-                            bin.hasCensoredBeats
-                                ? StrokeStyle(lineWidth: 1.8, lineJoin: .round, dash: [3, 3])
-                                : StrokeStyle(lineWidth: 1.8, lineJoin: .round)
-                        )
+                    }
+                }
+
+                // Median line — the connected modes. Drawn in NEUTRAL ink
+                // per ratified B-RUO color discipline
+                // (project_mockup_review_pass.md): app-computed departures
+                // never render in caution hues, only analyst-marked
+                // findings use amber. Chunked into eligible runs so the
+                // line breaks across low-confidence gaps. Censored bins
+                // render the median DASHED, marking "at least this
+                // prolonged, possibly more" — the point estimate isn't a
+                // confident value.
+                if effectiveShowMode != .dotAndRange {
+                    ForEach(eligibleRuns.indices, id: \.self) { idx in
+                        let run = eligibleRuns[idx]
+                        ForEach(run) { bin in
+                            LineMark(
+                                x: .value("t", bin.centerSeconds),
+                                y: .value("median", bin.median),
+                                series: .value("median-run", idx)
+                            )
+                            .interpolationMethod(.monotone)
+                            .foregroundStyle(Color.primary)
+                            .lineStyle(
+                                bin.hasCensoredBeats
+                                    ? StrokeStyle(lineWidth: 1.8, lineJoin: .round, dash: [3, 3])
+                                    : StrokeStyle(lineWidth: 1.8, lineJoin: .round)
+                            )
+                        }
                     }
                 }
 
                 // Ineligible bins — dimmed points at the median, so
                 // the analyst sees WHERE the confidence failed rather
-                // than a gap they'd have to guess about.
-                ForEach(ineligibleBins) { bin in
-                    PointMark(
-                        x: .value("t", bin.centerSeconds),
-                        y: .value("dim", bin.median)
-                    )
-                    .symbol(.circle)
-                    .symbolSize(18)
-                    .foregroundStyle(Color.secondary.opacity(0.35))
+                // than a gap they'd have to guess about. Not in
+                // dot-and-range: there the stub already places the bin,
+                // and 13a's excluded state is "stub ONLY, no median".
+                if effectiveShowMode != .dotAndRange {
+                    ForEach(ineligibleBins) { bin in
+                        PointMark(
+                            x: .value("t", bin.centerSeconds),
+                            y: .value("dim", bin.median)
+                        )
+                        .symbol(.circle)
+                        .symbolSize(18)
+                        .foregroundStyle(Color.secondary.opacity(0.35))
+                    }
                 }
 
                 // Censored-bin up-chevron + "QT ≥" annotation — signals
@@ -1321,6 +1384,13 @@ struct IntervalTrendLane: View {
         data.bins.filter { !$0.isEligible }
     }
 
+    /// The flat form of `eligibleRuns` for the dot-and-range mode,
+    /// which draws each bin as an independent mark and so has no use
+    /// for run boundaries.
+    private var eligibleFiniteBins: [IntervalTrendBin] {
+        data.bins.filter { $0.isEligible && $0.median.isFinite }
+    }
+
     /// Bins whose preceding-2-min rate was evaluated and found unstable — the
     /// rate-stability validity marker (X43). Only meaningful for QTc, whose
     /// correction assumes a steady rate.
@@ -1446,6 +1516,15 @@ struct IntervalTrendLane: View {
         var values = data.bins
             .filter { $0.isEligible && $0.median.isFinite }
             .flatMap { [$0.q1, $0.q3, $0.median] }
+        // Dot-and-range draws each bin's FULL range, and the range
+        // segment exists precisely to show threshold excursions — a
+        // domain that clips it would hide the one thing it's for.
+        if effectiveShowMode == .dotAndRange {
+            for bin in eligibleFiniteBins {
+                values.append(bin.rangeMinMs)
+                if !bin.hasCensoredBeats { values.append(bin.rangeMaxMs) }
+            }
+        }
         // Guides must be visible on the lane — otherwise the analyst
         // places a 500 ms guide, the bins sit at 420–465, and the
         // guide silently disappears off-screen.

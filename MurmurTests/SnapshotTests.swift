@@ -266,6 +266,45 @@ final class SnapshotTests: XCTestCase {
         assertSnapshot(of: render(view, size: CGSize(width: 552, height: 120)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 
+    func testVariabilityLane_withPercentileRibbon() {
+        // The 13a ribbon (#261): filled p25–p75 + dashed p5/p95 around
+        // the median line. The middle third carries no band — the
+        // ribbon must break there while the line continues — and the
+        // band widens with the value so the fill is visibly asymmetric
+        // from the line's own drift. Y-domain must cover p95's peak
+        // (proves the band participates in the domain, not just the
+        // line).
+        let samples: [VariabilityLaneSample] = (0..<30).map { i in
+            let t = Double(i) * 10.0
+            let v = 40.0 + 30.0 * sin(Double(i) * 0.4)
+            let spread = 6.0 + Double(i) * 0.8
+            let band: VariabilityLaneBand? = (10...19).contains(i) ? nil : VariabilityLaneBand(
+                p5: v - spread * 1.8,
+                p25: v - spread,
+                p75: v + spread,
+                p95: v + spread * 1.8
+            )
+            return VariabilityLaneSample(
+                windowStartSeconds: t - 150,
+                windowEndSeconds: t + 150,
+                value: v,
+                isEligible: true,
+                band: band
+            )
+        }
+        let view = VariabilityLane(
+            samples: samples,
+            timeRangeSeconds: 0...300,
+            metricLabel: "RMSSD",
+            unit: "ms",
+            windowCaption: "5-min window"
+        )
+        .frame(width: 520)
+        .padding()
+        .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 552, height: 120)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
     /// X92: the LF/HF lane carries a leading y-scale (3-tick, the RMSSD
     /// treatment) — a dimensionless ratio with no scale was a shape, not a
     /// measurement. The fixture includes a mid-series hole one window wide,
@@ -595,6 +634,25 @@ final class SnapshotTests: XCTestCase {
             data: makeCanonicalTrendData(),
             metric: .qtc,
             showMode: .medianAndIQR,
+            selectedBinPreset: .twoMinute
+        )
+        .frame(width: 520)
+        .padding()
+        .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 552, height: 160)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
+    func testIntervalTrendLane_dotAndRange() {
+        // The 13a canonical (and new default, #261): dot at the bin
+        // median on a thick IQR segment and a thin full-range segment,
+        // one independent mark per bin — no connecting line. The
+        // fixture's ineligible bins 8–9 must render as short grey
+        // stubs at the domain floor, with no median dot, IQR or range.
+        let view = IntervalTrendLane(
+            timeRangeSeconds: 0...1800,
+            data: makeCanonicalTrendData(),
+            metric: .qtc,
+            showMode: .dotAndRange,
             selectedBinPreset: .twoMinute
         )
         .frame(width: 520)
