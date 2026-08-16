@@ -102,6 +102,14 @@ struct TrendStackLane: Identifiable {
     /// a lane with no value is still a lane, and a blank cell reads as a
     /// layout bug rather than as "no reading here".
     let value: String?
+    /// The reading's unit, drawn under the value in the 13a value column
+    /// (`412` over `ms`). Separate from `value` so the value string stays
+    /// exactly the number — the UI tests assert the rendered `1.50`/`75.0`
+    /// verbatim, and folding the unit in would break that contract.
+    let unit: String?
+    /// The lane's 4 pt accent rail (13a). One hue per metric family, sampled
+    /// from the handoff wireframe — see the palette extension below.
+    let accent: Color
     /// Row height. Lanes differ: a heat band needs far less than an envelope.
     /// `nil` sizes the row to its content — for the caller-supplied lanes
     /// (RMSSD, interval trend) whose cells carry their own headers, chips and
@@ -124,18 +132,40 @@ struct TrendStackLane: Identifiable {
         title: String,
         subtitle: String,
         value: String? = nil,
+        unit: String? = nil,
         height: CGFloat? = nil,
         seekable: Bool = false,
+        accent: Color = Color.secondary.opacity(0.35),
         @ViewBuilder plot: () -> some View
     ) {
         self.id = id
         self.title = title
         self.subtitle = subtitle
         self.value = value
+        self.unit = unit
         self.height = height
         self.seekable = seekable
+        self.accent = accent
         self.plot = AnyView(plot())
     }
+}
+
+/// The 13a lane accent rails, sampled from the handoff wireframe
+/// (docs/design/2026-08-15-main-window). One hue per metric family, so the
+/// two HR lanes share green and any future variability lane shares blue.
+/// Deliberately muted — the rail is a family badge, not a data encoding,
+/// and the fiducial-tag palette (#249) must stay the louder one.
+extension TrendStackLane {
+    /// #7D9C86 — both HR lanes (trend channel and beat-derived).
+    static let hrAccent = Color(red: 125 / 255, green: 156 / 255, blue: 134 / 255)
+    /// #6B8BA8 — rolling variability (RMSSD).
+    static let variabilityAccent = Color(red: 107 / 255, green: 139 / 255, blue: 168 / 255)
+    /// #4F6F8C — the binned interval trend.
+    static let intervalAccent = Color(red: 79 / 255, green: 111 / 255, blue: 140 / 255)
+    /// #B58A4E — rolling LF/HF.
+    static let lfhfAccent = Color(red: 181 / 255, green: 138 / 255, blue: 78 / 255)
+    /// #9AA3AD — the quality heat band.
+    static let qualityAccent = Color(red: 154 / 255, green: 163 / 255, blue: 173 / 255)
 }
 
 struct TrendStack: View {
@@ -155,8 +185,14 @@ struct TrendStack: View {
     var hint: String?
     var onSeek: ((Double) -> Void)?
 
-    static let labelWidth: CGFloat = 150
-    static let valueWidth: CGFloat = 52
+    // 13a lane-row grid: [4 pt accent rail | 114 pt label | y-gutter | plot |
+    // 66 pt value]. The wireframe's y-gutter is 30 pt; ours stays `axisGutter`
+    // (45 pt) because that number is measured off what Swift Charts actually
+    // reserves (see the contract below) — the design drew a narrower gutter
+    // than Charts will honor, raised on #261 rather than silently adopted.
+    static let railWidth: CGFloat = 4
+    static let labelWidth: CGFloat = 114
+    static let valueWidth: CGFloat = 66
     private static let axisHeight: CGFloat = 16
 
     // MARK: - The plot-geometry contract (#210)
@@ -193,14 +229,21 @@ struct TrendStack: View {
     /// 15 pt. `TrendStackGeometryTests` fails if a future Charts changes it.
     static let chartsAxisPadding: CGFloat = 15
 
-    /// Where every lane's data starts, measured from the card's leading edge.
-    static var plotOriginX: CGFloat { labelWidth + 10 + axisGutter }
+    /// Where every lane's data starts, measured from the card's leading edge:
+    /// the accent rail, then the label column, then the y-scale gutter.
+    static var plotOriginX: CGFloat { railWidth + labelWidth + axisGutter }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(spacing: 0) {
-                ForEach(lanes) { lane in
+                // Enumerated for the 13a zebra striping — every OTHER row gets
+                // a whisper of fill, so adjacent lanes read as separate rows
+                // even where their plots are visually quiet (the TestFlight
+                // "tiny space between lanes" complaint behind #261).
+                ForEach(Array(lanes.enumerated()), id: \.element.id) { index, lane in
                     laneRow(lane)
+                        .background(index.isMultiple(of: 2)
+                                    ? Color.clear : Color.secondary.opacity(0.04))
                     if lane.id != lanes.last?.id {
                         Divider().opacity(0.4)
                     }
@@ -272,13 +315,21 @@ struct TrendStack: View {
         // Charts lane with no intrinsic height would size the row to whatever
         // it felt like. Hence the explicit ceiling on the cell in
         // `laneRowContent` — the two halves are a pair.
-        if let height = lane.height {
-            laneRowContent(lane)
-                .frame(minHeight: height)
-                .fixedSize(horizontal: false, vertical: true)
-        } else {
-            laneRowContent(lane)
-                .fixedSize(horizontal: false, vertical: true)
+        Group {
+            if let height = lane.height {
+                laneRowContent(lane)
+                    .frame(minHeight: height)
+            } else {
+                laneRowContent(lane)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        // The 13a accent rail. An overlay, not an HStack child: an overlay is
+        // sized BY the row, so the rail spans exactly the row's height —
+        // including any growth the rail column above won — without voting on
+        // that height the way a greedy `Color` child would under `fixedSize`.
+        .overlay(alignment: .leading) {
+            lane.accent.frame(width: Self.railWidth)
         }
     }
 
@@ -291,11 +342,18 @@ struct TrendStack: View {
                 Text(lane.subtitle)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    // Three lines, not two: the 13a label column is 114 pt
+                    // where the old one was 150, and the provenance subtitles
+                    // (estimator · window · step) are not trimmable — cutting
+                    // provenance to fit a column is the one trade DECISIONS
+                    // forbids. The taller 13a rows carry the extra line.
+                    .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .frame(width: Self.labelWidth, alignment: .leading)
-            .padding(.leading, 10)
+            .padding(.vertical, 7)
+            .padding(.horizontal, 9)
+            .frame(width: Self.labelWidth, alignment: .topLeading)
+            .padding(.leading, Self.railWidth)
 
             lane.plot
                 // `minWidth: 0` is load-bearing (X97). With only `maxWidth`
@@ -346,11 +404,23 @@ struct TrendStack: View {
                     }
                 }
 
-            Text(lane.value ?? "—")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(lane.value == nil ? .tertiary : .primary)
-                .frame(width: Self.valueWidth, alignment: .trailing)
-                .padding(.trailing, 10)
+            // 13a value column: the reading over its unit, so the number is
+            // scannable down the column without each lane restating its unit
+            // inline. The value Text carries ONLY the number — the trend UI
+            // tests assert the rendered `1.50`/`75.0` strings verbatim.
+            VStack(alignment: .trailing, spacing: 1) {
+                Text(lane.value ?? "—")
+                    .font(.body.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(lane.value == nil ? .tertiary : .primary)
+                if lane.value != nil, let unit = lane.unit {
+                    Text(unit)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.vertical, 7)
+            .frame(width: Self.valueWidth, alignment: .topTrailing)
+            .padding(.trailing, 10)
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("trend-lane-\(lane.id)")

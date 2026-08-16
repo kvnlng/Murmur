@@ -1744,8 +1744,10 @@ struct BedsideView: View {
             // Provenance travels with the number — estimator, window, step.
             subtitle: lfhfContext.caption ?? "rolling 5 min",
             value: lfhfValueAtViewportStart,
-            height: 46,
-            seekable: true
+            unit: "ratio",
+            height: 86,
+            seekable: true,
+            accent: TrendStackLane.lfhfAccent
         ) {
             LFHFLanePlot(
                 samples: lfhfContext.samples,
@@ -1778,10 +1780,14 @@ struct BedsideView: View {
             // absent, name the unit rather than leaving the row unlabelled.
             subtitle: laneContext.windowCaption ?? laneContext.unit,
             value: laneContext.samples.last.map { String(format: "%.1f", $0.value) },
+            unit: laneContext.unit,
             // Natural height: the cell carries the lane's own header, chips
             // and captions — a fixed row overflowed through the lanes beneath
-            // the moment an entitled record populated it (X76 finding).
-            height: nil
+            // the moment an entitled record populated it (X76 finding). The
+            // 13a plot heights (86/104) are the RENDERERS' target (#261
+            // phase 2), not this row's.
+            height: nil,
+            accent: TrendStackLane.variabilityAccent
         ) {
             variabilityLaneStrip
         }
@@ -1794,7 +1800,8 @@ struct BedsideView: View {
             title: "Interval trend",
             subtitle: "\(trendLaneContext.metric.displayName) · \(Int(trendLaneContext.binSeconds / 60)) min bins",
             value: nil,
-            height: nil   // natural — the cell carries chips, chart, captions
+            height: nil,   // natural — the cell carries chips, chart, captions
+            accent: TrendStackLane.intervalAccent
         ) {
             intervalTrendLaneStrip
         }
