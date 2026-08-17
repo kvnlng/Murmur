@@ -173,6 +173,16 @@ final class MurmurUILargeDatasetTests: XCTestCase {
             .matching(identifier: "ui-test-viewport-state").firstMatch
         XCTAssertTrue(viewportState.waitForExistence(timeout: 5))
 
+        // The review queue's rows populate AFTER the viewport label — the
+        // hour-long bundle's annotations load off the render path, and on
+        // Xcode Cloud's slower VM the bare `.exists` checks inside the
+        // measured block ran before any row existed (Build 146/147, all
+        // retries). Wait once out here, so the clock metric still times
+        // the jump and never the load.
+        XCTAssertTrue(app.buttons.matching(identifier: "finding-row-VT").firstMatch
+            .waitForExistence(timeout: 30),
+            "the findings list should populate before the jumps are timed")
+
         let measureOptions = XCTMeasureOptions()
         measureOptions.iterationCount = 3
         measure(metrics: [XCTClockMetric()], options: measureOptions) {

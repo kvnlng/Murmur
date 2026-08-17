@@ -178,7 +178,7 @@ public enum WindowSizing {
     public static func applyTestWindowPolicy() async {
         #if DEBUG
         guard UITestSupport.isRunningUITest else { return }
-        let size = testWindowContentSize(
+        var size = testWindowContentSize(
             pinned: UITestSupport.forcedWindowSize,
             maximized: UITestSupport.wantsMaximizedWindow,
             visible: NSScreen.main?.visibleFrame.size
@@ -196,6 +196,26 @@ public enum WindowSizing {
         }
         var converged = false
         for _ in 0..<15 {
+            // `max` promises FRAME == visible frame, so its layout target
+            // must come from the chrome this window actually has, measured
+            // live — not from `chromeAllowance`, which is a prediction
+            // frozen at 66 pt when the toolbar showed icon-and-text. #253
+            // made icon-only the default, whose chrome is ~52–56 pt
+            // depending on display metrics, so the prediction left every
+            // fresh-defaults `max` launch a chrome-delta short of maximized
+            // (Cloud Build 146/147: 682 pt on a 692 pt visible frame; any
+            // machine whose persisted toolbar config predates #253 still
+            // measures 66 and never sees it). Inside the loop, not before
+            // it: the toolbar may not be laid out on the first pass, and
+            // the same guard `frameSize(forLayout:of:)` uses keeps a
+            // garbage measurement from shrinking the target.
+            if UITestSupport.wantsMaximizedWindow,
+               let visibleHeight = (window.screen ?? NSScreen.main)?.visibleFrame.height {
+                let chrome = window.frame.size.height - window.contentLayoutRect.height
+                if chrome > 0, chrome < window.frame.size.height {
+                    size.height = visibleHeight - chrome
+                }
+            }
             let content = layoutSize(of: window)
             if abs(content.width - size.width) < 1, abs(content.height - size.height) < 1,
                isPlacedOnScreen(window) {
