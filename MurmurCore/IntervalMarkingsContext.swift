@@ -445,6 +445,25 @@ public final class IntervalMarkingsContext {
         }
     }
 
+    /// #227 — whether the focused beat draws its PR / QRS / QT spans against
+    /// the patient's own normal.
+    ///
+    /// Its own flag rather than a fourth `MarkingsFiducialLayer` case, for two
+    /// reasons. The layer enum is the letter vocabulary — every case has a
+    /// letter and a colour in `FiducialPalette`, and "intervals" has neither.
+    /// And its raw values are persisted, so adding a case means a stored set
+    /// from an older launch decodes to a different meaning.
+    ///
+    /// Default ON. The roadmap line this completes has always read "toggleable
+    /// layers (P / QRS / T / ST / intervals)", and the point of #227 is that the
+    /// span half is what an analyst actually reads — shipping it off by default
+    /// would leave the feature exactly as undiscovered as it was.
+    public var showIntervalSpans: Bool {
+        didSet {
+            UserDefaults.standard.set(showIntervalSpans, forKey: Keys.showIntervalSpans)
+        }
+    }
+
     // MARK: - T-offset reliability gate (X58 — the analyst's dial)
 
     /// The derived default exclusion threshold — mirror of
@@ -538,6 +557,9 @@ public final class IntervalMarkingsContext {
         } else {
             self.enabledLayers = Set(MarkingsFiducialLayer.allCases)
         }
+        // #227: absent key reads as ON — see `showIntervalSpans`.
+        self.showIntervalSpans =
+            UserDefaults.standard.object(forKey: Keys.showIntervalSpans) as? Bool ?? true
         // X58 gate: absent keys read as the shipped defaults (exclude, at the
         // derived operating point).
         self.tOffsetExclusionEnabled = UserDefaults.standard.object(forKey: Keys.tOffsetExclusionEnabled) as? Bool ?? true
@@ -778,6 +800,7 @@ public final class IntervalMarkingsContext {
     private enum Keys {
         static let qtcFormula = "murmur.intervalMarkings.qtcFormula"
         static let enabledLayers = "murmur.intervalMarkings.enabledLayers"
+        static let showIntervalSpans = "murmur.intervalMarkings.showIntervalSpans"
         static let tOffsetExclusionEnabled = "murmur.intervalMarkings.tOffsetExclusionEnabled"
         static let tOffsetExclusionScore = "murmur.intervalMarkings.tOffsetExclusionScore"
     }

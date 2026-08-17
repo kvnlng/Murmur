@@ -352,6 +352,19 @@ enum SyntheticRecording {
                 """)
             }
         }
+        // #250 — one analyst-authored finding, exactly as the creation
+        // sites stamp it, so the rename UI tests have a row to act on.
+        if UITestSupport.seedAnalystFinding {
+            findings.append("""
+            {
+              "kind": "point",
+              "startSample": 1250,
+              "category": "ANALYST_FINDING",
+              "label": "Analyst mark",
+              "source": "murmur.annotation"
+            }
+            """)
+        }
         // Same shape, atr-like provenance: these DO read as normal beats to
         // `normalBeatSampleIndices()`, so the variability-metrics pipeline
         // has a population to measure (X95).

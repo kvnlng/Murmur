@@ -164,6 +164,23 @@ struct FindingsPanel: View {
     /// this recording's signal BEFORE weighing its candidates.
     var arrhythmiaPreflightWindows: [ArrhythmiaPreflightWindow] = []
 
+    /// #250 — rename an analyst-authored finding. The panel offers the
+    /// affordance; the OWNER performs the replace-and-persist, because the
+    /// annotation stores live in BedsideView (same division as the jump and
+    /// disposition hooks). Nil = no rename anywhere (previews, tests that
+    /// don't care).
+    var onRenameFinding: ((Annotation, String) -> Void)? = nil
+    /// #250 — reports when the rename field is on screen, so the owner can
+    /// raise `BedsideCommands.textEntryActive` and the bedside's plain-key
+    /// shortcuts (J/K pan, disposition keys) stay out of the analyst's
+    /// typing — the same wiring the notes editor has.
+    var onRenameFieldActive: ((Bool) -> Void)? = nil
+
+    /// The finding being renamed, driving the rename dialog. Text state is
+    /// seeded from the row's current display label at open.
+    @State private var renameTarget: Annotation?
+    @State private var renameText: String = ""
+
     @State private var sort: FindingSort = .structural
     @State private var expandedGroups: Set<String> = []
     @State private var showNormals: Bool = false
@@ -238,6 +255,36 @@ struct FindingsPanel: View {
         // stay expanded for the test that dropped them in.
         .onChange(of: annotations.count) { _, _ in
             applyUITestExpandOverride()
+        }
+        // #250 — the rename dialog. An alert rather than an inline field:
+        // inline editors in lists fight click-to-jump (the row IS a button),
+        // and the issue names the context menu as the safer first cut.
+        .alert(
+            "Rename Finding",
+            isPresented: Binding(
+                get: { renameTarget != nil },
+                set: { presented in
+                    if !presented {
+                        renameTarget = nil
+                        onRenameFieldActive?(false)
+                    }
+                }
+            )
+        ) {
+            TextField("Name", text: $renameText)
+                .accessibilityIdentifier("finding-rename-field")
+            Button("Rename") {
+                let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let target = renameTarget, !trimmed.isEmpty {
+                    onRenameFinding?(target, trimmed)
+                }
+            }
+            .accessibilityIdentifier("finding-rename-save")
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            // The label-vs-caption split, stated where the analyst acts on it.
+            Text("Renames this finding in the queue and exports. "
+                 + "The measured citation is unchanged.")
         }
     }
 
@@ -517,7 +564,7 @@ struct FindingsPanel: View {
                 Button {
                     toggleCategory(cat)
                 } label: {
-                    Label(humanLabel(for: cat), systemImage: filter.categories.contains(cat) ? "checkmark" : "")
+                    Label(Self.humanLabel(for: cat), systemImage: filter.categories.contains(cat) ? "checkmark" : "")
                 }
                 .accessibilityIdentifier("findings-category-filter-\(cat)")
             }
@@ -994,6 +1041,30 @@ struct FindingsPanel: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
         .opacity(dispositionStore.record(for: entry.annotation.id)?.state == .dismissed ? 0.5 : 1.0)
+        .contextMenu { rowContextMenu(for: entry.annotation) }
+    }
+
+    /// #250 — Rename, offered ONLY for analyst-authored findings. Imported
+    /// WFDB annotations and producer findings keep their source-given
+    /// labels: renaming someone else's annotation would falsify provenance,
+    /// which is the same reason the groups are provenance-tagged. macOS
+    /// shows no menu at all when the builder is empty, so read-only rows
+    /// behave exactly as before.
+    @ViewBuilder
+    private func rowContextMenu(for annotation: Annotation) -> some View {
+        // Behind the Editing latch, like the disposition buttons and every
+        // other analyst edit — renaming is an authoring act that goes
+        // through the same door authoring does.
+        if isEditing,
+           annotation.source == Annotation.analystAuthoredSource,
+           onRenameFinding != nil {
+            Button("Rename…") {
+                renameText = annotation.displayLabel
+                renameTarget = annotation
+                onRenameFieldActive?(true)
+            }
+            .accessibilityIdentifier("finding-rename-\(annotation.id.uuidString)")
+        }
     }
 
     /// Label for the numeric confidence value shown on exemplar rows.
@@ -1177,7 +1248,7 @@ struct FindingsPanel: View {
         let groups: [FindingGroup] = buckets.map { category, entries in
             FindingGroup(
                 category: category,
-                humanLabel: humanLabel(for: category),
+                humanLabel: Self.humanLabel(for: category),
                 subLabel: subLabel(for: category),
                 color: CategoryPalette.swiftUIColor(for: category),
                 count: entries.count,
@@ -1333,9 +1404,16 @@ struct FindingsPanel: View {
         "VT":    "Ventricular tachycardia",
         "VF":    "Ventricular fibrillation",
         "NOISE": "Signal quality — noise",
+        // #250 — the creation sites stamp this internal constant as the
+        // category; the header was rendering it raw. The stored category is
+        // untouched: only the display maps.
+        "ANALYST_FINDING": "Analyst findings",
     ]
 
-    private func humanLabel(for category: String) -> String {
+    /// Static and internal (not private) so the mapping is unit-testable —
+    /// the raw `ANALYST_FINDING` token leaking into the queue header (#250)
+    /// is exactly the regression a test on this function catches.
+    static func humanLabel(for category: String) -> String {
         let raw = category.trimmingCharacters(in: .whitespaces)
         return Self.caseSensitiveLabels[raw]
             ?? Self.categoryLabels[raw.uppercased()]

@@ -87,6 +87,13 @@ struct BedsideView: View {
     @State private var attachedAnnotations: [Annotation] = []
     /// #263 — the global import-progress state the info bar's strip reads.
     @State private var importProgress = ImportProgressContext.shared
+    /// #250 — in-session display-label overrides for analyst-authored
+    /// findings, keyed by annotation id. Applied in `allAnnotations` and
+    /// persisted through the bundle sidecar on every rename.
+    @State private var renamedLabels: [UUID: String] = [:]
+    /// #250 — true while the queue's rename field is on screen, so the
+    /// bedside's plain-key shortcuts stay out of the analyst's typing.
+    @State private var findingRenameActive = false
     /// Drives the file-importer sheet for "Attach findings…".
     @State private var showAttachFindings: Bool = false
     /// Error message shown when an attach attempt fails (unreadable file,
@@ -251,7 +258,18 @@ struct BedsideView: View {
     /// surface — canvas overlays, findings panel, density timeline, summary
     /// chips — reads from this so attached findings are first-class.
     private var allAnnotations: [Annotation] {
-        recording.annotations + attachedAnnotations
+        // #250 — rename overlay. `recording` is immutable and a reopened
+        // bundle's findings live in `recording.annotations` (the sidecar
+        // overrides the manifest at load), so an in-session rename cannot
+        // land in either store directly. The overlay maps by id over the
+        // union, which covers a finding authored this session and one
+        // loaded from the sidecar identically — and `BundleAnnotationsFile
+        // .write(allAnnotations…)` therefore persists renames on the same
+        // write every other authoring act uses.
+        (recording.annotations + attachedAnnotations).map { annotation in
+            guard let newLabel = renamedLabels[annotation.id] else { return annotation }
+            return annotation.withLabel(newLabel)
+        }
     }
 
     /// Annotations that survive the current filter. Drives the canvas, the
@@ -374,8 +392,22 @@ struct BedsideView: View {
                     isEnabled: markingsContext.enabledLayers.contains(layer),
                     isRendering: policy.drawsMarks
                         && policy.renderableLayers.contains(layer))
-            },
+            }
+            // #227 — the roadmap's "intervals" layer joins the same menu.
+            // Not a `MarkingsFiducialLayer` case (its raw values persist,
+            // and the letter palette has no letter for it), so it rides
+            // along as one more row with its own id; `isRendering` reads
+            // the SAME policy the overlay draws from, per X61.
+            + [BedsideCommands.FiducialLayerMenuItem(
+                id: "interval-spans",
+                label: "Intervals",
+                isEnabled: markingsContext.showIntervalSpans,
+                isRendering: markingsContext.renderPolicy.drawsIntervalSpans)],
             toggleFiducialLayer: { raw in
+                if raw == "interval-spans" {
+                    markingsContext.showIntervalSpans.toggle()
+                    return
+                }
                 guard let layer = MarkingsFiducialLayer(rawValue: raw) else { return }
                 toggleFiducialLayer(layer)
             },
@@ -405,7 +437,9 @@ struct BedsideView: View {
                 panels.request(.inspector, open: !panels.resolution.inspectorVisible)
             },
             reviewQueueVisible: panels.resolution.inspectorVisible,
-            textEntryActive: notesEditorFocused,
+            // #250: the rename field raises the same gate as the notes
+            // editor — typing a finding's name must not pan the viewport.
+            textEntryActive: notesEditorFocused || findingRenameActive,
             isEditing: isEditing
         )
     }
@@ -512,7 +546,11 @@ struct BedsideView: View {
             arrhythmiaDispositionStore: arrhythmiaDispositionStore,
             arrhythmiaParametersCaption: arrhythmiaContext.parametersCaption,
             arrhythmiaRegulatoryNotice: arrhythmiaContext.regulatoryNotice,
-            arrhythmiaPreflightWindows: arrhythmiaContext.preflightWindows
+            arrhythmiaPreflightWindows: arrhythmiaContext.preflightWindows,
+            onRenameFinding: { annotation, newLabel in
+                renameFinding(annotation, to: newLabel)
+            },
+            onRenameFieldActive: { findingRenameActive = $0 }
         )
         .inspectorColumnWidth(min: 260, ideal: 340, max: 500)
         // The Review Queue owns its own scrolling, so its content height is
@@ -1341,6 +1379,22 @@ struct BedsideView: View {
     /// Mirrors the persistence semantics of `handleAttachFindings` — a
     /// write failure surfaces in the same alert path but doesn't roll
     /// back the in-memory state.
+    /// #250 — rename an analyst-authored finding. Guarded on source here as
+    /// well as at the affordance: renaming someone else's annotation would
+    /// falsify provenance, and a UI bug must not be enough to do it. Same
+    /// persistence semantics as attach/producer: the in-memory rename holds
+    /// even if the sidecar write fails, and the failure is surfaced.
+    private func renameFinding(_ annotation: Annotation, to newLabel: String) {
+        guard annotation.source == Annotation.analystAuthoredSource else { return }
+        renamedLabels[annotation.id] = newLabel
+        do {
+            try BundleAnnotationsFile.write(allAnnotations, to: recordingDirectory)
+        } catch {
+            attachError = "The finding was renamed for this session but could not be "
+                + "saved to the bundle: \(error.localizedDescription)"
+        }
+    }
+
     private func handleProducerOutput(_ findings: [Annotation]) {
         guard !findings.isEmpty else { return }
         attachedAnnotations.append(contentsOf: findings)

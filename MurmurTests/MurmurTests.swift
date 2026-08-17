@@ -5970,6 +5970,29 @@ struct FiducialLayerToggleTests {
         #expect(MarkingsFiducialLayer.qrs.displayName == "QRS")
         #expect(MarkingsFiducialLayer.t.displayName == "T")
     }
+
+    // MARK: - Interval spans toggle (#227)
+
+    /// The roadmap's layer list always named "intervals" alongside P/QRS/T,
+    /// and the span half is the half an analyst actually reads — off by
+    /// default would ship it as undiscovered as it was unbuilt.
+    @Test("Interval spans default to on")
+    func intervalSpansDefaultOn() {
+        UserDefaults.standard.removeObject(forKey: "murmur.intervalMarkings.showIntervalSpans")
+        let ctx = IntervalMarkingsContext()
+        #expect(ctx.showIntervalSpans)
+    }
+
+    @Test("Turning interval spans off survives a relaunch")
+    func intervalSpansTogglePersists() {
+        UserDefaults.standard.removeObject(forKey: "murmur.intervalMarkings.showIntervalSpans")
+        do {
+            let ctx = IntervalMarkingsContext()
+            ctx.showIntervalSpans = false
+        }
+        let reloaded = IntervalMarkingsContext()
+        #expect(!reloaded.showIntervalSpans)
+    }
 }
 
 /// X74. Column reduction for the shared-axis trend stack.
@@ -6522,6 +6545,19 @@ struct FiducialRenderPolicyTests {
         let p = policy(.inspect, level)
         #expect(p.suppressedLayers(enabled: [.p, .qrs, .t]) == [.p, .t])
         #expect(p.explanation(enabled: [.p, .qrs, .t]) != nil)
+    }
+
+    /// #227 — interval spans are a full-fiducial treatment: they exist at the
+    /// zoom where the spec says the analyst reads intervals, and nowhere
+    /// else. The View-menu row and the overlay both read THIS answer — the
+    /// X61 rule, extended to the new layer before it can drift.
+    @Test("Interval spans draw only at full-fiducial zoom on Inspect")
+    func intervalSpansFollowFullFiducialZoom() {
+        #expect(policy(.inspect, .fullFiducials).drawsIntervalSpans)
+        #expect(!policy(.inspect, .qrsOnly).drawsIntervalSpans)
+        #expect(!policy(.inspect, .rTicksOnly).drawsIntervalSpans)
+        #expect(!policy(.scan, .fullFiducials).drawsIntervalSpans)
+        #expect(!policy(.context, .fullFiducials).drawsIntervalSpans)
     }
 
     @Test("Nothing enabled-and-dropped means no explanation to give")
@@ -8460,5 +8496,64 @@ struct ImportProgressContextTests {
         ctx.update(recordName: "r", fractionComplete: -0.3,
                    completedRecords: 0, totalRecords: 2)
         #expect(ctx.fractionComplete == 0.0)
+    }
+}
+
+// MARK: - #250 · Name your own finding
+
+/// Renaming an analyst-authored finding edits `label` — the row title —
+/// and NOTHING else. The label-vs-caption split exists so what the analyst
+/// CALLS a finding can evolve without corrupting what was MEASURED, so
+/// `citationCaption` in particular must survive a rename byte-for-byte.
+@Suite("Finding rename (#250)")
+struct FindingRenameTests {
+
+    private func analystFinding() -> Annotation {
+        Annotation(
+            kind: .point,
+            sampleIndex: 1_250,
+            category: "ANALYST_FINDING",
+            label: "Analyst mark",
+            source: Annotation.analystAuthoredSource,
+            citationCaption: "Marked by the analyst on the V1 trace")
+    }
+
+    @Test("withLabel changes the label and only the label")
+    func withLabelIsSurgical() {
+        let original = analystFinding()
+        let renamed = original.withLabel("Late-coupled PVC")
+        #expect(renamed.displayLabel == "Late-coupled PVC")
+        // Identity and provenance are untouched — same finding, new name.
+        #expect(renamed.id == original.id)
+        #expect(renamed.category == original.category)
+        #expect(renamed.source == original.source)
+        #expect(renamed.citationCaption == original.citationCaption)
+        #expect(renamed.sampleIndex == original.sampleIndex)
+        #expect(renamed.note == original.note)
+    }
+
+    /// The round-trip the issue calls the test worth writing first: name it,
+    /// save, reopen, still named — through the real sidecar code, not a mock.
+    @Test("A rename survives the bundle sidecar round-trip")
+    func renameSurvivesSidecarRoundTrip() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("rename-roundtrip-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let renamed = analystFinding().withLabel("Junctional escape")
+        try BundleAnnotationsFile.write([renamed], to: dir)
+        let reloaded = try #require(BundleAnnotationsFile.read(from: dir))
+        let found = try #require(reloaded.first { $0.id == renamed.id })
+        #expect(found.displayLabel == "Junctional escape")
+        #expect(found.citationCaption == "Marked by the analyst on the V1 trace")
+        #expect(found.source == Annotation.analystAuthoredSource)
+    }
+
+    /// The group header leaked the raw category token into analyst-facing
+    /// chrome. The stored category is untouched — only the display maps.
+    @Test("ANALYST_FINDING renders as a human title, not a constant")
+    func analystGroupHeaderIsHuman() {
+        #expect(FindingsPanel.humanLabel(for: "ANALYST_FINDING") == "Analyst findings")
     }
 }

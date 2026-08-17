@@ -81,6 +81,15 @@ public struct FiducialRenderPolicy: Sendable, Equatable {
         }
     }
 
+    /// #227 — whether the focused beat's PR / QRS / QT spans can draw at
+    /// this zoom. A full-fiducial treatment: spans exist at the zoom where
+    /// the spec says the analyst reads intervals. The View-menu row and the
+    /// overlay both read THIS answer (the X61 rule — one authority, so the
+    /// control cannot claim a state the canvas is not honouring).
+    public var drawsIntervalSpans: Bool {
+        drawsMarks && renderableLayers.isSuperset(of: [.p, .qrs, .t])
+    }
+
     /// Layers the analyst has enabled that the renderer is currently
     /// dropping. Empty when the control and the canvas agree — which is the
     /// only state in which the chip may report the enabled set plainly.

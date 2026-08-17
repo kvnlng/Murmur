@@ -568,7 +568,9 @@ struct ChannelPanel: View {
                     pinnedRPeakSampleIndex: markingsContext.pinnedBeatSampleIndex,
                     enabledLayers: markingsContext.enabledLayers,
                     canvasSize: liveSize,
-                    tier: resolvedTier
+                    tier: resolvedTier,
+                    template: markingsContext.template,
+                    drawIntervalSpans: markingsContext.showIntervalSpans
                 )
 
                 if let hovered = hoveredAnnotation {
