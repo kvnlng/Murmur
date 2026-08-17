@@ -435,8 +435,32 @@ public struct ContentView: View {
     // what happened to each of the card's entry points. Recents live in
     // File ▸ Open Recent; drag-a-folder and the sample recording were
     // removed deliberately.
+    //
+    // #303: the launch window is the REAL split view. 12a's "both side panes
+    // are closed at launch" means closed, not absent — the navigator and the
+    // review queue open and close with no record, showing their working
+    // chrome with quiet empties. The pane state is LOCAL rather than the
+    // shared coexistence context: the context's wanted-defaults encode the
+    // loaded experience (record open → queue up), while 12a pins launch to
+    // closed — and an empty pane must not consume the analyst's stored
+    // intent for the record they open next.
     private var emptyShell: some View {
-        NavigationStack {
+        NavigationSplitView(columnVisibility: Binding(
+            get: { emptyNavigatorOpen ? .all : .detailOnly },
+            set: { emptyNavigatorOpen = $0 != .detailOnly }
+        )) {
+            RecordSidebar(
+                records: [],
+                importStates: [:],
+                selection: $selection,
+                onOpenFolder: { isImporterPresented = true }
+            )
+                .navigationTitle("Murmur")
+                .navigationSplitViewColumnWidth(min: 160, ideal: 240, max: 320)
+                // X81: same suppression as the browse shell — the system
+                // toggle collapses with the column and cannot bring it back.
+                .toolbar(removing: .sidebarToggle)
+        } detail: {
             LaunchShellView(onOpenFolder: { isImporterPresented = true })
                 .navigationTitle("Murmur")
                 .toolbar(id: MurmurToolbar.identifier) {
@@ -445,8 +469,40 @@ public struct ContentView: View {
                     // whole item set exists at launch, idle (`live` is nil
                     // here: nothing publishes bedside commands). #298: one
                     // registration per hierarchy, never a second mirror.
-                    MurmurToolbarItems(live: bedsideCommands)
+                    // #303: the queue toggle alone is live — it acts on
+                    // chrome, not on record data.
+                    MurmurToolbarItems(
+                        live: bedsideCommands,
+                        idleQueueVisible: emptyQueueOpen,
+                        idleQueueToggle: { emptyQueueOpen.toggle() }
+                    )
                 }
+                .toolbar { emptySidebarToggleToolbarItem }
+                .inspector(isPresented: $emptyQueueOpen) {
+                    IdleReviewQueue()
+                        .inspectorColumnWidth(min: 260, ideal: 340, max: 500)
+                }
+        }
+    }
+
+    /// #303 — the launch shell's pane state. See `emptyShell` for why this
+    /// is not `SidePanelCoexistenceContext`.
+    @State private var emptyNavigatorOpen = false
+    @State private var emptyQueueOpen = false
+
+    /// The launch twin of `sidebarToggleToolbarItem`: same id, same glyph,
+    /// same placement — only the target state differs. Never mounted
+    /// together (one shell at a time), so the id cannot collide.
+    @ToolbarContentBuilder
+    private var emptySidebarToggleToolbarItem: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            Button {
+                withAnimation { emptyNavigatorOpen.toggle() }
+            } label: {
+                Label("Toggle Record List", systemImage: "sidebar.leading")
+            }
+            .help("Show or hide the record list")
+            .accessibilityIdentifier("toolbar-sidebar-toggle")
         }
     }
 
@@ -1371,6 +1427,11 @@ private struct RecordSidebar: View {
     let records: [RecordListEntry]
     let importStates: [String: ContentView.RecordImportState]
     @Binding var selection: String?
+    /// #303 — supplied by the launch shell only. With no records at all, the
+    /// navigator offers the open action inline (the design's third home for
+    /// it, after ⌘O and the toolbar overflow menu); a browse shell always
+    /// has records, so it never passes this.
+    var onOpenFolder: (() -> Void)?
     @State private var flags = SessionFlagStore.shared
 
     /// Search text (X68). Matches the record name and its metadata line, so
@@ -1422,6 +1483,20 @@ private struct RecordSidebar: View {
                 // no way to tell which without clearing the field.
                 if filtered.isEmpty && !records.isEmpty {
                     ContentUnavailableView.search(text: searchText)
+                }
+                // #303 — the launch navigator: working chrome, quiet empty.
+                // One line in the launch shell's own voice (`openLine`), not
+                // a ContentUnavailableView card — 12a forbids cards here.
+                if records.isEmpty, let onOpenFolder {
+                    VStack(spacing: 4) {
+                        Text("No records")
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("sidebar-empty-prompt")
+                        Button("Open Record Folder…") { onOpenFolder() }
+                            .buttonStyle(.link)
+                            .accessibilityIdentifier("sidebar-empty-open-button")
+                    }
+                    .font(.callout)
                 }
             }
         }

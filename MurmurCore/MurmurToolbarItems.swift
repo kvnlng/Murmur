@@ -51,6 +51,14 @@ struct MurmurToolbarItems: CustomizableToolbarContent {
     /// The mounted bedside's actions and state, or nil at idle.
     var live: BedsideCommands?
 
+    /// #303 — the launch shell's empty review-queue pane. With no bedside
+    /// mounted, the queue toggle alone stays live: it acts on chrome, not on
+    /// record data, and 12a wants the panes closed-but-openable at launch.
+    /// Nil (the loaded shells) keeps the toggle wired to `live` exactly as
+    /// before.
+    var idleQueueVisible: Bool = false
+    var idleQueueToggle: (() -> Void)?
+
     // MARK: - Hover text (X60)
     //
     // Named once each so the string a button claims is greppable. NOTE:
@@ -203,13 +211,18 @@ struct MurmurToolbarItems: CustomizableToolbarContent {
         #endif
         ToolbarItem(id: "findings-toggle", placement: .automatic, showsByDefault: true) {
             Button {
-                live?.toggleReviewQueue()
+                if let live {
+                    live.toggleReviewQueue()
+                } else {
+                    idleQueueToggle?()
+                }
             } label: {
                 Label("Review queue", systemImage: ToolbarGlyph.reviewQueue)
             }
             .help(Self.findingsHelp)
-            .tint(live?.reviewQueueVisible == true ? Color.accentColor : nil)
-            .disabled(live == nil)
+            .tint(live?.reviewQueueVisible == true || idleQueueVisible
+                  ? Color.accentColor : nil)
+            .disabled(live == nil && idleQueueToggle == nil)
             .accessibilityIdentifier("findings-toggle")
         }
     }
