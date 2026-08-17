@@ -5970,6 +5970,29 @@ struct FiducialLayerToggleTests {
         #expect(MarkingsFiducialLayer.qrs.displayName == "QRS")
         #expect(MarkingsFiducialLayer.t.displayName == "T")
     }
+
+    // MARK: - Interval spans toggle (#227)
+
+    /// The roadmap's layer list always named "intervals" alongside P/QRS/T,
+    /// and the span half is the half an analyst actually reads — off by
+    /// default would ship it as undiscovered as it was unbuilt.
+    @Test("Interval spans default to on")
+    func intervalSpansDefaultOn() {
+        UserDefaults.standard.removeObject(forKey: "murmur.intervalMarkings.showIntervalSpans")
+        let ctx = IntervalMarkingsContext()
+        #expect(ctx.showIntervalSpans)
+    }
+
+    @Test("Turning interval spans off survives a relaunch")
+    func intervalSpansTogglePersists() {
+        UserDefaults.standard.removeObject(forKey: "murmur.intervalMarkings.showIntervalSpans")
+        do {
+            let ctx = IntervalMarkingsContext()
+            ctx.showIntervalSpans = false
+        }
+        let reloaded = IntervalMarkingsContext()
+        #expect(!reloaded.showIntervalSpans)
+    }
 }
 
 /// X74. Column reduction for the shared-axis trend stack.
@@ -6522,6 +6545,19 @@ struct FiducialRenderPolicyTests {
         let p = policy(.inspect, level)
         #expect(p.suppressedLayers(enabled: [.p, .qrs, .t]) == [.p, .t])
         #expect(p.explanation(enabled: [.p, .qrs, .t]) != nil)
+    }
+
+    /// #227 — interval spans are a full-fiducial treatment: they exist at the
+    /// zoom where the spec says the analyst reads intervals, and nowhere
+    /// else. The View-menu row and the overlay both read THIS answer — the
+    /// X61 rule, extended to the new layer before it can drift.
+    @Test("Interval spans draw only at full-fiducial zoom on Inspect")
+    func intervalSpansFollowFullFiducialZoom() {
+        #expect(policy(.inspect, .fullFiducials).drawsIntervalSpans)
+        #expect(!policy(.inspect, .qrsOnly).drawsIntervalSpans)
+        #expect(!policy(.inspect, .rTicksOnly).drawsIntervalSpans)
+        #expect(!policy(.scan, .fullFiducials).drawsIntervalSpans)
+        #expect(!policy(.context, .fullFiducials).drawsIntervalSpans)
     }
 
     @Test("Nothing enabled-and-dropped means no explanation to give")
