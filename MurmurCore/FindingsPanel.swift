@@ -87,6 +87,77 @@ enum DispositionFilter: String, CaseIterable, Sendable, Equatable {
     }
 }
 
+/// #303 / 12a — the review queue's launch chrome: header and disposition
+/// filter at their final size and position, counts em-dashed, list area
+/// empty. Mounted by the launch shell's inspector so the queue pane opens
+/// and closes with no record; `FindingsPanel` proper needs a recording's
+/// annotations and stores, which do not exist yet.
+///
+/// The chips mirror `dispositionChip`'s anatomy (dot, label, count) with the
+/// idle treatment: disabled, count "—". Their identifiers are the live
+/// panel's, so a record opening changes VALUES and never which controls
+/// exist — the #285 toolbar rule, applied to the pane.
+struct IdleReviewQueue: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("Review queue")
+                        .font(.headline)
+                    Text("—")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                    Spacer(minLength: 4)
+                }
+                HStack(spacing: 6) {
+                    ForEach(DispositionFilter.allCases, id: \.self) { bucket in
+                        idleChip(bucket)
+                    }
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("disposition-filter")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            Divider()
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("findings-panel-idle")
+    }
+
+    private func idleChip(_ bucket: DispositionFilter) -> some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(idleColor(bucket))
+                .frame(width: 6, height: 6)
+            Text(bucket.label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text("—")
+                .font(.caption2.monospacedDigit().weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(Color.secondary.opacity(0.08)))
+        .overlay(Capsule().stroke(Color.secondary.opacity(0.15), lineWidth: 0.5))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(bucket.label), no records")
+        .accessibilityIdentifier("disposition-filter-\(bucket.rawValue)")
+    }
+
+    /// The live chips' hues at the idle opacity — same tokens, quiet.
+    private func idleColor(_ bucket: DispositionFilter) -> Color {
+        switch bucket {
+        case .toReview: return .blue.opacity(0.45)
+        case .confirmed: return .green.opacity(0.45)
+        case .dismissed: return .secondary.opacity(0.45)
+        }
+    }
+}
+
 public struct FindingFilter: Equatable {
     public var categories: Set<String> = []
     public var sources: Set<String> = []

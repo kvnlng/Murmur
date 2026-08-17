@@ -57,12 +57,17 @@ final class MurmurUILaunchShellTests: XCTestCase {
         // Idle means idle: a control that acts with no record open would be
         // worse than an absent one. The overflow menu is the one exception
         // 12a names (Open Record Folder…, Customize Toolbar…).
-        for id in ["notes-toggle", "edit-mode-toggle", "attach-findings", "findings-toggle"] {
+        for id in ["notes-toggle", "edit-mode-toggle", "attach-findings"] {
             XCTAssertFalse(toolbarElement(app, id).isEnabled,
                            "\(id) must be disabled with no record open")
         }
         XCTAssertTrue(toolbarElement(app, "toolbar-more").isEnabled,
                       "The overflow menu stays enabled — it is how a record gets opened")
+        // #303: the pane toggles are the OTHER exception — they act on
+        // chrome, not on record data, and 12a wants the panes closed but
+        // openable at launch.
+        XCTAssertTrue(toolbarElement(app, "findings-toggle").isEnabled,
+                      "The review-queue toggle stays enabled — the empty pane must open")
 
         // The scan item is present at launch like everything else…
         XCTAssertTrue(toolbarElement(app, "vtvf-scan-action").exists,
@@ -121,6 +126,69 @@ final class MurmurUILaunchShellTests: XCTestCase {
                       "the idle bar carries the import summary; it reads: \(bar.label)")
         XCTAssertTrue(bar.label.contains("3 of 12"),
                       "the summary names N of M records; it reads: \(bar.label)")
+    }
+
+    /// #303 / 12a: "Both side panes are closed at launch; their toolbar
+    /// toggles render in the off state." Closed, not absent — the design's
+    /// launch window is the REAL split view, so the record navigator and the
+    /// review queue open and close with no record, showing their working
+    /// chrome with quiet empties.
+    @MainActor
+    func testLaunchPanesStartClosedAndToggleOpenEmpty() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        XCTAssertTrue(app.toolbars.firstMatch.waitForExistence(timeout: 15))
+        let searchField = app.descendants(matching: .any)
+            .matching(identifier: "record-search-field").firstMatch
+        let idleQueue = app.descendants(matching: .any)
+            .matching(identifier: "findings-panel-idle").firstMatch
+        XCTAssertFalse(searchField.exists, "the navigator starts CLOSED at launch")
+        XCTAssertFalse(idleQueue.exists, "the review queue starts CLOSED at launch")
+
+        // Navigator: open → the record list's working chrome, empty.
+        let sidebarToggle = toolbarElement(app, "toolbar-sidebar-toggle")
+        XCTAssertTrue(sidebarToggle.exists,
+                      "the sidebar toggle exists at launch — the pane is closed, not absent")
+        sidebarToggle.click()
+        XCTAssertTrue(searchField.waitForExistence(timeout: 5),
+                      "the empty navigator keeps the search field")
+        XCTAssertTrue(app.descendants(matching: .any)
+            .matching(identifier: "records-section-header").firstMatch.exists,
+                      "the empty navigator keeps the RECORDS header")
+        XCTAssertTrue(app.descendants(matching: .any)
+            .matching(identifier: "sidebar-empty-open-button").firstMatch.exists,
+                      "the empty navigator offers Open Record Folder — the design's third home "
+                      + "for the open action")
+        sidebarToggle.click()
+        XCTAssertTrue(waitForAbsence(searchField),
+                      "the navigator closes again — the toggle round-trips")
+
+        // Review queue: open → header and disposition filter, counts blank.
+        let queueToggle = toolbarElement(app, "findings-toggle")
+        queueToggle.click()
+        XCTAssertTrue(idleQueue.waitForExistence(timeout: 5),
+                      "the review-queue toggle opens the empty queue")
+        XCTAssertTrue(idleQueue.staticTexts["Review queue"].exists,
+                      "the empty queue keeps its header")
+        for bucket in ["toReview", "confirmed", "dismissed"] {
+            XCTAssertTrue(app.descendants(matching: .any)
+                .matching(identifier: "disposition-filter-\(bucket)").firstMatch.exists,
+                          "the empty queue keeps the \(bucket) chip — working chrome, quiet empties")
+        }
+        queueToggle.click()
+        XCTAssertTrue(waitForAbsence(idleQueue),
+                      "the queue closes again — the toggle round-trips")
+    }
+
+    /// Absence has no waitFor — poll briefly.
+    private func waitForAbsence(_ element: XCUIElement, timeout: TimeInterval = 5) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if !element.exists { return true }
+            usleep(200_000)
+        }
+        return !element.exists
     }
 
     @MainActor
