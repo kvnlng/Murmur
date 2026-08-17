@@ -963,6 +963,21 @@ final class SnapshotTests: XCTestCase {
         assertSnapshot(of: render(view, size: CGSize(width: 660, height: 60)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 
+    /// The fallback branch (#291): no summary, no insufficient scope, not
+    /// locked — the state the strip used to render NOTHING for. Pins the 12a
+    /// shape: header, scope picker, blank value line, same card chrome, so
+    /// the region never vanishes while the orchestrator is still working or
+    /// the record has nothing measurable.
+    @MainActor
+    func testVariabilityMetricsStrip_unmeasured() {
+        let context = VariabilityMetricsContext()
+        let view = VariabilityMetricsStrip(context: context)
+            .frame(width: 620)
+            .padding()
+            .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 660, height: 120)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
     private static var variabilityFixture: VariabilityMetricsSummary {
         VariabilityMetricsSummary(
             sections: [

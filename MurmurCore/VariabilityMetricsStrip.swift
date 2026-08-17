@@ -50,6 +50,8 @@ public struct VariabilityMetricsStrip: View {
             insufficient(scope: scope, beatCount: context.insufficientBeatCount)
         } else if context.isLocked {
             unlockSeam
+        } else {
+            unmeasured
         }
     }
 
@@ -274,6 +276,39 @@ public struct VariabilityMetricsStrip: View {
         let beats = beatCount == 1 ? "1 normal beat" : "\(beatCount) normal beats"
         return "\(beats) in this \(scope.provenanceLabel) — at least 3 are needed to measure. "
             + "Widen the window or switch scope."
+    }
+
+    // MARK: - Unmeasured (#291)
+
+    /// Every state the other branches don't claim: before the orchestrator's
+    /// first publish, and a whole record with too few normal beats. There was
+    /// no branch here before, so these states rendered nothing at all — on the
+    /// synthetic fixtures the region was simply absent for the 9–22 s the
+    /// orchestrator took, which was reported as the feature missing. The 12a
+    /// invariant applies: the region is present at its final size with values
+    /// blank, never absent. Keeping the scope picker mounted is the same
+    /// obligation the insufficient branch discharges (X95) — unmounting it
+    /// strands the analyst in a scope with no control left to change.
+    private var unmeasured: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("Variability Metrics")
+                    .font(.subheadline.weight(.semibold))
+                Spacer(minLength: 8)
+                scopePicker
+            }
+            Text("—")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.secondary.opacity(0.06))
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("variability-metrics-unmeasured")
     }
 
     // MARK: - Locked
