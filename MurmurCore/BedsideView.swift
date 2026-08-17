@@ -360,6 +360,30 @@ struct BedsideView: View {
                     isVisible: visibleTrendLanes.contains($0.id))
             },
             toggleTrendLane: { toggleTrendLane($0) },
+            // #253 — the toolbar's own actions, each invoking the SAME closure
+            // its button does rather than a parallel implementation. A menu
+            // item that drifts from the button it mirrors is worse than no
+            // menu item: it teaches the analyst a path that behaves subtly
+            // differently from the one they can see.
+            toggleEditing: { isEditing.toggle() },
+            toggleWindowHold: { toggleWindowLock() },
+            windowHeldTo10s: windowLockedTo10s,
+            scanForVTVF: {
+                scanContext.requestScanDialog(
+                    viewStartSample: viewport.startSample,
+                    viewEndSample: viewport.endSample
+                )
+            },
+            scanAvailable: scanContext.isScanAvailable,
+            attachFindings: { showAttachFindings = true },
+            exportReport: { exportMarkdownReport() },
+            exportSnapshot: { exportSnapshotPNG() },
+            exportWFDBAnnotations: { exportWFDBAnnotations() },
+            wfdbExportAvailable: amberFindingCount > 0,
+            toggleReviewQueue: {
+                panels.request(.inspector, open: !panels.resolution.inspectorVisible)
+            },
+            reviewQueueVisible: panels.resolution.inspectorVisible,
             textEntryActive: notesEditorFocused,
             isEditing: isEditing
         )
