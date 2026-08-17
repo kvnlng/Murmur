@@ -529,26 +529,6 @@ public final class IntervalMarkingsContext {
         hoveredBeatSampleIndex ?? pinnedBeatSampleIndex
     }
 
-    /// A "please jump to this sample" signal from a command / menu
-    /// item to the viewport. Written by the deviation-navigation
-    /// menu handlers; consumed by BedsideView via `.onChange`. Cleared
-    /// to nil after consumption. Kept as a tuple counter so repeated
-    /// requests for the same sample still fire (SwiftUI `.onChange`
-    /// only fires on value change).
-    public private(set) var pendingJumpRequest: JumpRequest?
-
-    /// Envelope around a pending jump — the counter ensures
-    /// SwiftUI's `.onChange` fires even for repeated same-sample
-    /// requests.
-    public struct JumpRequest: Sendable, Equatable {
-        public let sampleIndex: Int64
-        public let counter: Int
-    }
-
-    /// Monotonic counter that ensures each jump request is a distinct
-    /// value even for repeat clicks on the same beat.
-    private var jumpCounter: Int = 0
-
     public init() {
         let raw = UserDefaults.standard.string(forKey: Keys.qtcFormula)
         self.qtcFormula = raw.flatMap(MarkingsQTcFormula.init(rawValue:)) ?? Self.defaultQTcFormula
@@ -678,23 +658,24 @@ public final class IntervalMarkingsContext {
         pinnedBeatSampleIndex = nil
     }
 
-    /// Post a jump request to be picked up by the viewport observer.
+    /// Land on a beat the analyst asked for by name — a deviation shortcut
+    /// (`]` / `[`) or a click on an interval-trend bin.
     ///
-    /// PINS the target rather than hover-focusing it. A jump arrives from
-    /// `J`/`K`, the deviation shortcuts, or a click on an interval-trend bin
-    /// — in every case the analyst asked for that specific beat, and under
-    /// the old behaviour the card carrying it was erased by the next
-    /// mouse-exit, often before they had read it.
-    public func requestJump(toSampleIndex sample: Int64) {
-        jumpCounter += 1
-        pendingJumpRequest = JumpRequest(sampleIndex: sample, counter: jumpCounter)
+    /// PINS rather than hover-focuses. Every caller here is an explicit
+    /// request for one specific beat, so nothing about where the pointer
+    /// subsequently goes should discard it; routed through `focus` it was
+    /// hover state and the next mouse-exit erased the card (#279) — #225
+    /// again, for the gesture least ambiguous about intent.
+    ///
+    /// Clearing the hover is the other half, and it is not tidiness. The
+    /// viewport moves to the target, so a stationary pointer is now over a
+    /// different part of the signal while `hoveredBeatSampleIndex` still
+    /// holds the beat it left. Since focus reads `hovered ?? pinned`, that
+    /// stale hover would outrank the beat just asked for and the card would
+    /// show the wrong one. The next pointer move recomputes it.
+    public func pin(beatSampleIndex sample: Int64) {
         pinnedBeatSampleIndex = sample
-    }
-
-    /// Acknowledge and clear the current pending jump. Called by the
-    /// viewport after applying it.
-    public func acknowledgeJump() {
-        pendingJumpRequest = nil
+        hoveredBeatSampleIndex = nil
     }
 
     // MARK: - Lookup
