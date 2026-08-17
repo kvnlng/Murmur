@@ -162,7 +162,12 @@ final class MurmurUILargeDatasetTests: XCTestCase {
         // generator places findings evenly through the recording, so the
         // last few finding-row-VT / -VF entries are >55 min in.
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-test-load-prepped-bundle"]
+        // Pinned to Xcode Cloud's resolved window (1280×768 display → 1214 pt
+        // × 626 pt of layout): the review queue's viewport is then ~419 pt,
+        // which is the regime where the VT group lazily fails to exist at
+        // all (Builds 146–148). Short-display constraints reproduce locally
+        // by pin, not get discovered in CI — the X100 doctrine.
+        app.launchArguments = ["--ui-test-load-prepped-bundle", "--ui-test-window=1214x626"]
         app.launch()
 
         let bedside = app.descendants(matching: .any)
@@ -179,9 +184,30 @@ final class MurmurUILargeDatasetTests: XCTestCase {
         // measured block ran before any row existed (Build 146/147, all
         // retries). Wait once out here, so the clock metric still times
         // the jump and never the load.
-        XCTAssertTrue(app.buttons.matching(identifier: "finding-row-VT").firstMatch
+        XCTAssertTrue(app.buttons.matching(identifier: "finding-row-VF").firstMatch
             .waitForExistence(timeout: 30),
             "the findings list should populate before the jumps are timed")
+
+        // The queue groups by category and renders lazily. In this pinned
+        // regime the VF group's 30 rows alone overfill the ~419 pt viewport,
+        // and the VT group below them never enters the accessibility tree at
+        // all — not slowly, NEVER: Build 148 waited 30 s with all 60 findings
+        // loaded ("60 of 60") and no VT row ever existed. So scroll the panel
+        // toward the VF/VT boundary until a VT row materializes; there both
+        // kinds exist at once, which the measured block's alternating clicks
+        // require.
+        let vtRow = app.buttons.matching(identifier: "finding-row-VT").firstMatch
+        let queueScroll = app.groups.matching(identifier: "findings-panel")
+            .firstMatch.scrollViews.firstMatch
+        var scrollBudget = 20
+        while !vtRow.exists && scrollBudget > 0 {
+            queueScroll.scroll(byDeltaX: 0, deltaY: -150)
+            scrollBudget -= 1
+        }
+        XCTAssertTrue(vtRow.waitForExistence(timeout: 10),
+                      "a VT row should materialize once the queue is scrolled to the "
+                      + "VF/VT group boundary — if it does not, the lazy list is failing "
+                      + "to realize the range-kind group regardless of scroll position")
 
         let measureOptions = XCTMeasureOptions()
         measureOptions.iterationCount = 3
