@@ -118,8 +118,9 @@ struct FiducialOverlay: View {
 
         // QRS boundaries at .qrsOnly and higher, gated by layer toggle.
         if drawable.contains(.qrs) {
-            if let q = beat.qrsOnset { boundaryTick(fiducial: q, colorStyle: .qrs, focused: focused) }
-            if let s = beat.qrsOffset { boundaryTick(fiducial: s, colorStyle: .qrs, focused: focused) }
+            if let q = beat.qrsOnset { boundaryTick(fiducial: q, layer: .qrs, focused: focused) }
+            if let s = beat.qrsOffset { boundaryTick(fiducial: s, layer: .qrs, focused: focused) }
+            layerLetter(onset: beat.qrsOnset, offset: beat.qrsOffset, layer: .qrs)
         }
 
         // P / T fiducials at .fullFiducials, each gated by its own
@@ -127,12 +128,14 @@ struct FiducialOverlay: View {
         // vice versa without changing the zoom.
         if detailLevel == .fullFiducials {
             if drawable.contains(.p) {
-                if let p = beat.pOnset { boundaryTick(fiducial: p, colorStyle: .p, focused: focused) }
-                if let p = beat.pOffset { boundaryTick(fiducial: p, colorStyle: .p, focused: focused) }
+                if let p = beat.pOnset { boundaryTick(fiducial: p, layer: .p, focused: focused) }
+                if let p = beat.pOffset { boundaryTick(fiducial: p, layer: .p, focused: focused) }
+                layerLetter(onset: beat.pOnset, offset: beat.pOffset, layer: .p)
             }
             if drawable.contains(.t) {
-                if let t = beat.tOnset { boundaryTick(fiducial: t, colorStyle: .t, focused: focused) }
-                if let t = beat.tOffset { boundaryTick(fiducial: t, colorStyle: .t, focused: focused) }
+                if let t = beat.tOnset { boundaryTick(fiducial: t, layer: .t, focused: focused) }
+                if let t = beat.tOffset { boundaryTick(fiducial: t, layer: .t, focused: focused) }
+                layerLetter(onset: beat.tOnset, offset: beat.tOffset, layer: .t)
                 // Tangent↔isoelectric bracket (project_qtc_trend_uncertainty_wireup_spec.md
                 // Phase 6): the T-offset fiducial is the tangent-based
                 // POINT estimate; the isoelectric endpoint marks where
@@ -216,12 +219,31 @@ struct FiducialOverlay: View {
     /// "did anything reach the trace" — it had its own copy of the number,
     /// so widening the band here silently moved the test's crop into the
     /// glyph band and failed an assertion about the trace.
-    static let hairlineTopInset: CGFloat = 31
+    /// Where the glyph band ends and the trace's space begins.
+    ///
+    /// 31 → 38 for #249. The band held a tick (y 13–21) and a 7 pt confidence
+    /// dot (21–28); a letter legible enough to outrank the queue's 9 pt glyph
+    /// needs ~17 pt of line height, so it runs 19–36 and the boundary has to
+    /// clear it. Leaving it at 31 put glyph pixels below the band, which is
+    /// exactly what `SnapshotTests.belowGlyphBand` is built to catch — #226 hit
+    /// the same edge when it enlarged the dot, and that test's comment records
+    /// it.
+    ///
+    /// The cost is 7 pt of trace height, taken from the top of the hairlines.
+    /// The alternative was a letter small enough to fit the old band, which
+    /// would fail the feedback's actual ask: the bedside tag has to read larger
+    /// than the queue's.
+    static let hairlineTopInset: CGFloat = 38
 
     /// The confidence dot. #226: was 4 pt filled / 5 pt hollow, which is
     /// under the size of a small grid square — at that scale a mark reads as
     /// a printing artifact rather than as a statement about a boundary.
     private static let dotDiameter: CGFloat = 7
+
+    /// Line box reserved for a letter tag, so its bottom edge (19 + this) stays
+    /// above `hairlineTopInset`. Fixed rather than intrinsic — see the offset
+    /// site.
+    static let letterBandHeight: CGFloat = 17
 
     /// A short tick + optional dot for a boundary fiducial (P/QRS/T).
     /// Confidence modulates alpha; low-confidence gets a hollow ring
@@ -240,7 +262,7 @@ struct FiducialOverlay: View {
     @ViewBuilder
     private func boundaryTick(
         fiducial: MarkingsFiducial,
-        colorStyle: FiducialColor,
+        layer: MarkingsFiducialLayer,
         focused: Bool = false
     ) -> some View {
         if let x = xPosition(forSample: fiducial.sampleIndex) {
@@ -249,33 +271,126 @@ struct FiducialOverlay: View {
             // marks the analyst most needs to see, since low confidence is
             // what a fiducial edit pass goes looking for.
             let alpha = max(0.60, fiducial.confidence)
-            let color = colorStyle.color.opacity(alpha)
+            let base = FiducialPalette.color(for: layer)
+            let color = base.opacity(alpha)
             let isLowConfidence = fiducial.confidence < 0.6
             Rectangle()
                 .fill(color)
                 .frame(width: 1.5, height: 8)
                 .offset(x: x - 0.75, y: 13)
-            // Confidence marker: filled dot for confident, hollow ring
-            // for unsure. #226 enlarged both — at 4 pt the dot was smaller
-            // than the grid squares it sat on.
-            if isLowConfidence {
-                Circle()
-                    .strokeBorder(color, lineWidth: 1.5)
-                    .frame(width: Self.dotDiameter, height: Self.dotDiameter)
-                    .offset(x: x - Self.dotDiameter / 2, y: 21)
-            } else {
-                Circle()
-                    .fill(color)
-                    .frame(width: Self.dotDiameter, height: Self.dotDiameter)
-                    .offset(x: x - Self.dotDiameter / 2, y: 21)
+            // #249 — the dot is now the FALLBACK. Where there is room, one
+            // letter per layer (see `layerLetter`) sits in this y-band instead
+            // and names the wave; where there is not, this is what shipped
+            // before and it still fits.
+            if !lettersFit {
+                if isLowConfidence {
+                    Circle()
+                        .strokeBorder(color, lineWidth: 1.5)
+                        .frame(width: Self.dotDiameter, height: Self.dotDiameter)
+                        .offset(x: x - Self.dotDiameter / 2, y: 21)
+                } else {
+                    Circle()
+                        .fill(color)
+                        .frame(width: Self.dotDiameter, height: Self.dotDiameter)
+                        .offset(x: x - Self.dotDiameter / 2, y: 21)
+                }
             }
             if detailLevel == .fullFiducials, canvasSize.height > Self.hairlineTopInset {
                 Rectangle()
-                    .fill(colorStyle.color.opacity(
+                    .fill(base.opacity(
                         hairlineAlpha(confidence: fiducial.confidence, focused: focused)))
                     .frame(width: 1, height: canvasSize.height - Self.hairlineTopInset)
                     .offset(x: x - 0.5, y: Self.hairlineTopInset)
             }
+        }
+    }
+
+    /// The letter naming one wave of one beat, centred between its two ticks.
+    ///
+    /// One per LAYER, not per boundary. Per boundary put "QRS" at both edges of
+    /// a complex 24 pt wide at the zoom the letters exist for — the tags
+    /// overlapped each other inside every beat. Centred, the ticks keep marking
+    /// the edges precisely and the letter says which wave they belong to, which
+    /// is what a letter is for.
+    ///
+    /// Confidence is the WEAKER of the pair. A span is only as trustworthy as
+    /// its shakier edge, and rounding up would let a confident onset vouch for
+    /// an offset the delineator guessed at.
+    @ViewBuilder
+    private func layerLetter(
+        onset: MarkingsFiducial?,
+        offset: MarkingsFiducial?,
+        layer: MarkingsFiducialLayer
+    ) -> some View {
+        if lettersFit,
+           let onset, let offset,
+           let x = FiducialGeometry.letterPosition(
+            onsetX: xPosition(forSample: onset.sampleIndex),
+            offsetX: xPosition(forSample: offset.sampleIndex)) {
+            let confidence = min(onset.confidence, offset.confidence)
+            let alpha = max(0.60, confidence)
+            let isLowConfidence = confidence < 0.6
+            FiducialLetterTag(
+                layer: layer,
+                pointSize: FiducialPalette.bedsideLetterPointSize,
+                weight: isLowConfidence ? .regular : .semibold)
+                // Confidence in the two channels a glyph has: weight above and
+                // alpha here, preserving the filled-vs-hollow distinction the
+                // dot carried.
+                .opacity(isLowConfidence ? alpha * 0.85 : alpha)
+                // Height fixed rather than intrinsic: the band's bottom edge
+                // is a constant that other code (and a snapshot test) reasons
+                // about, so the glyph's footprint must be knowable without
+                // rendering it.
+                .frame(width: FiducialPalette.letterMinimumSpacing,
+                       height: Self.letterBandHeight)
+                .offset(x: x - FiducialPalette.letterMinimumSpacing / 2, y: 19)
+                .allowsHitTesting(false)
+        }
+    }
+
+    /// Whether every letter this frame would draw has room, measured on the
+    /// positions themselves.
+    ///
+    /// All-or-nothing on purpose. A per-letter decision would drop tags
+    /// wherever a rhythm happened to tighten, so the same wave would be named
+    /// in one beat and not the next — and an absent letter reads as "no P
+    /// wave here", which is a finding, not a layout outcome. Uniform letters
+    /// or uniform dots is the only pair of states that says one thing.
+    private var lettersFit: Bool {
+        FiducialGeometry.lettersFit(positions: letterPositions)
+    }
+
+    /// Where every letter would go, in the same order the drawing walks.
+    private var letterPositions: [CGFloat] {
+        let drawable = policy.renderableLayers.intersection(enabledLayers)
+        var positions: [CGFloat] = []
+        for beat in beats {
+            for layer in MarkingsFiducialLayer.allCases where drawable.contains(layer) {
+                if layer == .qrs || detailLevel == .fullFiducials,
+                   let x = FiducialGeometry.letterPosition(
+                    onsetX: onsetFiducial(beat, layer).flatMap { xPosition(forSample: $0.sampleIndex) },
+                    offsetX: offsetFiducial(beat, layer).flatMap { xPosition(forSample: $0.sampleIndex) }) {
+                    positions.append(x)
+                }
+            }
+        }
+        return positions
+    }
+
+    private func onsetFiducial(_ beat: MarkingsBeat, _ layer: MarkingsFiducialLayer) -> MarkingsFiducial? {
+        switch layer {
+        case .p:   return beat.pOnset
+        case .qrs: return beat.qrsOnset
+        case .t:   return beat.tOnset
+        }
+    }
+
+    private func offsetFiducial(_ beat: MarkingsBeat, _ layer: MarkingsFiducialLayer) -> MarkingsFiducial? {
+        switch layer {
+        case .p:   return beat.pOffset
+        case .qrs: return beat.qrsOffset
+        case .t:   return beat.tOffset
         }
     }
 
@@ -306,51 +421,10 @@ struct FiducialOverlay: View {
         return CGFloat(fraction) * canvasSize.width
     }
 
-    // MARK: - Color palette
-
-    /// The boundary palette. Internal rather than private so
-    /// `FiducialPaletteTests` can hold it to the one rule that matters:
-    /// stay off the graph paper's hue.
-    ///
-    /// #226. QRS shipped at hue 0.02 — red-orange, which is the ECG paper's
-    /// own colour family (`WaveformStyle.paper` is (1.00, 0.93, 0.93) under a
-    /// red grid ladder). A one-point line in the grid's own hue, at the low
-    /// end of the alpha band, is grid. The analyst reading this overlay did
-    /// not know the marks were on screen at all.
-    ///
-    /// Two changes, and the second is the one that generalises: QRS moves to
-    /// green, and every layer moves DARKER. Brightness 0.85–0.90 was pastel
-    /// ink on pale-pink paper — the old palette was competing on hue while
-    /// giving away the contrast that actually separates a mark from its
-    /// background on a light surface.
-    ///
-    /// Colour is the only channel distinguishing the three, so green and teal
-    /// sit closer together than is ideal for red-green colour vision
-    /// deficiency. Distinct dot SHAPES per layer would fix that properly and
-    /// are not in this change.
-    enum FiducialColor: CaseIterable {
-        case p
-        case qrs
-        case t
-
-        /// The hue the ECG paper and its grid ladder occupy. Nothing drawn on
-        /// top of them may sit near it.
-        static let paperHue: Double = 0.0
-
-        var hue: Double {
-            switch self {
-            case .p:   return 0.76   // violet
-            case .qrs: return 0.36   // green
-            case .t:   return 0.55   // teal
-            }
-        }
-
-        var color: Color {
-            switch self {
-            case .p:   return Color(hue: hue, saturation: 0.65, brightness: 0.62)
-            case .qrs: return Color(hue: hue, saturation: 0.75, brightness: 0.50)
-            case .t:   return Color(hue: hue, saturation: 0.70, brightness: 0.60)
-            }
-        }
-    }
+    // (Moved by #249) `FiducialColor`, a parallel enum of the same three cases
+    // as `MarkingsFiducialLayer`. The letter→colour map now lives in
+    // `FiducialPalette` so the Review queue can read the same one — the point
+    // of the feedback's "always the same for each letter" is that one
+    // definition exists, which two enums cannot provide. The #226 history that
+    // was recorded here moved with it.
 }

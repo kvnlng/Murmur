@@ -744,6 +744,20 @@ struct FindingsPanel: View {
 
     // MARK: - Group rendering
 
+    /// The fiducial boundaries a group's category is defined BY, or empty when
+    /// it is not defined by any (#249).
+    ///
+    /// Deliberately a whitelist rather than a best-effort mapping. A category
+    /// with no fiducial meaning must return empty and keep its group colour
+    /// dot — the alternative is a letter that reads as a claim about the
+    /// waveform.
+    static func fiducialSpanLetters(for category: String) -> [MarkingsFiducialLayer] {
+        switch category.trimmingCharacters(in: .whitespaces).uppercased() {
+        case "QT-MANUAL": return [.qrs, .t]
+        default:          return []
+        }
+    }
+
     private func groupRow(_ group: FindingGroup) -> some View {
         let isExpanded = expandedGroups.contains(group.id)
         return VStack(spacing: 0) {
@@ -755,9 +769,33 @@ struct FindingsPanel: View {
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                         .frame(width: 9)
-                    Circle()
-                        .fill(group.color)
-                        .frame(width: 9, height: 9)
+                    // #249 — the letter tags reach the queue only where a row
+                    // actually denotes fiducial boundaries, which is one
+                    // category: QT-MANUAL is "analyst-placed Q-onset →
+                    // T-offset spans", so QRS and T are what it is bounded by.
+                    //
+                    // Every other group here is a WFDB annotation category —
+                    // V/PVC, A/APC, E, ~, + — describing a BEAT or a rhythm
+                    // transition, not a wave boundary. Giving those a P, QRS or
+                    // T would be inventing a meaning the data does not carry,
+                    // which is worse than an inconsistent-looking list: it
+                    // would teach the analyst a vocabulary that is wrong.
+                    if Self.fiducialSpanLetters(for: group.category).isEmpty {
+                        Circle()
+                            .fill(group.color)
+                            .frame(width: FiducialPalette.queueGlyphDiameter,
+                                   height: FiducialPalette.queueGlyphDiameter)
+                    } else {
+                        HStack(spacing: 1) {
+                            ForEach(Self.fiducialSpanLetters(for: group.category),
+                                    id: \.self) { layer in
+                                FiducialLetterTag(
+                                    layer: layer,
+                                    pointSize: FiducialPalette.queueLetterPointSize)
+                            }
+                        }
+                        .accessibilityIdentifier("queue-fiducial-letters")
+                    }
                     VStack(alignment: .leading, spacing: 1) {
                         Text(group.humanLabel)
                             .font(.callout.weight(.semibold))
