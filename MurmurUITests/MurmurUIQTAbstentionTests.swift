@@ -63,14 +63,16 @@ final class MurmurUIQTAbstentionTests: XCTestCase {
         // menu's sample comes from the panel's continuous-hover state, so
         // hover each point first — a bare right-click can carry the STALE
         // hover position, collapsing the span to zero.
-        let qOnset = stagePanel.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.5))
+        let qOnset = stagePanel.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.35, dy: TraceCoordinates.hoverableY))
         qOnset.hover()
         usleep(300_000)
         qOnset.rightClick()
         XCTAssertTrue(begin.waitForExistence(timeout: 3))
         begin.click()
 
-        let tOffset = stagePanel.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.5))
+        let tOffset = stagePanel.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.6, dy: TraceCoordinates.hoverableY))
         tOffset.hover()
         usleep(300_000)
         tOffset.rightClick()
