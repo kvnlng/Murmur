@@ -8413,3 +8413,62 @@ struct SidePanelCoexistenceTests {
         #expect(!c.resolution.navigatorVisible)
     }
 }
+
+// MARK: - #250 · Name your own finding
+
+/// Renaming an analyst-authored finding edits `label` — the row title —
+/// and NOTHING else. The label-vs-caption split exists so what the analyst
+/// CALLS a finding can evolve without corrupting what was MEASURED, so
+/// `citationCaption` in particular must survive a rename byte-for-byte.
+@Suite("Finding rename (#250)")
+struct FindingRenameTests {
+
+    private func analystFinding() -> Annotation {
+        Annotation(
+            kind: .point,
+            sampleIndex: 1_250,
+            category: "ANALYST_FINDING",
+            label: "Analyst mark",
+            source: Annotation.analystAuthoredSource,
+            citationCaption: "Marked by the analyst on the V1 trace")
+    }
+
+    @Test("withLabel changes the label and only the label")
+    func withLabelIsSurgical() {
+        let original = analystFinding()
+        let renamed = original.withLabel("Late-coupled PVC")
+        #expect(renamed.displayLabel == "Late-coupled PVC")
+        // Identity and provenance are untouched — same finding, new name.
+        #expect(renamed.id == original.id)
+        #expect(renamed.category == original.category)
+        #expect(renamed.source == original.source)
+        #expect(renamed.citationCaption == original.citationCaption)
+        #expect(renamed.sampleIndex == original.sampleIndex)
+        #expect(renamed.note == original.note)
+    }
+
+    /// The round-trip the issue calls the test worth writing first: name it,
+    /// save, reopen, still named — through the real sidecar code, not a mock.
+    @Test("A rename survives the bundle sidecar round-trip")
+    func renameSurvivesSidecarRoundTrip() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("rename-roundtrip-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let renamed = analystFinding().withLabel("Junctional escape")
+        try BundleAnnotationsFile.write([renamed], to: dir)
+        let reloaded = try #require(BundleAnnotationsFile.read(from: dir))
+        let found = try #require(reloaded.first { $0.id == renamed.id })
+        #expect(found.displayLabel == "Junctional escape")
+        #expect(found.citationCaption == "Marked by the analyst on the V1 trace")
+        #expect(found.source == Annotation.analystAuthoredSource)
+    }
+
+    /// The group header leaked the raw category token into analyst-facing
+    /// chrome. The stored category is untouched — only the display maps.
+    @Test("ANALYST_FINDING renders as a human title, not a constant")
+    func analystGroupHeaderIsHuman() {
+        #expect(FindingsPanel.humanLabel(for: "ANALYST_FINDING") == "Analyst findings")
+    }
+}

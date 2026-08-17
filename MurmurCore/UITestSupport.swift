@@ -349,6 +349,15 @@ enum UITestSupport {
         ProcessInfo.processInfo.arguments.contains("--ui-test-export-wfdb")
     }
 
+    /// True when `--ui-test-seed-analyst-finding` is passed. The synthetic
+    /// fixture then ships one analyst-authored finding (#250) — category
+    /// ANALYST_FINDING, label "Analyst mark", source `murmur.annotation` —
+    /// so rename tests have a row to act on without driving the authoring
+    /// flow first.
+    static var seedAnalystFinding: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-seed-analyst-finding")
+    }
+
     /// True when `--ui-test-seed-confirmed-region` is passed. BedsideView
     /// confirms a synthetic candidate region on appear but does NOT export —
     /// so `amberFindingCount > 0` enables the export toolbar button and an XCUI
