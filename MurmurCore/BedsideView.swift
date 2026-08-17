@@ -681,13 +681,13 @@ struct BedsideView: View {
         // analyst a route to visible labels that does not depend on a broken
         // API.
         //
-        // The default is Icon AND Text, seeded on fresh install by
-        // `ToolbarDisplayModeDefault`. (This comment used to claim the default
-        // was icon-only; that was true when it was written and stopped being
-        // true in the same ticket.) X68's redesign draws the cluster icon-only,
-        // and that part was declined for the reason above: with tooltips
-        // broken, removing the labels leaves nothing at all saying what a
-        // button is, and the redesign offers no replacement affordance.
+        // The default is icon-only again as of #253 — AppKit's own default,
+        // with X60's seed deleted rather than reversed. That was declined
+        // twice before, both times for the reason above: with tooltips broken,
+        // removing the labels leaves nothing saying what a button is. It went
+        // ahead now because #287 finally supplied the replacement affordance
+        // the redesign always assumed — every action here has a menu-bar row.
+        // See MurmurToolbar for the full record.
         //
         // The ids are the accessibility identifiers, deliberately: one name
         // per button, already stable, and already what the XCUI suite binds
