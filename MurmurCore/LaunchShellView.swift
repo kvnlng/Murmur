@@ -50,6 +50,9 @@ struct LaunchShellView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
+            // `UITestSupport` exists only under DEBUG — an unguarded
+            // reference is a Release (archive) build break.
+            #if DEBUG
             if UITestSupport.seedImportProgress {
                 // #263 — same frozen mid-import state BedsideView seeds, so
                 // the shell's strip is assertable without out-racing XCUI.
@@ -60,6 +63,7 @@ struct LaunchShellView: View {
                     totalRecords: 12
                 )
             }
+            #endif
         }
     }
 
