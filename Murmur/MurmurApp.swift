@@ -66,13 +66,11 @@ struct MurmurApp: App {
     }
 
     init() {
-        // X60: open the toolbar on Icon and Text. Seeds the preference AppKit
-        // reads while BUILDING the toolbar — assigning `displayMode` to a live
-        // toolbar instead makes SwiftUI rebuild the items and drop their
-        // accessibility identifiers for that launch. Must run before any
-        // window exists, hence here. One-time; Customize Toolbar… wins from
-        // then on. See ToolbarDisplayModeDefault.
-        ToolbarDisplayModeDefault.seedIfNeeded()
+        // (Removed by #253) `ToolbarDisplayModeDefault.seedIfNeeded()`, which
+        // opened the toolbar on Icon and Text. Icon-only is AppKit's own
+        // default, so nothing replaces it — see MurmurToolbar for the measured
+        // evidence and for why X60's reasoning reversed rather than being
+        // overruled.
 
         // Reap per-operation scratch (csv-import-*, mur-session-*, ui-test-*)
         // left in the container tmp by earlier launches — nothing deletes it
