@@ -733,8 +733,13 @@ public struct ContentView: View {
     private var detailPane: some View {
         if let key = selection {
             switch importStates[key] {
-            case .importing(let progress):
-                importingPane(progress: progress)
+            case .importing:
+                // #285 / 12a — no dedicated importing pane: the idle shell
+                // holds the frame (flatline, lane skeletons, info bar) and
+                // the bar's #263 strip is the ONLY chrome that reports the
+                // import. The old centered ProgressView was the frame
+                // moving — a whole pane that existed only mid-import.
+                LaunchShellView(onOpenFolder: { isImporterPresented = true })
             case .imported(let directory, let recording):
                 BedsideView(
                     recording: recording,
@@ -760,17 +765,6 @@ public struct ContentView: View {
                 description: Text("Pick a record from the sidebar to view its signals.")
             )
         }
-    }
-
-    private func importingPane(progress: ImportProgress?) -> some View {
-        VStack(spacing: 16) {
-            ProgressView(value: progress?.fractionComplete ?? 0)
-                .frame(maxWidth: 240)
-            Text(progress.map { "Importing… \(Int(($0.fractionComplete * 100).rounded()))%" } ?? "Importing…")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func failedPane(message: String, filename: String) -> some View {

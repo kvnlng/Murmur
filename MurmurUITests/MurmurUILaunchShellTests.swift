@@ -75,6 +75,54 @@ final class MurmurUILaunchShellTests: XCTestCase {
                       "The idle bar's values are em-dashes; it reads: \(bar.label)")
     }
 
+    /// 12a: "The trend stack renders all five lane rows with their accent
+    /// rails, label columns, y-axis ticks and gridlines; plots are empty and
+    /// values are em-dashes." The lane ids are the REAL lanes' ids, so a
+    /// record opening changes values, never which rows exist.
+    @MainActor
+    func testAllFiveTrendLanesExistIdleAtLaunch() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        let stack = app.descendants(matching: .any)
+            .matching(identifier: "trend-stack").firstMatch
+        XCTAssertTrue(stack.waitForExistence(timeout: 15),
+                      "12a: the trend stack exists at launch")
+        for laneID in [
+            "trend-lane-hr",
+            "trend-lane-rmssd",
+            "trend-lane-interval-trend",
+            "trend-lane-lfhf",
+            "trend-lane-quality",
+        ] {
+            let lane = app.descendants(matching: .any)
+                .matching(identifier: laneID).firstMatch
+            XCTAssertTrue(lane.exists,
+                          "\(laneID) must exist at launch — all five lane rows, values blank")
+            XCTAssertTrue(lane.staticTexts["—"].exists,
+                          "\(laneID)'s value must render as an em-dash")
+        }
+    }
+
+    /// #263 wired into the shell: with no record open, the import strip
+    /// lives in the SAME idle info bar — the one piece of chrome 12a allows
+    /// to change state between empty and loaded.
+    @MainActor
+    func testIdleInfoBarCarriesTheImportStrip() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-seed-import-progress"]
+        app.launch()
+
+        let bar = app.descendants(matching: .any)
+            .matching(identifier: "info-bar").firstMatch
+        XCTAssertTrue(bar.waitForExistence(timeout: 15),
+                      "the idle info bar exists at launch")
+        XCTAssertTrue(bar.label.contains("synth-02"),
+                      "the idle bar carries the import summary; it reads: \(bar.label)")
+        XCTAssertTrue(bar.label.contains("3 of 12"),
+                      "the summary names N of M records; it reads: \(bar.label)")
+    }
+
     @MainActor
     func testTheSameItemSetExistsWithARecordOpen() throws {
         let app = XCUIApplication()

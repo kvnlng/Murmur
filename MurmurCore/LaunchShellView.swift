@@ -28,9 +28,15 @@ struct LaunchShellView: View {
     /// `fileImporter` the toolbar's overflow menu and ⌘O drive.
     let onOpenFolder: () -> Void
 
+    /// #263 wired into the shell: the import strip renders in THIS bar while
+    /// the shell is what's on screen — during a browse-pane import the
+    /// detail pane is this view, and the strip is the one piece of chrome
+    /// 12a lets change state between empty and loaded.
+    @State private var importProgress = ImportProgressContext.shared
+
     var body: some View {
         VStack(spacing: 0) {
-            Spacer()
+            Spacer(minLength: 20)
             Flatline()
                 .frame(height: 120)
                 .frame(maxWidth: 720)
@@ -38,10 +44,106 @@ struct LaunchShellView: View {
                 .accessibilityHidden(true)
             openLine
                 .padding(.top, 28)
-            Spacer()
+            idleContext
+                .padding(.top, 28)
             idleInfoBar
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear {
+            if UITestSupport.seedImportProgress {
+                // #263 — same frozen mid-import state BedsideView seeds, so
+                // the shell's strip is assertable without out-racing XCUI.
+                ImportProgressContext.shared.update(
+                    recordName: "synth-02",
+                    fractionComplete: 0.41,
+                    completedRecords: 3,
+                    totalRecords: 12
+                )
+            }
+        }
+    }
+
+    /// #285 / 12a — "The trend stack renders all five lane rows with their
+    /// accent rails, label columns, y-axis ticks and gridlines; plots are
+    /// empty and values are em-dashes. The context region scrolls exactly as
+    /// it does when loaded." The rows are `TrendStack`'s own geometry — not
+    /// a redrawn likeness of it — so the skeleton cannot drift from the
+    /// loaded stack's anatomy (the X61 rule, applied to layout).
+    private var idleContext: some View {
+        ScrollView {
+            TrendStack(
+                lanes: Self.idleLanes,
+                recordingRange: 0...0,
+                viewportRange: 0...0
+            )
+            .frame(maxWidth: 720)
+            .padding(.horizontal, 24)
+            .padding(.bottom, 16)
+        }
+    }
+
+    /// The five 12a lane rows, ids and titles matching the REAL lanes'
+    /// (`BedsideTrendStack` + the `availableLanes` labels) so a record
+    /// opening changes values, never which rows exist. Subtitles keep the
+    /// static parts of the loaded lanes' provenance and em-dash the numbers
+    /// a record would supply — inventing provenance for data that does not
+    /// exist yet is the one trade DECISIONS forbids.
+    private static let idleLanes: [TrendStackLane] = [
+        TrendStackLane(
+            id: BedsideTrendStack.hrLaneID,
+            title: "Trends · HR",
+            subtitle: "bpm · trend channel only",
+            height: 86,
+            accent: TrendStackLane.hrAccent
+        ) { idlePlot() },
+        TrendStackLane(
+            id: "rmssd",
+            title: "RMSSD",
+            subtitle: "ms · rolling window",
+            height: 86,
+            accent: TrendStackLane.variabilityAccent
+        ) { idlePlot() },
+        TrendStackLane(
+            id: "interval-trend",
+            title: "Interval trend",
+            subtitle: "— · — min bins",
+            height: 86,
+            accent: TrendStackLane.intervalAccent
+        ) { idlePlot() },
+        TrendStackLane(
+            id: BedsideTrendStack.lfhfLaneID,
+            title: "LF / HF",
+            subtitle: "rolling 5 min",
+            height: 86,
+            accent: TrendStackLane.lfhfAccent
+        ) { idlePlot() },
+        TrendStackLane(
+            id: BedsideTrendStack.qualityLaneID,
+            title: "Quality",
+            subtitle: "artifact ratio · outline over 10%",
+            height: 26,
+            accent: TrendStackLane.qualityAccent
+        ) { idlePlot() },
+    ]
+
+    /// An empty plot cell that still draws the scale furniture 12a asks
+    /// for: em-dash ticks in the shared y-gutter, faint gridlines at the
+    /// same fractions. The gridline style matches `trendLaneYAxis()`'s
+    /// `AxisGridLine`, so idle and loaded lanes share one visual grammar.
+    private static func idlePlot() -> some View {
+        let fractions: [Double] = [0.15, 0.5, 0.85]
+        return HStack(spacing: 0) {
+            TrendLaneScaleGutter(ticks: fractions.map { ($0, "—") })
+            Canvas { context, size in
+                for fraction in fractions {
+                    let y = (1 - fraction) * size.height
+                    var line = Path()
+                    line.move(to: CGPoint(x: 0, y: y))
+                    line.addLine(to: CGPoint(x: size.width, y: y))
+                    context.stroke(line, with: .color(.secondary.opacity(0.15)), lineWidth: 1)
+                }
+            }
+        }
     }
 
     /// #285 / 12a — the info bar exists at launch with values blank. Same
@@ -55,6 +157,17 @@ struct LaunchShellView: View {
                 .fontWeight(.medium)
             Text("— leads · — Hz · —")
             Spacer(minLength: 12)
+            // #263 — the same global import strip the bedside bar mounts,
+            // in the same position: while a browse-pane import runs, this
+            // shell IS the detail pane, and the strip must not vanish just
+            // because the record it announces isn't open yet.
+            if let importSummary = importProgress.summary {
+                ProgressView(value: importProgress.fractionComplete)
+                    .controlSize(.small)
+                    .frame(width: 90)
+                Text(importSummary)
+                Spacer(minLength: 12)
+            }
             Text("window —")
         }
         .font(.caption2)
@@ -71,7 +184,11 @@ struct LaunchShellView: View {
         // There is no button in here to lose a trait over (the X51 caveat),
         // so the one honest sentence is stated outright.
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("— · — leads · — Hz · — · window —")
+        // The explicit label must carry the strip too — `.ignore` means
+        // nothing else will speak it.
+        .accessibilityLabel(importProgress.summary
+            .map { "— · — leads · — Hz · — · importing \($0) · window —" }
+            ?? "— · — leads · — Hz · — · window —")
         .accessibilityIdentifier("info-bar")
     }
 
