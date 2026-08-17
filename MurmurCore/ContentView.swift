@@ -6,6 +6,14 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 public struct ContentView: View {
+    /// #298 — the mounted bedside's actions + state, published by
+    /// `BedsideView` as a focused SCENE value (the same bridge the menu bar
+    /// reads, #253). Nil whenever no bedside is on screen. This is what
+    /// makes `MurmurToolbarItems` a single registration whose controls go
+    /// live and idle in place, instead of two contributors swapping ids —
+    /// the swap is what crashed NSToolbar.
+    @FocusedValue(\.bedsideCommands) private var bedsideCommands
+
     @State private var state: AppState = .empty
     @State private var importStates: [String: RecordImportState] = [:]
     @State private var selection: String?
@@ -434,26 +442,11 @@ public struct ContentView: View {
                 .toolbar(id: MurmurToolbar.identifier) {
                     overflowToolbarItems
                     // #285 / 12a: the frame never moves — the bedside's
-                    // whole item set exists at launch, idle. See
-                    // `IdleToolbarItems` for why this is a mirror and how
-                    // it is kept from drifting.
-                    IdleToolbarItems()
+                    // whole item set exists at launch, idle (`live` is nil
+                    // here: nothing publishes bedside commands). #298: one
+                    // registration per hierarchy, never a second mirror.
+                    MurmurToolbarItems(live: bedsideCommands)
                 }
-        }
-    }
-
-    /// #285 — true when a `BedsideView` is on screen and therefore
-    /// registering the live toolbar items. The idle set mounts exactly when
-    /// this is false; both at once would register duplicate ids.
-    private var isBedsideMounted: Bool {
-        switch state {
-        case .empty:
-            return false
-        case .directView:
-            return true
-        case .browsing:
-            guard let key = selection, case .imported = importStates[key] else { return false }
-            return true
         }
     }
 
@@ -570,12 +563,13 @@ public struct ContentView: View {
                 .navigationTitle(detailTitle)
                 .toolbar(id: MurmurToolbar.identifier) {
                     overflowToolbarItems
-                    // #285: the frame holds through browse-with-no-selection
-                    // too — the idle set stands in until the selected record
-                    // finishes importing and BedsideView takes over the ids.
-                    if !isBedsideMounted {
-                        IdleToolbarItems()
-                    }
+                    // #285 / #298: the frame holds through every browse
+                    // state — one item set whose controls go live exactly
+                    // when a mounted bedside publishes its commands, and
+                    // idle (nil) through no-selection and mid-import. The
+                    // old conditional mirror swapped two contributors'
+                    // identical ids and crashed NSToolbar on slow machines.
+                    MurmurToolbarItems(live: bedsideCommands)
                 }
                 // Persistent record-list toggle. The sidebar-toggle button
                 // NavigationSplitView injects lives in the sidebar's own
@@ -667,7 +661,12 @@ public struct ContentView: View {
                 onRecordingMutated: { setAppState(.directView(directory: directory, recording: $0)) }
             )
                 .navigationTitle(recording.device)
-                .toolbar(id: MurmurToolbar.identifier) { overflowToolbarItems }
+                .toolbar(id: MurmurToolbar.identifier) {
+                    overflowToolbarItems
+                    // #298: the bedside's items, registered HERE — the view
+                    // publishes actions, never toolbar ids.
+                    MurmurToolbarItems(live: bedsideCommands)
+                }
         }
     }
 

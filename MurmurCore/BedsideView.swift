@@ -433,6 +433,8 @@ struct BedsideView: View {
             exportSnapshot: { exportSnapshotPNG() },
             exportWFDBAnnotations: { exportWFDBAnnotations() },
             wfdbExportAvailable: amberFindingCount > 0,
+            exportWFDBHelp: exportWFDBHelp,
+            showProducers: { showProducersPanel = true },
             toggleReviewQueue: {
                 panels.request(.inspector, open: !panels.resolution.inspectorVisible)
             },
@@ -444,84 +446,14 @@ struct BedsideView: View {
         )
     }
 
-    /// VT/VF candidate scan toolbar item — only surfaces when the VT/VF
-    /// IAP is owned AND a recording is loaded (the App-target orchestrator
-    /// sets `isScanAvailable`). The free viewer never sees it, so the model
-    /// is never implied to be present. Extracted as its own toolbar-content
-    /// property to keep the `.toolbar` builder's type-check tractable.
-    /// 10-second window lock. Snaps the viewport to a 10 s window and holds
-    /// it there — finding + candidate jumps recenter without re-zooming, so
-    /// an analyst reading in fixed windows keeps their frame. A manual zoom
-    /// (see `zoom(factor:)`) releases the lock.
-    // MARK: - Toolbar hover text (X60)
-    //
-    // Named once each rather than written inline, so the string a button
-    // claims is greppable and reviewable rather than buried in a modifier.
-    //
-    // NOTE: these do not currently reach the user. `.help()` renders no
-    // tooltip anywhere in this app on macOS 26 — see the X60 PR for the
-    // evidence. They are kept accurate so that whenever hover text works
-    // again (an OS fix, or a decision to show toolbar labels), the copy is
-    // already right rather than needing an audit first.
-
-    private static let scanHelp =
-        "Scan this recording for candidate VT/VF episodes (research use only)"
-    private static let attachHelp =
-        "Merge a producer's annotations JSON into this recording"
-    private static let exportReportHelp =
-        "Save a markdown report of this recording's findings and dispositions"
-    private static let exportSnapshotHelp =
-        "Save a PNG snapshot of the current bedside view"
-    private static let findingsHelp = "Show or hide the review queue"
-
-    private var editModeHelp: String {
-        isEditing
-            ? "Editing on — notes and annotations are editable. Click to lock."
-            : "Read-only. Click to unlock and edit notes and annotations."
-    }
-
-    private var windowLockHelp: String {
-        windowLockedTo10s
-            ? "Held to a 10-second window. Jumps recenter without changing zoom. Click (or zoom) to release."
-            : "Hold the trace to a 10-second window so jumps keep your time frame."
-    }
-
+    // Toolbar hover text lives with the buttons in `MurmurToolbarItems`
+    // (#298); this one stays here because it names the exact output file,
+    // which only this view knows — it travels to the toolbar (and the menu
+    // bar) inside `bedsideCommands`.
     private var exportWFDBHelp: String {
         "Write your confirmed findings as a WFDB annotation file "
         + "(\(wfdbRecordBase).\(WFDBAnnotationWriter.defaultAnnotator)) "
         + "beside the recording, to hand to a peer"
-    }
-
-    @ToolbarContentBuilder
-    private var windowLockToolbarItem: some CustomizableToolbarContent {
-        ToolbarItem(id: "window-lock-toggle", placement: .automatic, showsByDefault: true) {
-            Button {
-                toggleWindowLock()
-            } label: {
-                Label("10 s window", systemImage: windowLockedTo10s ? ToolbarGlyph.windowHeld : ToolbarGlyph.windowFree)
-            }
-            .help(windowLockHelp)
-            .tint(windowLockedTo10s ? Color.accentColor : nil)
-            .accessibilityIdentifier("window-lock-toggle")
-        }
-    }
-
-    @ToolbarContentBuilder
-    private var scanToolbarItem: some CustomizableToolbarContent {
-        if scanContext.isScanAvailable {
-            ToolbarItem(id: "vtvf-scan-action", placement: .automatic, showsByDefault: true) {
-                Button {
-                    scanContext.requestScanDialog(
-                        viewStartSample: viewport.startSample,
-                        viewEndSample: viewport.endSample
-                    )
-                } label: {
-                    Label("Scan for VT/VF candidates", systemImage: ToolbarGlyph.scanVTVF)
-                }
-                .help(Self.scanHelp)
-                .accessibilityIdentifier("vtvf-scan-action")
-            }
-        }
     }
 
     /// The review-queue inspector — extracted from `body` for the same
@@ -730,123 +662,12 @@ struct BedsideView: View {
         )) {
             findingsInspector
         }
-        // X60: an ID'd toolbar is a CUSTOMISABLE one — macOS then offers
-        // View → Customize Toolbar…, where the analyst can switch the display
-        // mode to Icon and Text and drop the buttons they don't use.
-        //
-        // That matters more here than it normally would: `.help()` renders no
-        // tooltip anywhere in this app on macOS 26 (see X60), so an icon-only
-        // button has no way at all to say what it is. Customisation gives the
-        // analyst a route to visible labels that does not depend on a broken
-        // API.
-        //
-        // The default is icon-only again as of #253 — AppKit's own default,
-        // with X60's seed deleted rather than reversed. That was declined
-        // twice before, both times for the reason above: with tooltips broken,
-        // removing the labels leaves nothing saying what a button is. It went
-        // ahead now because #287 finally supplied the replacement affordance
-        // the redesign always assumed — every action here has a menu-bar row.
-        // See MurmurToolbar for the full record.
-        //
-        // The ids are the accessibility identifiers, deliberately: one name
-        // per button, already stable, and already what the XCUI suite binds
-        // to. They are persisted in the customisation, so DO NOT rename one
-        // without accepting that an analyst's saved layout loses that item.
-        .toolbar(id: MurmurToolbar.identifier) {
-            // X72 — the Context drawer toggle, leading the trailing cluster
-            // per the wireframe's ordering. Same action as ⌘⇧N.
-            ToolbarItem(id: "notes-toggle", placement: .automatic, showsByDefault: true) {
-                Button {
-                    withAnimation(.snappy(duration: 0.18)) { notesDrawerExpanded.toggle() }
-                } label: {
-                    Label("Notes", systemImage: ToolbarGlyph.notes)
-                }
-                .help("Show or hide the Context drawer (⌘⇧N)")
-                .tint(contextDrawerIsOpen ? Color.accentColor : nil)
-                .accessibilityIdentifier("notes-toggle")
-            }
-            ToolbarItem(id: "edit-mode-toggle", placement: .automatic, showsByDefault: true) {
-                Button {
-                    isEditing.toggle()
-                } label: {
-                    Label(
-                        isEditing ? "Editing" : "Locked",
-                        systemImage: isEditing ? ToolbarGlyph.editModeUnlocked : ToolbarGlyph.editModeLocked
-                    )
-                }
-                .help(editModeHelp)
-                .tint(isEditing ? Color.accentColor : nil)
-                .accessibilityIdentifier("edit-mode-toggle")
-            }
-            windowLockToolbarItem
-            scanToolbarItem
-            ToolbarItem(id: "attach-findings", placement: .automatic, showsByDefault: true) {
-                Button {
-                    showAttachFindings = true
-                } label: {
-                    Label("Attach findings…", systemImage: ToolbarGlyph.attachFindings)
-                }
-                .help(Self.attachHelp)
-                .accessibilityIdentifier("attach-findings")
-            }
-            // The three exports become one menu (X68). The other two ids stay
-            // REGISTERED but hidden by default rather than being retired: they
-            // are persisted in every analyst's saved toolbar layout, and X60
-            // made the toolbar customisable precisely so labels could be turned
-            // back on. A menu-backed action cannot be dragged out as a labelled
-            // button; a hidden-by-default item can.
-            ToolbarItem(id: "export-report", placement: .automatic, showsByDefault: true) {
-                Menu {
-                    Button("Export report…") { exportMarkdownReport() }
-                        .accessibilityIdentifier("export-report-item")
-                    Button("Export snapshot…") { exportSnapshotPNG() }
-                        .accessibilityIdentifier("export-snapshot-item")
-                    Button("Export WFDB annotations…") { exportWFDBAnnotations() }
-                        .disabled(amberFindingCount == 0)
-                        .accessibilityIdentifier("export-wfdb-item")
-                } label: {
-                    Label("Export", systemImage: ToolbarGlyph.exportReport)
-                }
-                .help(Self.exportReportHelp)
-                .accessibilityIdentifier("export-report")
-            }
-            ToolbarItem(id: "export-snapshot", placement: .automatic, showsByDefault: false) {
-                Button { exportSnapshotPNG() } label: {
-                    Label("Export snapshot…", systemImage: ToolbarGlyph.exportSnapshot)
-                }
-                .help(Self.exportSnapshotHelp)
-                .accessibilityIdentifier("export-snapshot")
-            }
-            ToolbarItem(id: "export-wfdb", placement: .automatic, showsByDefault: false) {
-                Button { exportWFDBAnnotations() } label: {
-                    Label("Export WFDB annotations…", systemImage: ToolbarGlyph.exportWFDB)
-                }
-                .help(exportWFDBHelp)
-                .disabled(amberFindingCount == 0)
-                .accessibilityIdentifier("export-wfdb")
-            }
-            #if DEBUG
-            ToolbarItem(id: "producers-toggle", placement: .automatic, showsByDefault: true) {
-                Button {
-                    showProducersPanel = true
-                } label: {
-                    Label("Producers", systemImage: ToolbarGlyph.producers)
-                }
-                .help("Run a registered FindingProducer over this recording")
-                .accessibilityIdentifier("producers-toggle")
-            }
-            #endif
-            ToolbarItem(id: "findings-toggle", placement: .automatic, showsByDefault: true) {
-                Button {
-                    panels.request(.inspector, open: !panels.resolution.inspectorVisible)
-                } label: {
-                    Label("Review queue", systemImage: ToolbarGlyph.reviewQueue)
-                }
-                .help(Self.findingsHelp)
-                .tint(panels.resolution.inspectorVisible ? Color.accentColor : nil)
-                .accessibilityIdentifier("findings-toggle")
-            }
-        }
+        // #298 — this view registers NO customizable-toolbar items anymore.
+        // The window's item set is `MurmurToolbarItems`, registered once by
+        // `ContentView` in every state and fed this view's actions through
+        // `bedsideCommands` (the focused-scene bridge the menu bar already
+        // uses). Registering the same ids from here as a second contributor
+        // is exactly what crashed in NSToolbar during bedside↔idle swaps.
         .fileImporter(
             isPresented: $showAttachFindings,
             allowedContentTypes: [.json]

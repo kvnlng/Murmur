@@ -104,6 +104,18 @@ public struct BedsideCommands {
     /// Shown DISABLED (X32), matching the toolbar menu's own gating.
     public var wfdbExportAvailable: Bool
 
+    /// #298 — the WFDB export's hover text names the exact output file, which
+    /// only the bedside knows. Travels with the closures so the single-site
+    /// toolbar (`MurmurToolbarItems`) can claim the same file the action
+    /// writes.
+    public var exportWFDBHelp: String
+
+    /// DEBUG producers panel (#298). Ships in release builds as an inert
+    /// default because `BedsideCommands` is public API and a `#if DEBUG`
+    /// stored property would fork the memberwise shape per configuration;
+    /// the toolbar item that calls it is itself DEBUG-gated.
+    public var showProducers: () -> Void
+
     /// Show or hide the review queue.
     public var toggleReviewQueue: () -> Void
     /// Drives the item's checkmark.
@@ -223,6 +235,8 @@ public struct BedsideCommands {
         exportSnapshot: @escaping () -> Void = {},
         exportWFDBAnnotations: @escaping () -> Void = {},
         wfdbExportAvailable: Bool = false,
+        exportWFDBHelp: String = "Write your confirmed findings as a WFDB annotation file beside the recording, to hand to a peer",
+        showProducers: @escaping () -> Void = {},
         toggleReviewQueue: @escaping () -> Void = {},
         reviewQueueVisible: Bool = false,
         textEntryActive: Bool,
@@ -263,6 +277,8 @@ public struct BedsideCommands {
         self.exportSnapshot = exportSnapshot
         self.exportWFDBAnnotations = exportWFDBAnnotations
         self.wfdbExportAvailable = wfdbExportAvailable
+        self.exportWFDBHelp = exportWFDBHelp
+        self.showProducers = showProducers
         self.toggleReviewQueue = toggleReviewQueue
         self.reviewQueueVisible = reviewQueueVisible
         self.textEntryActive = textEntryActive
