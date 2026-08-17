@@ -952,8 +952,31 @@ public struct ContentView: View {
         }
     }
 
+    /// #263 — the info bar's global import strip. Counts the folder plan
+    /// around the in-flight record: completed = records already imported,
+    /// total = every record the sidebar lists.
+    private func publishImportProgress(filename: String, fraction: Double) {
+        let completed = importStates.values.filter {
+            if case .imported = $0 { return true }
+            return false
+        }.count
+        let total: Int
+        if case .browsing(_, let records) = state {
+            total = records.count
+        } else {
+            total = max(completed + 1, 1)
+        }
+        ImportProgressContext.shared.update(
+            recordName: (filename as NSString).deletingPathExtension,
+            fractionComplete: fraction,
+            completedRecords: completed,
+            totalRecords: total
+        )
+    }
+
     private func startImport(filename: String, source folder: URL) {
         importStates[filename] = .importing(progress: nil)
+        publishImportProgress(filename: filename, fraction: 0)
         currentImportTask?.cancel()
         currentImportTask = Task {
             do {
@@ -964,12 +987,18 @@ public struct ContentView: View {
                         Task { @MainActor in
                             if case .importing = importStates[filename] {
                                 importStates[filename] = .importing(progress: snapshot)
+                                publishImportProgress(
+                                    filename: filename,
+                                    fraction: snapshot.fractionComplete
+                                )
                             }
                         }
                     }
                 )
                 await MainActor.run {
                     importStates[filename] = .imported(directory: summary.directory, recording: summary.recording)
+                    // #263 — the strip unmounts when nothing is in flight.
+                    ImportProgressContext.shared.clear()
                     // X63-B: only an imported record can be saved, so this is
                     // where it becomes flaggable.
                     SessionFlagStore.shared.register(
@@ -1005,6 +1034,8 @@ public struct ContentView: View {
                 if !Task.isCancelled {
                     await MainActor.run {
                         importStates[filename] = .failed(message: error.localizedDescription)
+                        // #263 — a failed import is no longer in flight.
+                        ImportProgressContext.shared.clear()
                     }
                 }
             }
