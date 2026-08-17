@@ -137,5 +137,13 @@ final class MurmurUILaunchShellTests: XCTestCase {
             XCTAssertTrue(toolbarElement(app, id).waitForExistence(timeout: 5),
                           "\(id) must exist with a record open — the frame never moves")
         }
+        // The other half of "same items, different STATE": with a record
+        // open the controls are live. Guards the wiring that turns the idle
+        // set into the bedside's controls (#298 — the two must be one
+        // registration, not two swapping ones).
+        for id in ["notes-toggle", "edit-mode-toggle", "window-lock-toggle", "findings-toggle"] {
+            XCTAssertTrue(toolbarElement(app, id).isEnabled,
+                          "\(id) must be ENABLED with a record open")
+        }
     }
 }
