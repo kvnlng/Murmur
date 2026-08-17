@@ -73,6 +73,17 @@ struct FiducialOverlay: View {
     /// callers/tests that haven't been tier-wired.
     var tier: WaveformZoomTier = .inspect
 
+    /// #227 — the patient-normal template, for the focused beat's ghost
+    /// spans. Nil when the record has no template; only the solid spans
+    /// draw then, since there is no normal to deviate from.
+    var template: MarkingsTemplate?
+
+    /// #227 — the analyst's Interval Spans toggle
+    /// (`IntervalMarkingsContext.showIntervalSpans`), threaded in like
+    /// `enabledLayers` rather than read from the context, so snapshots can
+    /// exercise both states without touching process-wide defaults.
+    var drawIntervalSpans: Bool = false
+
     /// The single authority on what this overlay draws at this zoom (X61).
     /// The Layers chip resolves the SAME policy so the control cannot claim
     /// a layer is on while this body drops it.
@@ -116,6 +127,14 @@ struct FiducialOverlay: View {
 
         let focused = beat.rPeakSampleIndex == focusedRPeakSampleIndex
 
+        // The focused beat's PR / QRS / QT spans (#227) — the trace showing
+        // the same object the beat card reports. Focused beat only: every
+        // beat treated identically is the reason the density gate exists,
+        // and spans on hundreds of beats would be clutter, not reading.
+        if drawIntervalSpans, focused, policy.drawsIntervalSpans {
+            intervalSpanBars(for: beat)
+        }
+
         // QRS boundaries at .qrsOnly and higher, gated by layer toggle.
         if drawable.contains(.qrs) {
             if let q = beat.qrsOnset { boundaryTick(fiducial: q, layer: .qrs, focused: focused) }
@@ -153,6 +172,61 @@ struct FiducialOverlay: View {
                 }
             }
         }
+    }
+
+    // MARK: - Interval spans (#227)
+
+    /// Rows anchor at the BOTTOM of the canvas, beneath the trace — the
+    /// bracket-lane half of the issue's "both" answer, kept inside this
+    /// overlay so it shares the x-mapping with the marks it summarises.
+    /// Nested magnitudes read top-to-bottom: PR, QRS inside QT.
+    private static let spanRowStride: CGFloat = 8
+    private static let spanBarHeight: CGFloat = 4
+    private static let spanGhostHeight: CGFloat = 2
+    /// Bottom margin + three rows must fit below the glyph band or the rows
+    /// would overprint the letters they annotate.
+    private static let spanBandHeight: CGFloat = 28
+
+    @ViewBuilder
+    private func intervalSpanBars(for beat: MarkingsBeat) -> some View {
+        if canvasSize.height > Self.hairlineTopInset + Self.spanBandHeight {
+            ForEach(IntervalSpans.spans(for: beat, template: template)) { span in
+                intervalSpanBar(span)
+            }
+        }
+    }
+
+    /// One span: a solid bar for THIS beat's duration, and beneath it a
+    /// thinner ghost running to the template's — a bullet chart per
+    /// interval. The two bars share their start, so the length difference
+    /// at the far end IS the deviation the beat card states in ms.
+    @ViewBuilder
+    private func intervalSpanBar(_ span: IntervalSpan) -> some View {
+        if let xs = xClamped(span.startSample),
+           let xe = xClamped(span.endSample), xe > xs {
+            let y = canvasSize.height - Self.spanBandHeight
+                + CGFloat(span.kind.row) * Self.spanRowStride
+            let color = FiducialPalette.color(for: span.kind.paletteLayer)
+            Rectangle()
+                .fill(color.opacity(0.60))
+                .frame(width: xe - xs, height: Self.spanBarHeight)
+                .offset(x: xs, y: y)
+            if let ghostEnd = span.ghostEndSample(sampleRate: sampleRate),
+               let xg = xClamped(ghostEnd), xg > xs {
+                Rectangle()
+                    .fill(color.opacity(0.32))
+                    .frame(width: xg - xs, height: Self.spanGhostHeight)
+                    .offset(x: xs, y: y + Self.spanBarHeight + 1)
+            }
+        }
+    }
+
+    /// Like `xPosition`, but a sample past the viewport edge maps to the
+    /// edge instead of vanishing — a span half in view draws its visible
+    /// half rather than nothing.
+    private func xClamped(_ sample: Int64) -> CGFloat? {
+        xPosition(forSample: min(max(sample, viewportSampleRange.lowerBound),
+                                 viewportSampleRange.upperBound))
     }
 
     /// Horizontal bracket connecting the tangent and isoelectric

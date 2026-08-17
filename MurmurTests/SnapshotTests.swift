@@ -1138,6 +1138,100 @@ extension SnapshotTests {
         )
     }
 
+    // MARK: - #227: interval spans on the focused beat
+
+    /// Like `fiducialBeat()` but with published durations, which spans
+    /// require — endpoints alone are a measurement the card is refusing to
+    /// state, and no span may draw for those.
+    private func spansBeat() -> MarkingsBeat {
+        MarkingsBeat(rPeakSampleIndex: 500, rPeakConfidence: 1.0,
+            pOnset: MarkingsFiducial(kind: .pOnset, sampleIndex: 380, confidence: 0.85),
+            pOffset: MarkingsFiducial(kind: .pOffset, sampleIndex: 430, confidence: 0.85),
+            qrsOnset: MarkingsFiducial(kind: .qrsOnset, sampleIndex: 470, confidence: 0.95),
+            qrsOffset: MarkingsFiducial(kind: .qrsOffset, sampleIndex: 540, confidence: 0.90),
+            tOnset: MarkingsFiducial(kind: .tOnset, sampleIndex: 620, confidence: 0.75),
+            tOffset: MarkingsFiducial(kind: .tOffset, sampleIndex: 700, confidence: 0.70),
+            prMs: 172, qrsMs: 92, qtMs: 400, qtcMs: 410, precedingRRMs: 800)
+    }
+
+    private func spansTemplate() -> MarkingsTemplate {
+        MarkingsTemplate(sampleCount: 40,
+            medianPRMs: 150, iqrPRMs: 10,
+            medianQRSMs: 80, iqrQRSMs: 6,
+            medianQTMs: 360, iqrQTMs: 20,
+            qtcFormulaName: "Bazett", medianQTcMs: 400, iqrQTcMs: 18)
+    }
+
+    private func spansPNG(
+        detailLevel: MarkingsDetailLevel = .fullFiducials,
+        drawSpans: Bool,
+        template: MarkingsTemplate?,
+        focused: Int64? = 500
+    ) -> Data? {
+        let view = FiducialOverlay(beats: [spansBeat()], viewportSampleRange: 300..<900,
+            sampleRate: 250, detailLevel: detailLevel, focusedRPeakSampleIndex: focused,
+            enabledLayers: [.p, .qrs, .t], canvasSize: CGSize(width: 520, height: 120),
+            template: template, drawIntervalSpans: drawSpans)
+            .frame(width: 520, height: 120).background(Color.white)
+        return render(view, size: CGSize(width: 520, height: 120)).tiffRepresentation
+    }
+
+    /// The look itself, recorded: three bullet-chart rows beneath the trace,
+    /// each a solid bar (this beat) over a thinner ghost (the template), the
+    /// far-end difference being the deviation the beat card states. This
+    /// beat runs long against its normal on all three intervals, so every
+    /// solid bar overhangs its ghost.
+    func testFiducialOverlay_intervalSpans() {
+        let view = FiducialOverlay(beats: [spansBeat()], viewportSampleRange: 300..<900,
+            sampleRate: 250, detailLevel: .fullFiducials, focusedRPeakSampleIndex: 500,
+            enabledLayers: [.p, .qrs, .t], canvasSize: CGSize(width: 520, height: 120),
+            template: spansTemplate(), drawIntervalSpans: true)
+            .frame(width: 520, height: 120).padding().background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 552, height: 160)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
+    /// The feature exists: with a focused beat at full-fiducial zoom, the
+    /// spans toggle must change what is drawn. Same compare-two-renders
+    /// pattern as the X61 tests — no recorded baseline to drift.
+    func testIntervalSpans_drawForTheFocusedBeat() {
+        XCTAssertNotEqual(
+            spansPNG(drawSpans: true, template: spansTemplate()),
+            spansPNG(drawSpans: false, template: spansTemplate()),
+            "Interval spans on vs off must change the render for a focused beat"
+        )
+    }
+
+    /// The deviation half: the template's ghost must itself be visible, or
+    /// the overhang — the whole point of #227 — does not exist.
+    func testIntervalSpans_ghostNeedsATemplate() {
+        XCTAssertNotEqual(
+            spansPNG(drawSpans: true, template: spansTemplate()),
+            spansPNG(drawSpans: true, template: nil),
+            "A template must add the ghost span — without it only the solid draws"
+        )
+    }
+
+    /// Rich on the focused beat, sparse elsewhere (#227's clutter rule): a
+    /// beat nobody is focused on gets no spans, so the toggle must be a
+    /// no-op when nothing is focused.
+    func testIntervalSpans_onlyTheFocusedBeatCarriesThem() {
+        XCTAssertEqual(
+            spansPNG(drawSpans: true, template: spansTemplate(), focused: nil),
+            spansPNG(drawSpans: false, template: spansTemplate(), focused: nil),
+            "Without a focused beat there is nothing to span"
+        )
+    }
+
+    /// Spans follow the full-fiducial gate the policy states — at qrsOnly
+    /// zoom the toggle is inert, like the P and T toggles at that window.
+    func testIntervalSpans_heldBackBelowFullFiducialZoom() {
+        XCTAssertEqual(
+            spansPNG(detailLevel: .qrsOnly, drawSpans: true, template: spansTemplate()),
+            spansPNG(detailLevel: .qrsOnly, drawSpans: false, template: spansTemplate()),
+            "Interval spans are a full-fiducial treatment; qrsOnly zoom drops them"
+        )
+    }
+
     // MARK: - X93: are the phase points visible ON the trace?
 
     /// Crop the render to everything BELOW the top glyph band, where the

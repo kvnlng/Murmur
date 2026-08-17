@@ -372,8 +372,22 @@ struct BedsideView: View {
                     isEnabled: markingsContext.enabledLayers.contains(layer),
                     isRendering: policy.drawsMarks
                         && policy.renderableLayers.contains(layer))
-            },
+            }
+            // #227 — the roadmap's "intervals" layer joins the same menu.
+            // Not a `MarkingsFiducialLayer` case (its raw values persist,
+            // and the letter palette has no letter for it), so it rides
+            // along as one more row with its own id; `isRendering` reads
+            // the SAME policy the overlay draws from, per X61.
+            + [BedsideCommands.FiducialLayerMenuItem(
+                id: "interval-spans",
+                label: "Intervals",
+                isEnabled: markingsContext.showIntervalSpans,
+                isRendering: markingsContext.renderPolicy.drawsIntervalSpans)],
             toggleFiducialLayer: { raw in
+                if raw == "interval-spans" {
+                    markingsContext.showIntervalSpans.toggle()
+                    return
+                }
                 guard let layer = MarkingsFiducialLayer(rawValue: raw) else { return }
                 toggleFiducialLayer(layer)
             },
