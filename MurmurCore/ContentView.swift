@@ -431,7 +431,29 @@ public struct ContentView: View {
         NavigationStack {
             LaunchShellView(onOpenFolder: { isImporterPresented = true })
                 .navigationTitle("Murmur")
-                .toolbar(id: MurmurToolbar.identifier) { overflowToolbarItems }
+                .toolbar(id: MurmurToolbar.identifier) {
+                    overflowToolbarItems
+                    // #285 / 12a: the frame never moves — the bedside's
+                    // whole item set exists at launch, idle. See
+                    // `IdleToolbarItems` for why this is a mirror and how
+                    // it is kept from drifting.
+                    IdleToolbarItems()
+                }
+        }
+    }
+
+    /// #285 — true when a `BedsideView` is on screen and therefore
+    /// registering the live toolbar items. The idle set mounts exactly when
+    /// this is false; both at once would register duplicate ids.
+    private var isBedsideMounted: Bool {
+        switch state {
+        case .empty:
+            return false
+        case .directView:
+            return true
+        case .browsing:
+            guard let key = selection, case .imported = importStates[key] else { return false }
+            return true
         }
     }
 
@@ -546,7 +568,15 @@ public struct ContentView: View {
         } detail: {
             detailPane
                 .navigationTitle(detailTitle)
-                .toolbar(id: MurmurToolbar.identifier) { overflowToolbarItems }
+                .toolbar(id: MurmurToolbar.identifier) {
+                    overflowToolbarItems
+                    // #285: the frame holds through browse-with-no-selection
+                    // too — the idle set stands in until the selected record
+                    // finishes importing and BedsideView takes over the ids.
+                    if !isBedsideMounted {
+                        IdleToolbarItems()
+                    }
+                }
                 // Persistent record-list toggle. The sidebar-toggle button
                 // NavigationSplitView injects lives in the sidebar's own
                 // toolbar region, so it collapses together with the column —
