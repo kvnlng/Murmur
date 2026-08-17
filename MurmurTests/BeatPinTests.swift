@@ -89,15 +89,34 @@ struct BeatPinTests {
 
     @Test("A jump pins its target")
     func jumpPins() {
-        // J/K, the deviation shortcuts and interval-trend bin clicks all
-        // arrive here. In every case the analyst asked for that specific
-        // beat — and before this, the card carrying it was erased by the
-        // next mouse-exit, frequently before it had been read.
+        // The deviation shortcuts (`]` / `[`) and interval-trend bin clicks
+        // arrive here. In every case the analyst asked for that specific beat
+        // — and the card carrying it must not be erased by the next
+        // mouse-exit, frequently before it had been read.
+        //
+        // This test used to name J/K, which never called this at all: they
+        // are the FINDING jumps. Asserting the property against the context
+        // API while assuming the wiring is how #279 survived — the UI test
+        // `testADeviationJumpSurvivesThePointerLeavingTheTrace` covers the
+        // wiring this cannot see.
         let ctx = context()
-        ctx.requestJump(toSampleIndex: 3000)
+        ctx.pin(beatSampleIndex: 3000)
         #expect(ctx.focusedBeatSampleIndex == 3000)
         ctx.focus(beatSampleIndex: nil)
         #expect(ctx.focusedBeatSampleIndex == 3000, "A jumped-to beat must not evaporate on mouse-exit")
+    }
+
+    @Test("A jump outranks the hover it lands on top of")
+    func jumpClearsAStaleHover() {
+        // The viewport moves to the target, so a stationary pointer now sits
+        // over a different part of the signal while the old hover is still
+        // recorded. Since focus reads `hovered ?? pinned`, leaving it would
+        // let a stale hover outrank the beat just asked for.
+        let ctx = context()
+        ctx.focus(beatSampleIndex: 1000)
+        ctx.pin(beatSampleIndex: 3000)
+        #expect(ctx.focusedBeatSampleIndex == 3000,
+                "The beat the analyst asked for lost to the beat the pointer had been over")
     }
 
     @Test("A pin belongs to the record it was placed in")

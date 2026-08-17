@@ -1566,10 +1566,18 @@ struct BedsideView: View {
         jumpViewport(toBeat: prev.rPeakSampleIndex)
     }
 
+    /// Move the viewport to a beat the analyst named, and PIN it there.
+    ///
+    /// The single path for every "take me to this beat" gesture — `]` / `[`
+    /// and the interval-trend bin click. They used to be separate and each
+    /// had half the behaviour: this one moved the viewport but only
+    /// hover-focused, so the next mouse-exit erased the card (#279), while
+    /// the trend click pinned but never moved the viewport, because it
+    /// posted a jump request nothing consumed.
     private func jumpViewport(toBeat sample: Int64) {
         let total = max(1, viewport.totalSamples)
         viewport.animateJump(toFraction: Double(sample) / Double(total), duration: 0.18)
-        markingsContext.focus(beatSampleIndex: sample)
+        markingsContext.pin(beatSampleIndex: sample)
     }
 
     /// Determine the caliper kind for the focused beat by cross-
@@ -2604,16 +2612,19 @@ struct BedsideView: View {
         }
     }
 
-    /// Click-through from the trend lane back to a specific beat.
-    /// Finds the beat closest to the clicked bin center and asks
-    /// `IntervalMarkingsContext` to jump the viewport + focus that
-    /// beat — same drilldown mechanism the deviation-navigation
-    /// shortcuts use.
+    /// Click-through from the trend lane back to a specific beat. Finds the
+    /// beat closest to the clicked bin centre and jumps to it — literally the
+    /// same call the deviation shortcuts make, which is what the old comment
+    /// here claimed ("same drilldown mechanism") without it being true.
+    ///
+    /// It used to post a jump request that nothing consumed, so the beat was
+    /// pinned and the viewport never moved: a click on a bin quietly did half
+    /// its job.
     private func handleIntervalTrendBinClick(atTimeSeconds seconds: Double) {
         guard markingsContext.sampleRate > 0 else { return }
         let sampleIndex = Int64(seconds * markingsContext.sampleRate)
         if let beat = markingsContext.nearestBeat(toSampleIndex: sampleIndex) {
-            markingsContext.requestJump(toSampleIndex: beat.rPeakSampleIndex)
+            jumpViewport(toBeat: beat.rPeakSampleIndex)
         }
     }
 

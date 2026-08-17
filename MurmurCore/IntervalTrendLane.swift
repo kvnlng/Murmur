@@ -22,9 +22,11 @@
 //    - Hover a bin → publishes the time to VariabilityLaneContext so
 //      the ECG canvas above can draw the "window on signal" overlay;
 //      likewise reads the ECG's hover for the reverse direction.
-//    - Click a bin → focuses the beat closest to the bin center via
-//      IntervalMarkingsContext.requestJump(...), which drives the
-//      viewport to the beat and opens the caliper readout.
+//    - Click a bin → PINS the beat closest to the bin centre and drives the
+//      viewport to it, opening the caliper readout. Both halves go through
+//      BedsideView.jumpViewport(toBeat:), the same call `]` / `[` make.
+//      Until #279 this described a viewport move that did not happen: the
+//      old path posted a jump request nothing consumed.
 //    - Threshold guides are user-set only — the app never ships built-
 //      in clinical cutoffs. Guides live in @State on the view for now
 //      (persisting them is a follow-up when analyst authoring lands).

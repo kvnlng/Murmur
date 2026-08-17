@@ -77,6 +77,7 @@ final class MurmurUIStageColumnTests: XCTestCase {
     /// the whole signal: `docked-beat-inspector-empty` shows exactly when no
     /// beat is focused, so "the card is showing readings" is its ABSENCE.
     private struct BeatCardStage {
+        let app: XCUIApplication
         let placeholder: XCUIElement
         let onBeat: XCUICoordinate
         let offTrace: XCUICoordinate
@@ -103,6 +104,7 @@ final class MurmurUIStageColumnTests: XCTestCase {
                       "No fiducial overlay — this record has no beats to read")
 
         return BeatCardStage(
+            app: app,
             placeholder: app.descendants(matching: .any)
                 .matching(identifier: "docked-beat-inspector-empty").firstMatch,
             onBeat: overlay.coordinate(
@@ -131,6 +133,41 @@ final class MurmurUIStageColumnTests: XCTestCase {
         XCTAssertTrue(stage.placeholder.waitForExistence(timeout: 5),
                       "Readings are up with nothing pinned and the pointer off the "
                       + "trace — they belong to a beat nobody is pointing at")
+    }
+
+    /// #279 — a keyboard jump must PIN its beat, not hover-focus it.
+    ///
+    /// `]` steps to the most-deviant beat (`j`/`k` are the FINDING jumps and
+    /// never touch beat focus, which is what the issue originally said). The analyst asked for that specific
+    /// beat by name; nothing about the request is a hover, so nothing about
+    /// where the pointer subsequently goes should discard it. Routed through
+    /// `focus()` it was hover state, and the next mouse-exit erased the card —
+    /// #225 again, for the one gesture that is least ambiguous about intent.
+    ///
+    /// Needs no trace coordinate, which is the point: the jump is keyboard
+    /// driven, so this covers the wiring without depending on window geometry.
+    @MainActor
+    func testADeviationJumpSurvivesThePointerLeavingTheTrace() throws {
+        let stage = launchBeatCardStage()
+
+        // The pointer must be ON the trace first. Without a live hover there
+        // is no mouse-exit to fire when it leaves, and the jump's focus
+        // survives by accident — the test passes while the bug is intact.
+        stage.onBeat.hover()
+        XCTAssertTrue(stage.placeholder.waitForNonExistence(timeout: 5),
+                      "Hovering should raise readings before the jump is asked for")
+
+        stage.app.typeKey("]", modifierFlags: [])
+        XCTAssertTrue(stage.placeholder.waitForNonExistence(timeout: 5),
+                      "] should jump to the most-deviant beat and keep readings up")
+
+        stage.offTrace.hover()
+        // Same settle as the pin test: the assertion is that something does
+        // NOT appear, so there is no positive event to wait on.
+        Thread.sleep(forTimeInterval: 2)
+        XCTAssertFalse(stage.placeholder.exists,
+                       "The jumped-to beat evaporated as the pointer moved — it was "
+                       + "hover-focused rather than pinned (#279)")
     }
 
     /// #225 — the reported bug, driven through the app the way it was hit.
