@@ -116,6 +116,91 @@ final class MurmurUIMetricsRegionTests: XCTestCase {
                       + "placeholder has swallowed a case that used to work")
     }
 
+    /// The card must not change size when the numbers arrive. 12a's rule is
+    /// dimensional, not just existential: "every region present at its FINAL
+    /// SIZE with values blank". A short placeholder that grows into the
+    /// populated grid is the frame moving — one launch, one card, measured
+    /// before and after the orchestrator publishes.
+    @MainActor
+    func testUnmeasuredCardHoldsTheStripsFinalSize() throws {
+        // Two launches, one geometry (X100 pins the window per launch, so
+        // the frames are comparable): the plain fixture holds the
+        // unmeasured card stably; the seeded one populates. A single
+        // seeded launch can't catch the transient unmeasured state — the
+        // orchestrator publishes faster than XCUI's first query.
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-sample", "--ui-test-grant-studio"]
+        app.launch()
+        let unmeasured = app.descendants(matching: .any)
+            .matching(identifier: "variability-metrics-unmeasured").firstMatch
+        XCTAssertTrue(unmeasured.waitForExistence(timeout: 30),
+                      "the plain fixture renders the unmeasured card")
+        let idleFrame = unmeasured.frame
+        app.terminate()
+
+        // 300 seeded beats → 299 intervals, above the Task Force minimum of
+        // 256, so this compares the advisory-free populated rendering.
+        // (Advisories are size-neutral anyway — they ride the section header
+        // line — which testInsufficientScopeHoldsTheCardsSize pins.)
+        let seeded = XCUIApplication()
+        seeded.launchArguments += ["--ui-test-sample", "--ui-test-grant-studio",
+                                   "--ui-test-seed-atr-normals=300"]
+        seeded.launch()
+        let strip = seeded.descendants(matching: .any)
+            .matching(identifier: "variability-metrics-strip").firstMatch
+        XCTAssertTrue(strip.waitForExistence(timeout: 40),
+                      "seeded normals should populate the strip")
+        let populatedFrame = strip.frame
+
+        XCTAssertEqual(idleFrame.width, populatedFrame.width, accuracy: 2,
+                       "populating the card must not change its width")
+        XCTAssertEqual(idleFrame.height, populatedFrame.height, accuracy: 8,
+                       "populating the card must not change its height — the unmeasured "
+                       + "state renders the same grid with em-dash values "
+                       + "(idle \(idleFrame.height) pt vs populated \(populatedFrame.height) pt)")
+    }
+
+    /// The third state the size rule covers: narrowing to Window scope on an
+    /// unmeasurable stretch (X95's insufficient branch) must not collapse the
+    /// card. Reported live: "when you select window, the Variability Metrics
+    /// card collapsed" — the insufficient branch still rendered the old
+    /// header-plus-caption stub while the other states held the full grid.
+    /// Advisories ride the section header line (they change how the numbers
+    /// read, so they stay visible — but they cost no height), so parity here
+    /// is strict: same grid, same size, glyphs and one warning are all that
+    /// change.
+    @MainActor
+    func testInsufficientScopeHoldsTheCardsSize() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-sample", "--ui-test-grant-studio"]
+        app.launch()
+        let unmeasured = app.descendants(matching: .any)
+            .matching(identifier: "variability-metrics-unmeasured").firstMatch
+        XCTAssertTrue(unmeasured.waitForExistence(timeout: 30),
+                      "the plain fixture renders the unmeasured card")
+        let idleFrame = unmeasured.frame
+
+        // Window scope over the sample fixture holds 0 normal beats — the
+        // insufficient branch, reached exactly the way the analyst reaches it.
+        let windowSegment = app.radioButtons["Window"].firstMatch
+        XCTAssertTrue(MurmurUITests.scrollUntilHittable(windowSegment, in: app),
+                      "The scope picker's Window segment should be clickable")
+        windowSegment.click()
+        let insufficient = app.descendants(matching: .any)
+            .matching(identifier: "variability-metrics-insufficient").firstMatch
+        XCTAssertTrue(insufficient.waitForExistence(timeout: 10),
+                      "Window scope with too few beats renders the insufficient card")
+        let scopedFrame = insufficient.frame
+
+        XCTAssertEqual(idleFrame.width, scopedFrame.width, accuracy: 2,
+                       "switching scope must not change the card's width")
+        XCTAssertEqual(idleFrame.height, scopedFrame.height, accuracy: 8,
+                       "switching scope must not change the card's height — the "
+                       + "insufficient state renders the same grid with its explanation "
+                       + "inline on the section header, never a collapsed stub (12a). "
+                       + "Unmeasured \(idleFrame.height) pt vs insufficient \(scopedFrame.height) pt")
+    }
+
     /// The scope picker is why this matters beyond tidiness. X95's whole point
     /// was that unmounting takes the picker with it and strands the analyst in
     /// a scope they cannot leave; a placeholder without it would repeat that.

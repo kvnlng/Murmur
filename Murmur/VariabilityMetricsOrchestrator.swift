@@ -145,11 +145,11 @@ struct VariabilityMetricsOrchestrator: View {
         recordName: String,
         scope: MetricsScope
     ) -> VariabilityMetricsSummary {
-        var sections = [timeDomainSection(report)]
-        if let fd = report.frequencyDomain {
-            sections.append(frequencyDomainSection(fd))
-        }
-        sections.append(qtviSection(qtvi))
+        let sections = [
+            timeDomainSection(report),
+            frequencyDomainSection(report.frequencyDomain),
+            qtviSection(qtvi),
+        ]
         // The scope is named in the provenance, not just shown in the picker.
         // A copied or screenshotted block has to say what it covered — a
         // 5-minute SDNN and a 25-hour SDNN are different measurements, and
@@ -182,31 +182,52 @@ struct VariabilityMetricsOrchestrator: View {
 
     /// Reports each band's power with the estimator, window, and band edges
     /// alongside — never a bare LF/HF — plus the two validity surfaces: VLF is
-    /// omitted with a note when the window is too short, and the excluded-beat
-    /// fraction is stated factually. All neutral: LF/HF is a measurement, never
-    /// "sympathetic/parasympathetic balance".
+    /// em-dashed with a note when the window is too short, and the
+    /// excluded-beat fraction is stated factually. All neutral: LF/HF is a
+    /// measurement, never "sympathetic/parasympathetic balance".
+    ///
+    /// The full canonical row set is ALWAYS emitted — a band the analyzer
+    /// could not measure renders an em-dash, never a missing row. 12a's rule
+    /// is dimensional: the populated card and the unmeasured skeleton
+    /// (`VariabilityMetricsSummary.unmeasured`) must be the same shape, so
+    /// numbers arriving changes glyphs, not geometry.
     private static func frequencyDomainSection(
-        _ fd: FrequencyDomainHRV
+        _ fd: FrequencyDomainHRV?
     ) -> VariabilityMetricsSummary.Section {
-        var rows: [VariabilityMetricsSummary.Row] = []
-        if let vlf = fd.vlf.absolutePowerMs2 {
-            rows.append(.init(id: "vm-vlf", label: "VLF", value: power(vlf), unit: "ms²"))
+        let lfhf: String
+        if let ratio = fd?.lfhfRatio {
+            lfhf = String(format: "%.2f", ratio)
+        } else {
+            lfhf = "—"
         }
-        if let lf = fd.lf.absolutePowerMs2 {
-            rows.append(.init(id: "vm-lf", label: "LF", value: power(lf), unit: "ms²"))
+        let nu: String
+        if let lfnu = fd?.lfNormalizedUnits, let hfnu = fd?.hfNormalizedUnits {
+            nu = String(format: "%.0f / %.0f", lfnu, hfnu)
+        } else {
+            nu = "—"
         }
-        if let hf = fd.hf.absolutePowerMs2 {
-            rows.append(.init(id: "vm-hf", label: "HF", value: power(hf), unit: "ms²"))
-        }
-        if let ratio = fd.lfhfRatio {
-            rows.append(.init(id: "vm-lfhf", label: "LF/HF", value: String(format: "%.2f", ratio)))
-        }
-        if let lfnu = fd.lfNormalizedUnits, let hfnu = fd.hfNormalizedUnits {
-            rows.append(.init(
-                id: "vm-lfhf-nu",
-                label: "LF / HF n.u.",
-                value: String(format: "%.0f / %.0f", lfnu, hfnu)
-            ))
+        let rows: [VariabilityMetricsSummary.Row] = [
+            .init(id: "vm-vlf", label: "VLF",
+                  value: power(fd?.vlf.absolutePowerMs2), unit: "ms²"),
+            .init(id: "vm-lf", label: "LF",
+                  value: power(fd?.lf.absolutePowerMs2), unit: "ms²"),
+            .init(id: "vm-hf", label: "HF",
+                  value: power(fd?.hf.absolutePowerMs2), unit: "ms²"),
+            .init(id: "vm-lfhf", label: "LF/HF", value: lfhf),
+            .init(id: "vm-lfhf-nu", label: "LF / HF n.u.", value: nu),
+        ]
+        guard let fd else {
+            // Thresholds restated from `FrequencyDomainHRVAnalyzer`
+            // (internal to MurmurMetrics): 12 clean beats over 20 s.
+            return .init(
+                id: "variability-metrics-frequency-domain",
+                title: "Frequency-domain HRV",
+                rows: rows,
+                captions: [
+                    "Not measured — the spectrum needs at least 12 clean beats "
+                    + "spanning 20 s of RR data.",
+                ]
+            )
         }
         var captions = [
             "\(fd.estimator) · \(duration(fd.windowSeconds)) window · "
@@ -231,9 +252,20 @@ struct VariabilityMetricsOrchestrator: View {
         _ qtvi: QTVISummary?
     ) -> VariabilityMetricsSummary.Section {
         guard let q = qtvi else {
+            // Same id, same rows, values em-dash: absence is a state of this
+            // section, not a different section. The old
+            // "variability-metrics-qtvi-empty" collapsed to a bare caption,
+            // which made the populated card shorter than the unmeasured
+            // skeleton — the frame moving, which 12a forbids.
             return .init(
-                id: "variability-metrics-qtvi-empty",
+                id: "variability-metrics-qtvi",
                 title: "QT variability index",
+                rows: [
+                    .init(id: "vm-qtvi", label: "QTVI", value: "—"),
+                    .init(id: "vm-sdqt", label: "SDQT", value: "—", unit: "ms"),
+                    .init(id: "vm-qtvi-sdnn", label: "SDNN", value: "—", unit: "ms"),
+                    .init(id: "vm-qtvi-meannn", label: "Mean NN", value: "—", unit: "ms"),
+                ],
                 captions: ["No qualifying 5-min segments (needs ≥ 5 min of stable, artifact-free rate)."]
             )
         }
@@ -260,6 +292,12 @@ struct VariabilityMetricsOrchestrator: View {
     // Digit counts carried over verbatim from `ECGMetricsView`.
     private static func value(_ v: Double) -> String { String(format: "%.1f", v) }
     private static func power(_ v: Double) -> String { String(format: "%.0f", v) }
+    /// Em-dash for a band the analyzer could not measure — the row itself
+    /// never goes missing (12a).
+    private static func power(_ v: Double?) -> String {
+        guard let v else { return "—" }
+        return power(v)
+    }
 
     private static func duration(_ seconds: Double) -> String {
         if seconds < 60 { return String(format: "%.1f s", seconds) }

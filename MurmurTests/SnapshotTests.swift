@@ -965,9 +965,11 @@ final class SnapshotTests: XCTestCase {
 
     /// The fallback branch (#291): no summary, no insufficient scope, not
     /// locked — the state the strip used to render NOTHING for. Pins the 12a
-    /// shape: header, scope picker, blank value line, same card chrome, so
-    /// the region never vanishes while the orchestrator is still working or
-    /// the record has nothing measurable.
+    /// shape, which is dimensional: the FULL grid — all three sections, every
+    /// canonical row — with every value an em-dash, same card chrome, so the
+    /// region neither vanishes nor changes size when the orchestrator
+    /// publishes. Rendered at the same size as `_populated` on purpose; the
+    /// two images should differ in glyphs, not geometry.
     @MainActor
     func testVariabilityMetricsStrip_unmeasured() {
         let context = VariabilityMetricsContext()
@@ -975,7 +977,23 @@ final class SnapshotTests: XCTestCase {
             .frame(width: 620)
             .padding()
             .background(Color.white)
-        assertSnapshot(of: render(view, size: CGSize(width: 660, height: 120)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+        assertSnapshot(of: render(view, size: CGSize(width: 660, height: 320)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
+    /// X95's insufficient branch after the collapse fix: the SAME full grid
+    /// as the unmeasured card, with the explanation inline on the first
+    /// section's header line — never the header-plus-caption stub, which was
+    /// the card collapsing when the analyst narrowed the scope (12a). Same
+    /// render size as `_populated` and `_unmeasured` on purpose.
+    @MainActor
+    func testVariabilityMetricsStrip_insufficient() {
+        let context = VariabilityMetricsContext()
+        context.setInsufficient(scope: .visibleWindow, beatCount: 2)
+        let view = VariabilityMetricsStrip(context: context)
+            .frame(width: 620)
+            .padding()
+            .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 660, height: 320)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 
     private static var variabilityFixture: VariabilityMetricsSummary {
@@ -1006,9 +1024,18 @@ final class SnapshotTests: XCTestCase {
                         "0% of beats excluded as artifact before the spectrum.",
                     ]
                 ),
+                // The QTVI-empty state as the orchestrator now shapes it:
+                // same section, same rows, em-dash values — never a section
+                // collapsed to a caption, which changed the card's height.
                 .init(
-                    id: "variability-metrics-qtvi-empty",
+                    id: "variability-metrics-qtvi",
                     title: "QT variability index",
+                    rows: [
+                        .init(id: "vm-qtvi", label: "QTVI", value: "—"),
+                        .init(id: "vm-sdqt", label: "SDQT", value: "—", unit: "ms"),
+                        .init(id: "vm-qtvi-sdnn", label: "SDNN", value: "—", unit: "ms"),
+                        .init(id: "vm-qtvi-meannn", label: "Mean NN", value: "—", unit: "ms"),
+                    ],
                     captions: ["No qualifying 5-min segments (needs ≥ 5 min of stable, artifact-free rate)."]
                 ),
             ],
