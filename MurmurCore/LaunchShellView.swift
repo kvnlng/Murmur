@@ -39,8 +39,40 @@ struct LaunchShellView: View {
             openLine
                 .padding(.top, 28)
             Spacer()
+            idleInfoBar
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// #285 / 12a — the info bar exists at launch with values blank. Same
+    /// 28 pt, same styling, same `info-bar` identifier as the bedside's
+    /// (X69), mirrored shape: what the record IS on the left, what the
+    /// trace is DOING on the right — all of it em-dash, because there is
+    /// no record and the bar must say so rather than vanish.
+    private var idleInfoBar: some View {
+        HStack(spacing: 10) {
+            Text("—")
+                .fontWeight(.medium)
+            Text("— leads · — Hz · —")
+            Spacer(minLength: 12)
+            Text("window —")
+        }
+        .font(.caption2)
+        .monospacedDigit()
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .padding(.horizontal, 14)
+        .frame(height: 28)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.bar)
+        // `.ignore` + explicit label rather than the bedside bar's
+        // `.combine`: AX synthesis dropped this bar's em-dash-heavy children
+        // and combined it into an element that spoke as nothing at all.
+        // There is no button in here to lose a trait over (the X51 caveat),
+        // so the one honest sentence is stated outright.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("— · — leads · — Hz · — · window —")
+        .accessibilityIdentifier("info-bar")
     }
 
     /// One quiet line, deliberately not a card: `No record open ·
