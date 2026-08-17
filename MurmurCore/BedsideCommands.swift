@@ -60,6 +60,55 @@ public struct BedsideCommands {
     /// Drives the toggle item's title (Show vs Hide).
     public var notesDrawerVisible: Bool
 
+    // MARK: - The toolbar's own actions (#253)
+    //
+    // Eight toolbar buttons had no menu-bar equivalent at all. That was
+    // survivable only because the toolbar seeds Icon AND Text: the label under
+    // the glyph was the entire affordance, since `.help()` renders no tooltip
+    // anywhere in this app on macOS 26 (X60). The design's icon-only toolbar
+    // removes that label and justifies it with "every action keeps its
+    // menu-bar equivalent" — a claim about this file, which was false. These
+    // make it true, and must land BEFORE the display-mode seed flips.
+    //
+    // Reached through the same focused-value bridge as the navigation
+    // commands, for the same reason: a menu key equivalent dispatches through
+    // the responder chain rather than depending on a subview holding focus.
+
+    /// Toggle the Editing latch. `isEditing` below already reports its state
+    /// and drives the item's title.
+    public var toggleEditing: () -> Void
+
+    /// Hold the viewport to a 10 s window so jumps recenter without
+    /// re-zooming. A manual zoom releases it.
+    public var toggleWindowHold: () -> Void
+    /// Drives the item's title (Hold vs Release) — held is a MODE, so the
+    /// menu says which way the item will move it.
+    public var windowHeldTo10s: Bool
+
+    /// Open the VT/VF candidate scan dialog over the visible window.
+    public var scanForVTVF: () -> Void
+    /// False for the free viewer — the VT/VF scan is behind an IAP, and the
+    /// App-target orchestrator owns the entitlement. The item is HIDDEN rather
+    /// than disabled in that case: a disabled item advertises a capability the
+    /// analyst has not bought, which is a different message from X32's
+    /// "this record cannot support it".
+    public var scanAvailable: Bool
+
+    /// Merge a producer's annotations JSON into this recording.
+    public var attachFindings: () -> Void
+
+    public var exportReport: () -> Void
+    public var exportSnapshot: () -> Void
+    public var exportWFDBAnnotations: () -> Void
+    /// False when no finding has been confirmed — there is nothing to write.
+    /// Shown DISABLED (X32), matching the toolbar menu's own gating.
+    public var wfdbExportAvailable: Bool
+
+    /// Show or hide the review queue.
+    public var toggleReviewQueue: () -> Void
+    /// Drives the item's checkmark.
+    public var reviewQueueVisible: Bool
+
     /// True while a text field (the notes editor) is the first responder. The
     /// App disables the bedside key commands then so typing isn't intercepted.
     public var textEntryActive: Bool
@@ -119,6 +168,18 @@ public struct BedsideCommands {
         notesDrawerVisible: Bool = false,
         trendLanes: [TrendLaneMenuItem] = [],
         toggleTrendLane: @escaping (String) -> Void = { _ in },
+        toggleEditing: @escaping () -> Void = {},
+        toggleWindowHold: @escaping () -> Void = {},
+        windowHeldTo10s: Bool = false,
+        scanForVTVF: @escaping () -> Void = {},
+        scanAvailable: Bool = false,
+        attachFindings: @escaping () -> Void = {},
+        exportReport: @escaping () -> Void = {},
+        exportSnapshot: @escaping () -> Void = {},
+        exportWFDBAnnotations: @escaping () -> Void = {},
+        wfdbExportAvailable: Bool = false,
+        toggleReviewQueue: @escaping () -> Void = {},
+        reviewQueueVisible: Bool = false,
         textEntryActive: Bool,
         isEditing: Bool
     ) {
@@ -144,6 +205,18 @@ public struct BedsideCommands {
         self.notesDrawerVisible = notesDrawerVisible
         self.trendLanes = trendLanes
         self.toggleTrendLane = toggleTrendLane
+        self.toggleEditing = toggleEditing
+        self.toggleWindowHold = toggleWindowHold
+        self.windowHeldTo10s = windowHeldTo10s
+        self.scanForVTVF = scanForVTVF
+        self.scanAvailable = scanAvailable
+        self.attachFindings = attachFindings
+        self.exportReport = exportReport
+        self.exportSnapshot = exportSnapshot
+        self.exportWFDBAnnotations = exportWFDBAnnotations
+        self.wfdbExportAvailable = wfdbExportAvailable
+        self.toggleReviewQueue = toggleReviewQueue
+        self.reviewQueueVisible = reviewQueueVisible
         self.textEntryActive = textEntryActive
         self.isEditing = isEditing
     }

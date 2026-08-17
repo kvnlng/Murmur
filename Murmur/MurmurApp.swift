@@ -207,8 +207,26 @@ struct MurmurApp: App {
                 Button("Save Session As…") { saveSessionPanel() }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
             }
+            // #253 — Attach findings… and the three exports, which existed
+            // ONLY as toolbar buttons. Their own `Commands` type at this level
+            // rather than more buttons in the group above: a `CommandGroup`
+            // builder takes Views, so a `Commands` value cannot nest inside
+            // one, and these need `@FocusedValue` to reach the live bedside.
+            RecordFileCommands()
+            // #253 — the Editing latch, which existed only as a toolbar
+            // button. The Edit menu is where a mode that governs whether the
+            // document can be modified belongs.
+            EditingLatchCommand()
             // #236 — the trend-lane picker, appended to the View menu.
+            // #253 added the pane and viewport toggles above it.
             ViewCommandMenu()
+            // #253 — record-level analysis. Its own menu rather than a corner
+            // of Navigate: the VT/VF scan is not movement, and the handoff's
+            // Region 1 cluster treats it as a distinct class of action. The
+            // menu is absent entirely for the free viewer (see
+            // `AnalyzeCommandMenu`), so this is not an empty menu advertising
+            // a locked feature.
+            AnalyzeCommandMenu()
             // X22: hoist the bedside navigation / disposition keys into real
             // menu commands so they dispatch through the responder chain
             // (fixing the intermittent J/K defect) and become discoverable.
@@ -553,6 +571,86 @@ struct BedsideCommandMenu: Commands {
 /// purpose — six bare keys would collide with J/K, the deviation steps and the
 /// disposition trio, and lane choice is not a per-beat action.
 ///
+/// #253 — Attach findings… and the three exports, for the File menu.
+///
+/// These were toolbar-only. That was tolerable while the toolbar seeds Icon
+/// AND Text, because the label under the glyph was the whole affordance —
+/// `.help()` renders no tooltip anywhere in this app on macOS 26 (X60). The
+/// design's icon-only toolbar removes the label and justifies it with "every
+/// action keeps its menu-bar equivalent", which was not true of these four.
+///
+/// Each calls the same closure its toolbar button does, bridged through
+/// `BedsideCommands`, so the two paths cannot drift.
+struct RecordFileCommands: Commands {
+    @FocusedValue(\.bedsideCommands) private var commands
+
+    var body: some Commands {
+        // `.importExport` is the native File-menu slot for exactly this, and
+        // it sits below this app's Open/Save group — so the order reads
+        // Open… / Save… / Attach / Export without hand-placing anything.
+        CommandGroup(after: .importExport) {
+            Button("Attach Findings…") { commands?.attachFindings() }
+                .disabled(commands == nil)
+            Divider()
+            Button("Export Report…") { commands?.exportReport() }
+                .disabled(commands == nil)
+            Button("Export Snapshot…") { commands?.exportSnapshot() }
+                .disabled(commands == nil)
+            // Gated exactly as the toolbar's own menu gates it: with no
+            // confirmed finding there is nothing to write. DISABLED rather
+            // than hidden, the X32 principle — the analyst sees the capability
+            // exists and that this record has not earned it yet.
+            Button("Export WFDB Annotations…") { commands?.exportWFDBAnnotations() }
+                .disabled(commands?.wfdbExportAvailable != true)
+        }
+    }
+}
+
+/// #253 — the Editing latch, for the Edit menu.
+///
+/// Titled by what it will DO rather than what it is, because a menu item that
+/// reads "Editing" leaves the analyst guessing whether that is a state or an
+/// action. The toolbar button can afford "Editing" — it is tinted and sits
+/// next to the thing it governs; a menu row has neither.
+struct EditingLatchCommand: Commands {
+    @FocusedValue(\.bedsideCommands) private var commands
+
+    var body: some Commands {
+        CommandGroup(after: .pasteboard) {
+            Button(commands?.isEditing == true ? "Lock Editing" : "Unlock for Editing") {
+                commands?.toggleEditing()
+            }
+            .disabled(commands == nil)
+        }
+    }
+}
+
+/// #253 — record-level analysis.
+///
+/// The whole menu is absent when the VT/VF scan is unavailable, which mirrors
+/// the toolbar item's own `scanContext.isScanAvailable` condition. Two reasons
+/// not to show it disabled instead: the free viewer would get a top-level menu
+/// containing one permanently dead row, which reads as a broken app rather
+/// than a locked feature; and an empty `CommandMenu` renders as an empty menu,
+/// which is worse than either.
+///
+/// This is deliberately NOT the X32 "disabled, not hidden" case. X32 is about
+/// a capability THIS RECORD cannot support — the analyst should see that the
+/// app can do it. Here the app genuinely cannot, until the entitlement is
+/// bought, and advertising it in the menu bar is a storefront rather than a
+/// status.
+struct AnalyzeCommandMenu: Commands {
+    @FocusedValue(\.bedsideCommands) private var commands
+
+    var body: some Commands {
+        if commands?.scanAvailable == true {
+            CommandMenu("Analyze") {
+                Button("Scan for VT/VF Candidates…") { commands?.scanForVTVF() }
+            }
+        }
+    }
+}
+
 /// `CommandGroup(after: .toolbar)`, NOT `CommandMenu("View")`. SwiftUI already
 /// synthesises a View menu for the window's toolbar, so a `CommandMenu` of the
 /// same name adds a SECOND one — the menu bar read
@@ -571,6 +669,26 @@ struct ViewCommandMenu: Commands {
             // was exactly the label below. Every other menu-bar assertion in
             // the UI suite matches on title for the same reason; the in-window
             // `Menu`s that DO carry identifiers are a different surface.
+            // #253 — the review queue and the 10 s window hold, both
+            // toolbar-only until now. Titled by what they will do, like the
+            // Context drawer item next door in Navigate, rather than rendered
+            // as checked Toggles: the trend lanes below are a LIST where a
+            // checkmark reads as "this one of many is showing", while these
+            // are single panes whose state a Show/Hide title states outright.
+            Button(commands?.reviewQueueVisible == true
+                   ? "Hide Review Queue" : "Show Review Queue") {
+                commands?.toggleReviewQueue()
+            }
+            .disabled(commands == nil)
+            // A MODE, not a pane: held keeps the viewport at 10 s so finding
+            // jumps recenter without re-zooming, and a manual zoom releases it.
+            Button(commands?.windowHeldTo10s == true
+                   ? "Release 10-Second Window" : "Hold to 10-Second Window") {
+                commands?.toggleWindowHold()
+            }
+            .disabled(commands == nil)
+            Divider()
+
             let lanes = commands?.trendLanes ?? []
             if lanes.isEmpty {
                 // Shown DISABLED rather than hidden, the X32 principle: the
