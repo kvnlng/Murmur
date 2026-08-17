@@ -546,7 +546,12 @@ struct TrendStack: View {
                         .frame(width: max(1, x1 - x0), height: geo.size.height)
                         .offset(x: plotX + x0)
                 }
-                windowBox(plotX: plotX, plotWidth: plotWidth, height: geo.size.height)
+                // A zero-span domain has no meaningful window — the idle
+                // launch stack (#285) passes `0...0`, and the box would
+                // otherwise render as a stray 2 pt sliver at the plot origin.
+                if recordingRange.upperBound > recordingRange.lowerBound {
+                    windowBox(plotX: plotX, plotWidth: plotWidth, height: geo.size.height)
+                }
             }
         }
         // Purely visual, and now emphatically so: as an overlay (#215) this
