@@ -23,13 +23,20 @@ final class MurmurUIWindowPolicyTests: XCTestCase {
         continueAfterFailure = false
     }
 
+    /// Mirrors `WindowSizing.chromeAllowance`. This target imports only
+    /// AppKit and XCTest — it drives the app as a separate process and cannot
+    /// read MurmurCore — so the value is duplicated rather than shared. Change
+    /// both together; #241 moved it 60 → 66 after measuring this app's title
+    /// bar + unified toolbar at 66 pt.
+    private static let chromeAllowance: CGFloat = 66
+
     /// What the policy should resolve to on THIS runner — mirrors
     /// `WindowSizing.testWindowContentSize` (default 1400×900 clamped to the
-    /// visible frame minus the 60 pt chrome allowance).
+    /// visible frame minus the chrome allowance).
     @MainActor
     private func expectedDefaultContentWidth() -> CGFloat {
         guard let visible = NSScreen.main?.visibleFrame else { return 1400 }
-        return min(1400, visible.width - 60)
+        return min(1400, visible.width - Self.chromeAllowance)
     }
 
     @MainActor
@@ -179,7 +186,19 @@ final class MurmurUIWindowPolicyTests: XCTestCase {
             + "a lane is still publishing a width floor its cell can only clip")
     }
 
-    /// `max` fills the runner's visible frame (minus the chrome allowance).
+    /// `max` fills the runner's visible frame.
+    ///
+    /// The HEIGHT assertion is the one #241 needed and did not have. `max`
+    /// resolves a LAYOUT size of `visible - chromeAllowance`, and the applier
+    /// used to hand that straight to `setContentSize` — which under this
+    /// window's `fullSizeContentView` mask sizes the FRAME. So the frame came
+    /// out one chrome allowance short of the screen and the layout two, on
+    /// every display, silently: nothing measured the height, and the width
+    /// (chrome is vertical) was right either way.
+    ///
+    /// Stated as "the frame fills the visible frame" rather than in terms of
+    /// content, because that is what `max` means and it is the form that
+    /// cannot be satisfied by the wrong rect.
     @MainActor
     func testMaxFillsTheVisibleFrame() throws {
         let visible = try XCTUnwrap(NSScreen.main?.visibleFrame)
@@ -187,7 +206,11 @@ final class MurmurUIWindowPolicyTests: XCTestCase {
         app.launchArguments += ["--ui-test-sample", "--ui-test-window=max"]
         app.launch()
         let frame = mainWindowFrame(app)
-        XCTAssertEqual(frame.width, visible.width - 60, accuracy: 2,
+        XCTAssertEqual(frame.width, visible.width - Self.chromeAllowance, accuracy: 2,
                        "--ui-test-window=max should fill the visible width minus the chrome allowance")
+        XCTAssertEqual(frame.height, visible.height, accuracy: 2,
+                       "--ui-test-window=max resolved a \(frame.height) pt frame on a "
+                       + "\(visible.height) pt visible frame — the window is short by "
+                       + "\(visible.height - frame.height) pt and `max` is not maximized")
     }
 }

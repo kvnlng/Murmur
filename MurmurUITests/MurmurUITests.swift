@@ -186,8 +186,14 @@ final class MurmurUITests: XCTestCase {
         XCTAssertTrue(window.waitForExistence(timeout: 5))
         let visible = NSScreen.main?.visibleFrame
             ?? CGRect(x: 0, y: 0, width: 5000, height: 5000)
-        let expectedMinWidth = min(1100.0, visible.width - 60)
-        let expectedMinHeight = min(720.0, visible.height - 60)
+        // 66 mirrors `WindowSizing.chromeAllowance` (#241 measured it at 66,
+        // up from 60); this target cannot import MurmurCore to read it. These
+        // are LOWER bounds against a FRAME, so the comparison stays loose in
+        // the safe direction either way — but a stale copy of this constant is
+        // how the minimum and the resolved size drifted apart in the first
+        // place, so it is kept in step deliberately.
+        let expectedMinWidth = min(1100.0, visible.width - 66)
+        let expectedMinHeight = min(720.0, visible.height - 66)
         XCTAssertGreaterThanOrEqual(window.frame.width, expectedMinWidth,
                                     "Window width should be at least min(1100, screen) = \(expectedMinWidth)")
         XCTAssertGreaterThanOrEqual(window.frame.height, expectedMinHeight,
