@@ -181,6 +181,69 @@ final class MurmurUILaunchShellTests: XCTestCase {
                       "the queue closes again — the toggle round-trips")
     }
 
+    /// #304 / 12a — the stage skeleton at launch: the chip bar with its
+    /// mode toggle and zoom ladder, both overview bands, the bordered trace
+    /// with the open line inside it, and the docked right column (gain /
+    /// speed / Standard View, the beat card, the keyboard hint) — all present
+    /// at final size, idle. The identifiers are the loaded bedside's where a
+    /// mirror stands in for a data-bound component, so this test doubles as
+    /// the set-equality guard: a record opening changes values, never which
+    /// surfaces exist.
+    @MainActor
+    func testLaunchStageSkeletonExistsIdle() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        // Chip bar: mode toggle, the no-leads placeholder chip, the ladder.
+        let chipBar = app.descendants(matching: .any)
+            .matching(identifier: "lead-chip-bar").firstMatch
+        XCTAssertTrue(chipBar.waitForExistence(timeout: 15),
+                      "the lead chip bar exists at launch")
+        for id in ["layout-mode-focus", "layout-mode-strips", "lead-chip-none"] {
+            XCTAssertTrue(app.descendants(matching: .any)
+                .matching(identifier: id).firstMatch.exists,
+                          "\(id) must exist in the idle chip bar")
+        }
+        for rung in ["72h", "1h", "5m", "10s", "2s"] {
+            XCTAssertTrue(app.descendants(matching: .any)
+                .matching(identifier: "zoom-ladder-\(rung)").firstMatch.exists,
+                          "the idle ladder draws every canonical rung (\(rung))")
+        }
+
+        // Both overview bands, empty.
+        for id in ["overview-map", "hour-band"] {
+            XCTAssertTrue(app.descendants(matching: .any)
+                .matching(identifier: id).firstMatch.exists,
+                          "\(id) must exist at launch — bands empty, never absent")
+        }
+
+        // The trace is a bordered stage with the open line inside it.
+        let trace = app.descendants(matching: .any)
+            .matching(identifier: "idle-trace").firstMatch
+        XCTAssertTrue(trace.exists, "the flatline lives inside a bordered trace stage")
+        XCTAssertTrue(app.staticTexts["empty-state-prompt"].exists,
+                      "the open line stays — now inside the trace box")
+
+        // The docked right column: calibration controls idle, the beat card
+        // mounted with values withheld, the keyboard hint.
+        XCTAssertTrue(app.descendants(matching: .any)
+            .matching(identifier: "calibration-controls").firstMatch.exists,
+                      "the calibration controls exist at launch")
+        for id in ["gain-5", "gain-10", "gain-20", "speed-25", "speed-50",
+                   "standard-view-button"] {
+            let control = app.descendants(matching: .any)
+                .matching(identifier: id).firstMatch
+            XCTAssertTrue(control.exists, "\(id) must exist at launch")
+            XCTAssertFalse(control.isEnabled, "\(id) must be idle with no record open")
+        }
+        XCTAssertTrue(app.descendants(matching: .any)
+            .matching(identifier: "docked-beat-inspector").firstMatch.exists,
+                      "the beat card is mounted at launch, values withheld")
+        XCTAssertTrue(app.descendants(matching: .any)
+            .matching(identifier: "stage-keyboard-hint").firstMatch.exists,
+                      "the keyboard hint exists at launch")
+    }
+
     /// Absence has no waitFor — poll briefly.
     private func waitForAbsence(_ element: XCUIElement, timeout: TimeInterval = 5) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)

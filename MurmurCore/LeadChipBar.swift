@@ -29,19 +29,28 @@ struct LeadChipBar: View {
     /// releases (DECISIONS §5).
     var onSelectZoom: ((Double) -> Void)?
 
+    /// #304 / 12a — the launch shell's idle rendering. With no channels this
+    /// draws the dashed "no leads" placeholder chip, and the ladder shows
+    /// every canonical rung disabled with no current selection: the frame at
+    /// its final size, values absent. Only the launch shell sets this.
+    var idle: Bool = false
+
     var body: some View {
         HStack(spacing: 10) {
             modeToggle
             Divider().frame(maxHeight: 18)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
+                    if idle && channels.isEmpty {
+                        noLeadsChip
+                    }
                     ForEach(channels) { channel in
                         chip(for: channel)
                     }
                 }
                 .padding(.vertical, 2)
             }
-            if let onSelectZoom, !ladderSteps.isEmpty {
+            if !ladderSteps.isEmpty, onSelectZoom != nil || idle {
                 Divider().frame(maxHeight: 18)
                 zoomLadder(steps: ladderSteps, onSelect: onSelectZoom)
             }
@@ -54,13 +63,34 @@ struct LeadChipBar: View {
     }
 
     private var ladderSteps: [ZoomLadderStep] {
-        ZoomLadder.steps(forDurationSeconds: recordDurationSeconds)
+        idle ? ZoomLadder.allSteps
+             : ZoomLadder.steps(forDurationSeconds: recordDurationSeconds)
+    }
+
+    /// The chip row's empty state: a dashed capsule where the lead chips
+    /// will be, so the row holds its height and says why it is empty.
+    private var noLeadsChip: some View {
+        Text("no leads")
+            .font(.caption.monospaced())
+            .foregroundStyle(.tertiary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .overlay(
+                Capsule()
+                    .strokeBorder(
+                        Color.secondary.opacity(0.35),
+                        style: StrokeStyle(lineWidth: 1, dash: [3, 2])
+                    )
+            )
+            .accessibilityLabel("No leads — no record open")
+            .accessibilityIdentifier("lead-chip-none")
     }
 
     /// The zoom ladder. Trailing, so the bar reads left-to-right as
-    /// "which layout, which leads, how wide a window".
-    private func zoomLadder(steps: [ZoomLadderStep], onSelect: @escaping (Double) -> Void) -> some View {
-        let current = ZoomLadder.currentStep(
+    /// "which layout, which leads, how wide a window". A nil `onSelect`
+    /// (idle) draws every rung disabled with no current selection.
+    private func zoomLadder(steps: [ZoomLadderStep], onSelect: ((Double) -> Void)?) -> some View {
+        let current = onSelect == nil ? nil : ZoomLadder.currentStep(
             forDurationSeconds: viewportDurationSeconds,
             in: steps
         )
@@ -72,7 +102,7 @@ struct LeadChipBar: View {
                 ForEach(steps) { step in
                     let isOn = current == step
                     Button {
-                        onSelect(step.seconds)
+                        onSelect?(step.seconds)
                     } label: {
                         Text(step.label)
                             .font(.caption.monospacedDigit())
@@ -89,6 +119,7 @@ struct LeadChipBar: View {
                             )
                     }
                     .buttonStyle(.plain)
+                    .disabled(onSelect == nil)
                     // Nothing is selected after a manual pinch, and that is the
                     // honest state — the ladder must not claim a rung the
                     // analyst is not on.

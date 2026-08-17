@@ -34,18 +34,34 @@ struct LaunchShellView: View {
     /// 12a lets change state between empty and loaded.
     @State private var importProgress = ImportProgressContext.shared
 
+    /// A stable primary-lead id for the idle chip bar's constant binding —
+    /// no channel carries it, so nothing renders selected.
+    private static let idlePrimaryLead = UUID()
+
     var body: some View {
+        // #304: the same window anatomy as `BedsideView.body` — chip bar,
+        // one scrolling center column (stage first, context beneath), info
+        // bar as the window's rail. The launch shell is the bedside, idle.
         VStack(spacing: 0) {
-            Spacer(minLength: 20)
-            Flatline()
-                .frame(height: 120)
-                .frame(maxWidth: 720)
-                .padding(.horizontal, 24)
-                .accessibilityHidden(true)
-            openLine
-                .padding(.top, 28)
-            idleContext
-                .padding(.top, 28)
+            LeadChipBar(
+                channels: [],
+                layoutMode: .constant(.focus(only: Self.idlePrimaryLead)),
+                idle: true
+            )
+            Divider()
+            ScrollView {
+                VStack(spacing: 0) {
+                    idleStage
+                    Divider()
+                    VStack(alignment: .leading, spacing: 12) {
+                        idleContext
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .frame(minHeight: 0)
+            Divider()
             idleInfoBar
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -67,6 +83,196 @@ struct LaunchShellView: View {
         }
     }
 
+    // MARK: - The idle stage (#304)
+
+    /// The pinned stage, idle: the same anatomy as `BedsideView.pinnedStage`
+    /// — band ladder above, then the trace beside the docked column. The
+    /// data-bound pieces (`OverviewMap`, `HourBand`, `ChannelPanel`) cannot
+    /// render without a recording, so their places are held by mirrors that
+    /// keep the loaded components' heights and identifiers; `BeatCalipers`
+    /// CAN render empty (#246 made its nil-beat card a first-class state),
+    /// so the beat card is the real component.
+    private var idleStage: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            idleBand(label: "Record", height: 34, id: "overview-map")
+            idleBand(label: "Hour", height: 32, id: "hour-band")
+            HStack(alignment: .top, spacing: 12) {
+                idleTraceStage
+                idleDockedColumn
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+        .background(.background)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("pinned-stage")
+    }
+
+    /// One empty overview band: the loaded band's label column (76 pt, title
+    /// over detail) beside an empty rounded box at the loaded band's height,
+    /// so the record and hour bands appear by filling, not by mounting.
+    private func idleBand(label: String, height: CGFloat, id: String) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label)
+                    .font(.caption.weight(.semibold))
+                Text("—")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: 76, alignment: .leading)
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.secondary.opacity(0.05))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(Color.secondary.opacity(0.15), lineWidth: 1)
+                )
+                .frame(height: height)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(label) band — no record")
+        .accessibilityIdentifier(id)
+    }
+
+    /// The trace as a bordered stage: the unhooked flatline inside the
+    /// viewer's frame with the mV badge in the loaded canvas's corner, the
+    /// open line beneath the flatline INSIDE the box, and em-dash time-axis
+    /// labels under it — the 12a wireframe's viewer, literally.
+    private var idleTraceStage: some View {
+        VStack(spacing: 6) {
+            ZStack(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.secondary.opacity(0.03))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(Color.secondary.opacity(0.18), lineWidth: 1)
+                    )
+                VStack(spacing: 24) {
+                    Spacer(minLength: 12)
+                    Flatline()
+                        .frame(height: 120)
+                        .padding(.horizontal, 24)
+                        .accessibilityHidden(true)
+                    openLine
+                    Spacer(minLength: 12)
+                }
+                .frame(maxWidth: .infinity)
+                Text("— (mV)")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 4))
+                    .padding(8)
+                    .accessibilityIdentifier("idle-trace-mv-badge")
+            }
+            .frame(minHeight: 280)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("idle-trace")
+            idleTimeAxis
+        }
+    }
+
+    /// Five em-dashes where the loaded axis draws its time labels — the
+    /// axis exists before it has anything to say.
+    private var idleTimeAxis: some View {
+        HStack {
+            ForEach(0..<5) { index in
+                if index > 0 { Spacer() }
+                Text("—")
+            }
+        }
+        .font(.caption2.monospacedDigit())
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 4)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Time axis — no record")
+        .accessibilityIdentifier("idle-time-axis")
+    }
+
+    /// The docked column at the loaded column's width: calibration controls
+    /// idle, the beat card mounted with values withheld (the REAL
+    /// `BeatCalipers` — its empty card is a designed state), the keyboard
+    /// hint. Same identifiers as the bedside's, so the launch tests can
+    /// assert set-equality across states.
+    private var idleDockedColumn: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            idleCalibrationControls
+            BeatCalipers(
+                beat: nil,
+                sampleRate: 0,
+                template: nil,
+                qtcFormula: .fridericia,
+                placeholderNote: "No record open"
+            )
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("docked-beat-inspector")
+            Text("J / K next finding · ← → pan one window")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("stage-keyboard-hint")
+        }
+        .frame(width: BedsideGeometry.dockedColumnWidth, alignment: .topLeading)
+    }
+
+    /// `BedsideView.calibrationControls`, idle: same presets, same layout,
+    /// same identifiers, every control disabled — the pane an analyst will
+    /// use is already drawn, waiting for a record to give it something to
+    /// act on.
+    private var idleCalibrationControls: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 4) {
+                Text("Gain").font(.caption2).foregroundStyle(.secondary).frame(width: 38, alignment: .leading)
+                ForEach([5, 10, 20], id: \.self) { value in
+                    Button("\(value)") {}
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                        .disabled(true)
+                        .accessibilityIdentifier("gain-\(value)")
+                }
+                Text("mm/mV").font(.caption2).foregroundStyle(.tertiary)
+            }
+            HStack(spacing: 4) {
+                Text("Speed").font(.caption2).foregroundStyle(.secondary).frame(width: 38, alignment: .leading)
+                ForEach([25, 50], id: \.self) { value in
+                    Button("\(value)") {}
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                        .disabled(true)
+                        .accessibilityIdentifier("speed-\(value)")
+                }
+                Text("mm/s").font(.caption2).foregroundStyle(.tertiary)
+            }
+            HStack(spacing: 6) {
+                Button {} label: {
+                    Label("Standard View", systemImage: "ruler")
+                        .font(.caption2)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(true)
+                .accessibilityIdentifier("standard-view-button")
+                Button {} label: {
+                    Image(systemName: "lock.open")
+                        .font(.caption2)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(true)
+                .accessibilityIdentifier("calibration-lock-button")
+                .accessibilityLabel("Calibration unlocked")
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("calibration-controls")
+    }
+
     /// #285 / 12a — "The trend stack renders all five lane rows with their
     /// accent rails, label columns, y-axis ticks and gridlines; plots are
     /// empty and values are em-dashes. The context region scrolls exactly as
@@ -74,16 +280,11 @@ struct LaunchShellView: View {
     /// a redrawn likeness of it — so the skeleton cannot drift from the
     /// loaded stack's anatomy (the X61 rule, applied to layout).
     private var idleContext: some View {
-        ScrollView {
-            TrendStack(
-                lanes: Self.idleLanes,
-                recordingRange: 0...0,
-                viewportRange: 0...0
-            )
-            .frame(maxWidth: 720)
-            .padding(.horizontal, 24)
-            .padding(.bottom, 16)
-        }
+        TrendStack(
+            lanes: Self.idleLanes,
+            recordingRange: 0...0,
+            viewportRange: 0...0
+        )
     }
 
     /// The five 12a lane rows, ids and titles matching the REAL lanes'
