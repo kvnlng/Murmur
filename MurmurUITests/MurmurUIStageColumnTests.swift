@@ -105,7 +105,8 @@ final class MurmurUIStageColumnTests: XCTestCase {
         return BeatCardStage(
             placeholder: app.descendants(matching: .any)
                 .matching(identifier: "docked-beat-inspector-empty").firstMatch,
-            onBeat: overlay.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)),
+            onBeat: overlay.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.5, dy: TraceCoordinates.hoverableY)),
             offTrace: app.descendants(matching: .any)
                 .matching(identifier: "calibration-controls").firstMatch
                 .coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)))

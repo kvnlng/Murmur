@@ -1969,8 +1969,15 @@ struct BedsideView: View {
 
     /// The pinned stage. Contains the ECG canvas, the docked caliper
     /// readout sitting beside it, and the one-map overview beneath.
-    /// Never scrolls; the analyst's primary reading surface stays put
-    /// while the scrolling context under it moves.
+    ///
+    /// "Pinned" names its position in the column — first, above the context
+    /// lanes — not an exemption from scrolling. It sits INSIDE
+    /// `focusModeLayout`'s scroll view and scrolls with everything else; the
+    /// claim that it never does has been wrong since 2dfdd5c (#202 / #207)
+    /// put one scroll around the whole centre column. On a window too short
+    /// to hold the stage whole, its lower band is below the viewport — by
+    /// design, so the canvas can keep the height its mV graticule needs
+    /// instead of squashing to fit.
     private func pinnedStage(channel: Channel) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             // X70: the two coarser bands read ABOVE the trace, so the stage
