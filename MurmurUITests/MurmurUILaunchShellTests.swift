@@ -244,6 +244,41 @@ final class MurmurUILaunchShellTests: XCTestCase {
                       "the keyboard hint exists at launch")
     }
 
+    /// #305 / 12a — the remaining launch chrome: the pinned unmeasured
+    /// Variability Metrics card (the same X83 top inset the bedside uses),
+    /// the collapsed Context bar, the info bar's full trailing cluster, and
+    /// numeric default scales on the idle lanes' y-axes (axes are furniture;
+    /// only VALUES are em-dashed — decided 2026-08-17).
+    @MainActor
+    func testLaunchPinnedMetricsCardContextBarAndAxes() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        let card = app.descendants(matching: .any)
+            .matching(identifier: "variability-metrics-unmeasured").firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 15),
+                      "the unmeasured metrics card is pinned above the launch column — "
+                      + "the same card, the same position, as with a record open")
+
+        XCTAssertTrue(app.descendants(matching: .any)
+            .matching(identifier: "context-bar").firstMatch.exists,
+                      "the collapsed Context bar exists at launch")
+
+        let bar = app.descendants(matching: .any)
+            .matching(identifier: "info-bar").firstMatch
+        XCTAssertTrue(bar.exists)
+        for cluster in ["window —", "zoom tier —", "LOD —", "notes —"] {
+            XCTAssertTrue(bar.label.contains(cluster),
+                          "the idle info bar carries '\(cluster)' — it reads: \(bar.label)")
+        }
+
+        // The numeric default scales on the idle lanes are asserted by the
+        // `testLaunchIdleTrendStack` SNAPSHOT, not here: the y-gutter is
+        // deliberately `.accessibilityHidden` (axis furniture is VoiceOver
+        // noise), so XCUI cannot see the ticks — and un-hiding them to make
+        // them testable would be the test bending the product.
+    }
+
     /// Absence has no waitFor — poll briefly.
     private func waitForAbsence(_ element: XCUIElement, timeout: TimeInterval = 5) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
