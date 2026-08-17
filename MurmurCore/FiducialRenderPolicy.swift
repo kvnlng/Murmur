@@ -94,6 +94,19 @@ public struct FiducialRenderPolicy: Sendable, Equatable {
     /// analyst can confirm the set at a glance.
     private static let readoutOrder: [MarkingsFiducialLayer] = [.p, .qrs, .t]
 
+    /// The same canonical ordering, for callers outside this file.
+    ///
+    /// #248 moved the layer controls to the menu bar and left an in-window
+    /// note naming what the zoom is holding back. That note lists layers, so
+    /// it needs this ordering — and it needs to be THIS ordering, not a
+    /// second one that happens to agree today. Waveform order is the whole
+    /// point: P·QRS·T is how the sequence is read.
+    public static func readoutOrdered(
+        _ layers: Set<MarkingsFiducialLayer>
+    ) -> [MarkingsFiducialLayer] {
+        readoutOrder.filter(layers.contains)
+    }
+
     /// The Layers chip's readout. Reports what the canvas is SHOWING, with a
     /// suffix naming what the zoom is holding back — so a toggle that cannot
     /// act is never silent about it.

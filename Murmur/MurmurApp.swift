@@ -687,6 +687,33 @@ struct ViewCommandMenu: Commands {
             .disabled(commands == nil)
             Divider()
 
+            // #248 — the Layers chip, moved out of the window. Same route
+            // #240 took for the trend lanes, and for the same reason: an
+            // in-window picker near a window edge has nowhere to open, while
+            // the menu bar never is.
+            //
+            // A `Toggle` per layer, so macOS draws the checkmark that spells
+            // "this layer is on". The TITLE carries the third state — a layer
+            // the analyst enabled that the zoom is holding back reads
+            // "P — hidden at this zoom" while staying checked and clickable,
+            // because the intent is recorded and takes effect on zoom-in.
+            let layers = commands?.fiducialLayers ?? []
+            if !layers.isEmpty {
+                Section("Fiducial Layers") {
+                    ForEach(layers) { layer in
+                        Toggle(layer.menuTitle, isOn: Binding(
+                            get: { layer.isEnabled },
+                            set: { _ in commands?.toggleFiducialLayer(layer.id) }))
+                    }
+                    // The sentence naming the binding constraint, carried over
+                    // from the chip. Only present when something enabled is
+                    // being dropped, so it never explains a state nobody is in.
+                    if let explanation = commands?.fiducialLayerExplanation {
+                        Text(explanation)
+                    }
+                }
+            }
+
             let lanes = commands?.trendLanes ?? []
             if lanes.isEmpty {
                 // Shown DISABLED rather than hidden, the X32 principle: the

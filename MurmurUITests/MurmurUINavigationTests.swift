@@ -462,67 +462,133 @@ final class MurmurUINavigationTests: XCTestCase {
                       "Viewport position should speak a clock-time window, got '\(position.label)'")
     }
 
-    // MARK: - X61: the Layers chip reports the zoom's render policy
+    // MARK: - X61 / #248: suppression is disclosed, and the menu says why
 
-    /// The chip's readout is computed by `FiducialRenderPolicy` and unit-
-    /// tested there. What no unit test can reach is the PUBLISH — whether the
-    /// focused channel panel actually pushes its resolved policy into
-    /// `IntervalMarkingsContext` for the chip to read. That is the wire-up
-    /// `feedback_verify_wire_up_with_xcui.md` exists to catch, so it is
-    /// asserted here rather than assumed.
+    /// The half of X61 that stayed in the window.
     ///
-    /// At a 2 s window every layer renders, so the chip must NOT claim
-    /// anything is hidden. If the publish never fires the context keeps its
-    /// permissive default and this still passes — which is why the 5 s case
-    /// below is the load-bearing half.
+    /// #248 moved the Layers CONTROLS to View ▸ Fiducial Layers, on
+    /// TestFlight feedback ("get rid of the Layers button"). What did not move
+    /// is the disclosure that the zoom is holding marks back — because a menu
+    /// only speaks when opened, and nobody opens a menu to explain an absence
+    /// they have not noticed. Without it, "this zoom hides P and T" and "this
+    /// record has no P waves" look identical on the canvas. One is a display
+    /// setting, the other is a finding.
+    ///
+    /// At a 2 s window everything renders, so the note must be ABSENT. This is
+    /// the half that would still pass if the publish never fired (the context
+    /// keeps a permissive default), which is why the 5 s case below carries
+    /// the weight.
     @MainActor
-    func testLayersChipReportsNoSuppressionAtFullFiducialZoom() throws {
-        let label = try layersChipLabel(initialDuration: 2)
-        XCTAssertFalse(label.contains("hidden"),
-                       "At a 2 s window every layer renders; chip should not report anything hidden. Got '\(label)'")
+    func testNoSuppressionNoteAtFullFiducialZoom() throws {
+        let app = try layersApp(initialDuration: 2)
+        let note = app.descendants(matching: .any)
+            .matching(identifier: "fiducial-suppression-note").firstMatch
+        // A negative, so there is no positive event to wait on.
+        Thread.sleep(forTimeInterval: 2)
+        XCTAssertFalse(note.exists,
+                       "At a 2 s window every layer renders — nothing should claim marks "
+                       + "are hidden. Got '\(note.label)'")
     }
 
     /// At a 5 s window the detail level is `.qrsOnly`, so P and T are dropped
-    /// by the LOD gate. The chip must say so. Before X61 this read
-    /// `Layers · all` — the control asserting a state the canvas was not
-    /// honouring, which is why it read as doing nothing.
+    /// by the LOD gate and the canvas must say so.
     ///
     /// This is the assertion that fails if the publish regresses: the
-    /// permissive default would report "all" again.
+    /// permissive default reports nothing suppressed, the note never mounts,
+    /// and an analyst reads a trace with no P marks as a trace with no P
+    /// waves. Before X61 the chip read `Layers · all` in exactly this state.
     @MainActor
-    func testLayersChipReportsSuppressionAtStandardViewZoom() throws {
-        let label = try layersChipLabel(initialDuration: 5)
-        XCTAssertTrue(label.contains("hidden"),
-                      "At a 5 s window P and T are dropped by the LOD gate; chip must report it. Got '\(label)'")
-        XCTAssertTrue(label.contains("QRS"),
-                      "QRS still renders at this zoom and should be named. Got '\(label)'")
+    func testSuppressionNoteNamesTheHeldLayersAtStandardViewZoom() throws {
+        let app = try layersApp(initialDuration: 5)
+        let note = app.descendants(matching: .any)
+            .matching(identifier: "fiducial-suppression-note").firstMatch
+        XCTAssertTrue(note.waitForExistence(timeout: 10),
+                      "At a 5 s window P and T are dropped by the LOD gate; the canvas "
+                      + "must disclose it rather than just showing fewer marks")
+        let spoken = note.label
+        XCTAssertTrue(spoken.contains("P") && spoken.contains("T"),
+                      "The note should NAME what is held back, got '\(spoken)'")
+        XCTAssertFalse(spoken.contains("QRS"),
+                       "QRS still renders at this zoom and must not be listed as hidden, "
+                       + "got '\(spoken)'")
     }
 
-    /// Launches with an entitlement (the chip only exists once the paid
-    /// delineator has produced beats) and returns the chip's spoken label.
+    /// The controls themselves, at their new address.
+    ///
+    /// Matched by TITLE: accessibility identifiers do not survive onto a
+    /// menu-bar `NSMenuItem` (measured during #236), which is why the chip's
+    /// `fiducial-layers-picker` id has no successor here.
+    @MainActor
+    func testViewMenuCarriesTheFiducialLayers() throws {
+        let app = try layersApp(initialDuration: 2)
+        let view = app.menuBarItems["View"]
+        XCTAssertTrue(view.waitForExistence(timeout: 10))
+        view.click()
+        let titles = view.menuItems.allElementsBoundByIndex.map(\.title)
+        for layer in ["P", "QRS", "T"] {
+            XCTAssertTrue(titles.contains(layer),
+                          "View should offer the \(layer) fiducial layer. Offers: \(titles)")
+        }
+        app.typeKey(.escape, modifierFlags: [])
+    }
+
+    /// The menu row names the zoom, and the explanation comes with it.
+    ///
+    /// The chip carried both; losing either on the way to the menu bar would
+    /// leave a toggle that appears to do nothing at this zoom with no account
+    /// of why. Enabled-but-suppressed must stay CHECKED and clickable — the
+    /// intent is recorded and takes effect on zoom-in.
+    @MainActor
+    func testSuppressedLayersSaySoInTheMenuAndExplainWhy() throws {
+        let app = try layersApp(initialDuration: 5)
+        let view = app.menuBarItems["View"]
+        XCTAssertTrue(view.waitForExistence(timeout: 10))
+        view.click()
+        let titles = view.menuItems.allElementsBoundByIndex.map(\.title)
+
+        XCTAssertTrue(titles.contains("P — hidden at this zoom"),
+                      "A layer the zoom is holding back should say so in its row. "
+                      + "Offers: \(titles)")
+        XCTAssertTrue(titles.contains("QRS"),
+                      "QRS renders at this zoom and should read plainly. Offers: \(titles)")
+        XCTAssertTrue(titles.contains { $0.contains("need a window under") },
+                      "The policy explanation should come along with the layers. "
+                      + "Offers: \(titles)")
+        app.typeKey(.escape, modifierFlags: [])
+    }
+
+    /// Launches with an entitlement (layers exist only once the paid
+    /// delineator has produced beats) and returns the app.
     ///
     /// Two preconditions are checked and SKIPPED rather than failed, because
     /// neither is the behaviour under test and a silent pass would be worse
     /// than a stop that says why:
     ///
-    /// 1. The chip must exist at all — no beats means no delineation, a
-    ///    different problem.
+    /// 1. The record must have beats — no delineation is a different problem.
     /// 2. **The zoom tier must be `.inspect`.** The fiducial overlay is gated
-    ///    by tier BEFORE detail level, and tier is points-per-beat, which is
-    ///    a function of the panel's WIDTH. In a narrow window a 5 s trace is
+    ///    by tier BEFORE detail level, and tier is points-per-beat, which is a
+    ///    function of the panel's WIDTH. In a narrow window a 5 s trace is
     ///    dense enough to leave Inspect, the overlay draws nothing at all, and
-    ///    the chip correctly reads `hidden` — with no `QRS` to assert on.
+    ///    EVERY layer is suppressed — so the per-layer assertions have nothing
+    ///    to distinguish.
     ///
     /// The second guard exists because this test silently depended on window
     /// width when it was written: it passed on a wide window and failed the
-    /// moment a saved window frame reset to `defaultSize`. The dependency was
-    /// real either way; it just wasn't visible. Asserting the precondition
-    /// makes the geometry part of the test rather than part of the machine.
+    /// moment a saved window frame reset to `defaultSize`. Asserting the
+    /// precondition makes the geometry part of the test rather than part of
+    /// the machine.
     @MainActor
-    private func layersChipLabel(initialDuration: Int) throws -> String {
+    private func layersApp(initialDuration: Int) throws -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments += [
             "--ui-test-sample",
+            // Pinned WIDE deliberately. The zoom tier is points-per-beat, so
+            // it is a function of panel WIDTH — at a narrow width a 5 s trace
+            // leaves Inspect, the overlay draws nothing at all, and every
+            // layer is suppressed, which destroys the some-but-not-all state
+            // these tests are about. The original X61 test depended on window
+            // width without saying so and broke when a saved frame reset.
+            "--ui-test-window=1600x1000",
             "--ui-test-initial-duration=\(initialDuration)",
             // Grants Studio and skips the entitlement walk — the existing
             // hook for "this XCUI run owns the paid module".
@@ -530,22 +596,19 @@ final class MurmurUINavigationTests: XCTestCase {
         ]
         app.launch()
 
-        let chip = app.descendants(matching: .any)
-            .matching(identifier: "fiducial-layers-picker").firstMatch
-        guard chip.waitForExistence(timeout: 15) else {
-            throw XCTSkip("Layers chip absent — the delineator produced no beats for the sample fixture")
-        }
-
+        // Tier FIRST: it exists at any zoom, while the overlay does not —
+        // `FiducialOverlay` renders `EmptyView` when the policy draws no
+        // marks, so a tier failure would otherwise be reported as "no beats".
         let tier = app.descendants(matching: .any)
             .matching(identifier: "ui-test-waveform-tier").firstMatch
-        if tier.waitForExistence(timeout: 5), !tier.label.contains("tier=inspect") {
+        if tier.waitForExistence(timeout: 15), !tier.label.contains("tier=inspect") {
             throw XCTSkip(
-                "Waveform tier is '\(tier.label)', not inspect — this window is too narrow for "
-                + "per-beat marks at \(initialDuration) s, so the chip reports 'hidden' and there "
-                + "is no per-layer readout to assert. Not a regression in the chip."
+                "Waveform tier is '\(tier.label)', not inspect at \(initialDuration) s — "
+                + "every layer is suppressed, so there is no per-layer state to assert. "
+                + "Not a regression."
             )
         }
-        return chip.label
+        return app
     }
 }
 
