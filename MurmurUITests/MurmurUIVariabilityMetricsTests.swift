@@ -68,15 +68,18 @@ final class MurmurUIVariabilityMetricsTests: XCTestCase {
                       "The 10 s fixture should offer the 2 s ladder rung")
         zoom2s.click()
 
-        // THE BUG: the strip used to unmount entirely here. It must stay,
-        // with the caption saying why and the picker still present.
+        // THE BUG: the strip used to unmount entirely here. It must stay —
+        // at FULL size, with the explanation riding the first section's
+        // header as an advisory (the follow-up bug was this branch rendering
+        // a collapsed stub) and the picker still present.
         let insufficient = app.descendants(matching: .any)
             .matching(identifier: "variability-metrics-insufficient").firstMatch
         XCTAssertTrue(insufficient.waitForExistence(timeout: 5),
                       "An unmeasurable scoped window must keep the strip mounted with its empty state")
-        let caption = app.descendants(matching: .any)
-            .matching(identifier: "variability-metrics-insufficient-caption").firstMatch
-        XCTAssertTrue(caption.waitForExistence(timeout: 3))
+        let advisory = app.descendants(matching: .any)
+            .matching(identifier: "variability-metrics-time-domain-advisory").firstMatch
+        XCTAssertTrue(advisory.waitForExistence(timeout: 3),
+                      "The insufficient card must say why there are no numbers")
         let picker = app.descendants(matching: .any)
             .matching(identifier: "metrics-scope-picker").firstMatch
         XCTAssertTrue(picker.exists,

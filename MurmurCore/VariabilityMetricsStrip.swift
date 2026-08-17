@@ -45,21 +45,27 @@ public struct VariabilityMetricsStrip: View {
 
     public var body: some View {
         if let summary = context.summary {
-            populated(summary)
+            card(summary, id: "variability-metrics-strip", live: true)
         } else if let scope = context.insufficientScope {
-            insufficient(scope: scope, beatCount: context.insufficientBeatCount)
+            card(Self.insufficientSummary(scope: scope, beatCount: context.insufficientBeatCount),
+                 id: "variability-metrics-insufficient", live: false)
         } else if context.isLocked {
             unlockSeam
         } else {
-            unmeasured
+            // #291's placeholder, resized: the same grid as a measured
+            // summary with every value an em-dash (`.unmeasured`), because
+            // the 12a rule is dimensional — a short card that grows when
+            // the orchestrator publishes is the frame moving. The size-
+            // parity XCUI test holds the two renderings together.
+            card(.unmeasured, id: "variability-metrics-unmeasured", live: false)
         }
     }
 
-    // MARK: - Populated
+    // MARK: - The card (measured and unmeasured — one geometry)
 
-    private func populated(_ summary: VariabilityMetricsSummary) -> some View {
+    private func card(_ summary: VariabilityMetricsSummary, id: String, live: Bool) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            header(summary)
+            header(summary, live: live)
             ForEach(summary.sections) { section in
                 sectionView(section)
             }
@@ -71,10 +77,10 @@ public struct VariabilityMetricsStrip: View {
                 .fill(Color.secondary.opacity(0.06))
         )
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("variability-metrics-strip")
+        .accessibilityIdentifier(id)
     }
 
-    private func header(_ summary: VariabilityMetricsSummary) -> some View {
+    private func header(_ summary: VariabilityMetricsSummary, live: Bool) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text("Variability Metrics")
                 .font(.subheadline.weight(.semibold))
@@ -94,6 +100,10 @@ public struct VariabilityMetricsStrip: View {
                     .imageScale(.small)
             }
             .buttonStyle(.borderless)
+            // Disabled, not absent, on the unmeasured card — the control
+            // occupies its final position with nothing to copy yet, same
+            // discipline as the idle toolbar.
+            .disabled(!live)
             .help("Copy these metrics as text")
             .accessibilityIdentifier("variability-metrics-copy-button")
             Text("Research use only")
@@ -172,10 +182,37 @@ public struct VariabilityMetricsStrip: View {
     @ViewBuilder
     private func sectionView(_ section: VariabilityMetricsSummary.Section) -> some View {
         VStack(alignment: .leading, spacing: 5) {
-            if let title = section.title {
-                Text(title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+            if section.title != nil || section.advisory != nil {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    if let title = section.title {
+                        Text(title)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    // Advisories share the header line rather than adding one
+                    // below the rows: a caution must be visible (never behind
+                    // the ⓘ), but it must not move the frame either — the
+                    // card's height is identical with and without one. The
+                    // full text survives truncation via the tooltip. The
+                    // `.combine` boundary is what lets the identifier stick —
+                    // the section container's identifier overrides plain
+                    // child identifiers (same reason `rowView` combines).
+                    if let advisory = section.advisory {
+                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                                .imageScale(.small)
+                            Text(advisory)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                        .help(advisory)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("\(section.id)-advisory")
+                    }
+                }
             }
             // Rows flow into as many columns as the width allows. The old
             // window was a fixed narrow column, so eleven metrics became a
@@ -206,19 +243,11 @@ public struct VariabilityMetricsStrip: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            if let advisory = section.advisory {
-                HStack(alignment: .top, spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                        .imageScale(.small)
-                    Text(advisory)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .accessibilityIdentifier("\(section.id)-advisory")
-            }
         }
+        // `.contain` makes the section a real container element, the same
+        // boundary the card itself draws. Without it, the identifier is
+        // stamped onto every direct child, clobbering the advisory's own.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier(section.id)
     }
 
@@ -242,32 +271,23 @@ public struct VariabilityMetricsStrip: View {
 
     // MARK: - Insufficient scoped window (X95)
 
-    /// The strip's shape survives an unmeasurable scoped range: title, scope
-    /// picker, and a caption saying why there are no numbers. Unmounting
-    /// instead (the pre-X95 behaviour) took the scope picker down with it, so
-    /// zooming to a short window in Window scope made the whole pane vanish
-    /// with no way back except zooming out.
-    private func insufficient(scope: MetricsScope, beatCount: Int) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("Variability Metrics")
-                    .font(.subheadline.weight(.semibold))
-                Spacer(minLength: 8)
-                scopePicker
-            }
-            Text(Self.insufficientCaption(scope: scope, beatCount: beatCount))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .accessibilityIdentifier("variability-metrics-insufficient-caption")
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.secondary.opacity(0.06))
+    /// The strip's FULL shape survives an unmeasurable scoped range: the same
+    /// grid as the unmeasured skeleton, with the X95 explanation riding the
+    /// first section's header line as an advisory. Unmounting (pre-X95) took
+    /// the scope picker down with it; the header-plus-caption stub that
+    /// replaced it collapsed the card instead — the frame moving, which 12a
+    /// forbids. Three failure modes, one rule: the grid never changes shape.
+    static func insufficientSummary(scope: MetricsScope, beatCount: Int) -> VariabilityMetricsSummary {
+        var sections = VariabilityMetricsSummary.unmeasured.sections
+        let first = sections[0]
+        sections[0] = .init(
+            id: first.id,
+            title: first.title,
+            rows: first.rows,
+            captions: first.captions,
+            advisory: insufficientCaption(scope: scope, beatCount: beatCount)
         )
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("variability-metrics-insufficient")
+        return .init(sections: sections, provenance: "—", exportText: "")
     }
 
     /// Static and public-in-effect (internal, testable): the caption states
@@ -276,39 +296,6 @@ public struct VariabilityMetricsStrip: View {
         let beats = beatCount == 1 ? "1 normal beat" : "\(beatCount) normal beats"
         return "\(beats) in this \(scope.provenanceLabel) — at least 3 are needed to measure. "
             + "Widen the window or switch scope."
-    }
-
-    // MARK: - Unmeasured (#291)
-
-    /// Every state the other branches don't claim: before the orchestrator's
-    /// first publish, and a whole record with too few normal beats. There was
-    /// no branch here before, so these states rendered nothing at all — on the
-    /// synthetic fixtures the region was simply absent for the 9–22 s the
-    /// orchestrator took, which was reported as the feature missing. The 12a
-    /// invariant applies: the region is present at its final size with values
-    /// blank, never absent. Keeping the scope picker mounted is the same
-    /// obligation the insufficient branch discharges (X95) — unmounting it
-    /// strands the analyst in a scope with no control left to change.
-    private var unmeasured: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("Variability Metrics")
-                    .font(.subheadline.weight(.semibold))
-                Spacer(minLength: 8)
-                scopePicker
-            }
-            Text("—")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.secondary.opacity(0.06))
-        )
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("variability-metrics-unmeasured")
     }
 
     // MARK: - Locked

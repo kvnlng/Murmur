@@ -98,6 +98,59 @@ public struct VariabilityMetricsSummary: Sendable, Equatable {
     }
 }
 
+public extension VariabilityMetricsSummary {
+    /// The unmeasured card: the SAME sections and rows the orchestrator
+    /// publishes, every value an em-dash. The strip renders this through
+    /// the same grid as a measured summary, so populating the card changes
+    /// glyphs and never geometry — the 12a rule is dimensional ("present at
+    /// its final size with values blank"), and a short placeholder that
+    /// grows when the numbers arrive is the frame moving.
+    ///
+    /// The ids and labels mirror `VariabilityMetricsOrchestrator`'s section
+    /// builders (App target — deliberately unreachable from here, so this
+    /// is a transcription, not a call). The XCUI size-parity test
+    /// (`testUnmeasuredCardHoldsTheStripsFinalSize`) is the drift guard:
+    /// a row added there without updating this skeleton changes the
+    /// populated height and fails the comparison.
+    static let unmeasured = VariabilityMetricsSummary(
+        sections: [
+            .init(
+                id: "variability-metrics-time-domain",
+                title: "Heart rate variability",
+                rows: [
+                    .init(id: "vm-mean-rr", label: "Mean RR", value: "—", unit: "ms"),
+                    .init(id: "vm-sdnn", label: "SDNN", value: "—", unit: "ms"),
+                    .init(id: "vm-rmssd", label: "RMSSD", value: "—", unit: "ms"),
+                    .init(id: "vm-pnn50", label: "pNN50", value: "—", unit: "%"),
+                ]
+            ),
+            .init(
+                id: "variability-metrics-frequency-domain",
+                title: "Frequency-domain HRV",
+                rows: [
+                    .init(id: "vm-vlf", label: "VLF", value: "—", unit: "ms²"),
+                    .init(id: "vm-lf", label: "LF", value: "—", unit: "ms²"),
+                    .init(id: "vm-hf", label: "HF", value: "—", unit: "ms²"),
+                    .init(id: "vm-lfhf", label: "LF/HF", value: "—"),
+                    .init(id: "vm-lfhf-nu", label: "LF / HF n.u.", value: "—"),
+                ]
+            ),
+            .init(
+                id: "variability-metrics-qtvi",
+                title: "QT variability index",
+                rows: [
+                    .init(id: "vm-qtvi", label: "QTVI", value: "—"),
+                    .init(id: "vm-sdqt", label: "SDQT", value: "—", unit: "ms"),
+                    .init(id: "vm-qtvi-sdnn", label: "SDNN", value: "—", unit: "ms"),
+                    .init(id: "vm-qtvi-meannn", label: "Mean NN", value: "—", unit: "ms"),
+                ]
+            ),
+        ],
+        provenance: "—",
+        exportText: ""
+    )
+}
+
 /// Process-wide variability-metrics state. `@MainActor` because the only
 /// reader is the bedside view hierarchy.
 @MainActor
