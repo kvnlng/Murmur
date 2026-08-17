@@ -360,6 +360,25 @@ struct BedsideView: View {
                     isVisible: visibleTrendLanes.contains($0.id))
             },
             toggleTrendLane: { toggleTrendLane($0) },
+            // #248 — the Layers chip's contents, moved to View ▸ Fiducial
+            // Layers. Resolved from the SAME `renderPolicy` the overlay draws
+            // from, which is X61's rule: a control that claims a state the
+            // canvas is not honouring reads as a control that does nothing.
+            fiducialLayers: MarkingsFiducialLayer.allCases.map { layer in
+                let policy = markingsContext.renderPolicy
+                return BedsideCommands.FiducialLayerMenuItem(
+                    id: layer.rawValue,
+                    label: layer.displayName,
+                    isEnabled: markingsContext.enabledLayers.contains(layer),
+                    isRendering: policy.drawsMarks
+                        && policy.renderableLayers.contains(layer))
+            },
+            toggleFiducialLayer: { raw in
+                guard let layer = MarkingsFiducialLayer(rawValue: raw) else { return }
+                toggleFiducialLayer(layer)
+            },
+            fiducialLayerExplanation: markingsContext.renderPolicy
+                .explanation(enabled: markingsContext.enabledLayers),
             // #253 — the toolbar's own actions, each invoking the SAME closure
             // its button does rather than a parallel implementation. A menu
             // item that drifts from the button it mirrors is worse than no
@@ -2146,7 +2165,7 @@ struct BedsideView: View {
             calibrationControls
             CalibrationReadout(reading: calibrationReading)
             if !markingsContext.beats.isEmpty {
-                fiducialLayersChip
+                fiducialSuppressionNote
             }
             // #246: the beat readout is ALWAYS mounted — focused, empty, or
             // beat-less record — one card, one size, values withheld as "—"
@@ -2346,65 +2365,68 @@ struct BedsideView: View {
     /// state the canvas is not honouring reads, correctly, as a control that
     /// does nothing. Both this and `FiducialOverlay` resolve the SAME
     /// `FiducialRenderPolicy`; the gates are unchanged, only their visibility.
-    private var fiducialLayersChip: some View {
+    /// What is left in the window after #248 moved the chip's CONTROLS to
+    /// View ▸ Fiducial Layers: one line, only when the zoom is actually
+    /// holding a layer back.
+    ///
+    /// The feedback was "get rid of the Layers button", and the button is
+    /// gone — this is not interactive and never appears when the canvas and
+    /// the analyst's toggles agree. Keeping it is deliberate, and it is the
+    /// half of X61 worth preserving.
+    ///
+    /// X61's finding was that a control claiming `Layers · all` while the
+    /// renderer dropped P and T reads as a control that does nothing. But the
+    /// deeper problem it fixed is the analyst's: at a 5 s window the marks
+    /// simply are not there, and without something saying why, "this zoom is
+    /// holding them back" is indistinguishable from "this record has no P
+    /// waves". One is a display setting, the other is a finding. A tool that
+    /// lets those two look identical is not safe to read from.
+    ///
+    /// Moving the whole chip into the menu bar would have lost that, because
+    /// a menu only discloses when opened, and nobody opens a menu to explain
+    /// an absence they have not noticed. So the CONTROL moves and the
+    /// DISCLOSURE stays — and it stays quieter than the chip was, since it is
+    /// absent entirely in the common case rather than dimmed.
+    @ViewBuilder
+    private var fiducialSuppressionNote: some View {
         let policy = markingsContext.renderPolicy
         let suppressed = policy.suppressedLayers(enabled: markingsContext.enabledLayers)
-        return Menu {
-            ForEach(MarkingsFiducialLayer.allCases, id: \.self) { layer in
-                let enabled = markingsContext.enabledLayers.contains(layer)
-                let renders = policy.drawsMarks && policy.renderableLayers.contains(layer)
-                Button {
-                    toggleFiducialLayer(layer)
-                } label: {
-                    Label(
-                        renders || !enabled
-                            ? layer.displayName
-                            : "\(layer.displayName) — hidden at this zoom",
-                        systemImage: enabled ? "checkmark" : ""
-                    )
-                }
-                // Enabled-but-not-rendering stays TOGGLEABLE: the analyst's
-                // intent is still recorded and takes effect on zoom in. Only
-                // the label says the canvas isn't showing it right now.
-            }
-            if let explanation = policy.explanation(enabled: markingsContext.enabledLayers) {
-                Section { Text(explanation) }
-            }
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "square.stack.3d.up.badge.a")
-                    .font(.caption2)
-                Text("Layers · \(layersSummary)")
-                    .font(.caption2)
-            }
-            .foregroundStyle(suppressed.isEmpty ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(Capsule().fill(Color.secondary.opacity(0.10)))
-            .overlay(Capsule().stroke(Color.secondary.opacity(0.25), lineWidth: 0.5))
+        if !suppressed.isEmpty {
+            // Built as a String first: `Label`'s literal initialiser takes a
+            // LocalizedStringKey, and concatenating one is a type error
+            // rather than a formatting choice.
+            let names = FiducialRenderPolicy.readoutOrdered(suppressed)
+                .map(\.displayName)
+                .joined(separator: "·")
+            Label("\(names) hidden at this zoom", systemImage: "square.stack.3d.up.slash")
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+            .lineLimit(1)
+            .help(policy.explanation(enabled: markingsContext.enabledLayers)
+                  ?? "Zoom in to show these marks.")
+            // `children: .ignore` BEFORE the label, and both are load-bearing
+            // (X51 §4, the same class of fault the chip hit). A `Label` is a
+            // group of icon + text, so the identified element is a CONTAINER:
+            // its own label stays empty and `.accessibilityLabel` alone does
+            // not reach it. Measured — with the identifier and label set but
+            // no `.ignore`, the element exists and reads ''. Collapsing it to
+            // one element makes the sentence the element's own.
+            //
+            // It is also what VoiceOver speaks, and "P·T hidden at this zoom"
+            // is what an analyst needs to hear, not the glyph's name.
+            .accessibilityElement(children: .ignore)
+            .accessibilityIdentifier("fiducial-suppression-note")
+            .accessibilityLabel("\(names) hidden at this zoom")
         }
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help(chipHelp)
-        .accessibilityIdentifier("fiducial-layers-picker")
-        // The summary is what X61 is about, so expose it to XCUI as the
-        // element's own label rather than leaving it inside the capsule's
-        // nested Text (which `.firstMatch` binds to arbitrarily — X51 §4).
-        .accessibilityLabel("Layers \(layersSummary)")
     }
 
-    /// The chip's readout — computed by `FiducialRenderPolicy` so the copy is
-    /// unit-tested rather than trapped in a private view property.
-    private var layersSummary: String {
-        markingsContext.renderPolicy.summary(enabled: markingsContext.enabledLayers)
-    }
-
-    private var chipHelp: String {
-        let base = "Show or hide P / QRS / T fiducial overlays"
-        guard let explanation = markingsContext.renderPolicy
-            .explanation(enabled: markingsContext.enabledLayers) else { return base }
-        return "\(base). \(explanation)"
-    }
+    // (Removed by #248) `layersSummary` and `chipHelp`, the chip's own copy.
+    // `FiducialRenderPolicy.summary(enabled:)` still exists and is still
+    // unit-tested — it is the sentence X61 moved into the policy so it could
+    // be tested at all, and it is the natural readout if a compact layers
+    // status ever returns to the window. The chip's `.help()` string is gone
+    // outright: `.help()` renders no tooltip on macOS 26 anyway, and the menu
+    // carries the explanation as a real row now.
 
     private func toggleFiducialLayer(_ layer: MarkingsFiducialLayer) {
         if markingsContext.enabledLayers.contains(layer) {

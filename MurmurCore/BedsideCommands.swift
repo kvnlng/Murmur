@@ -132,6 +132,48 @@ public struct BedsideCommands {
     /// Show or hide one lane by id. No-op for an unknown id.
     public var toggleTrendLane: (String) -> Void
 
+    /// #248 — the fiducial layers, moved out of the in-window chip.
+    ///
+    /// Three states per layer, not two, which is the whole reason this is not
+    /// a plain toggle list: a layer can be enabled and rendering, enabled but
+    /// SUPPRESSED by the current zoom, or disabled. `FiducialRenderPolicy`
+    /// resolves which — the same instance `FiducialOverlay` draws from, so
+    /// the menu cannot claim a state the canvas is not honouring. That was
+    /// X61's bug and it is not worth reintroducing on a new surface.
+    public var fiducialLayers: [FiducialLayerMenuItem]
+    /// Toggle one layer by id (`MarkingsFiducialLayer.rawValue`). Enabled but
+    /// suppressed stays toggleable: the intent is recorded and takes effect on
+    /// zoom-in.
+    public var toggleFiducialLayer: (String) -> Void
+    /// One sentence naming the binding zoom constraint, or nil when nothing
+    /// the analyst enabled is being dropped.
+    public var fiducialLayerExplanation: String?
+
+    /// One row of the View ▸ Fiducial Layers menu.
+    public struct FiducialLayerMenuItem: Identifiable, Equatable {
+        public let id: String
+        public let label: String
+        /// The analyst's toggle — drives the checkmark.
+        public let isEnabled: Bool
+        /// False when the zoom is holding this layer back despite it being
+        /// enabled. Drives the "hidden at this zoom" suffix.
+        public let isRendering: Bool
+
+        public init(id: String, label: String, isEnabled: Bool, isRendering: Bool) {
+            self.id = id
+            self.label = label
+            self.isEnabled = isEnabled
+            self.isRendering = isRendering
+        }
+
+        /// What the menu row says. Only names the zoom when the analyst has
+        /// asked for a layer the canvas is not drawing — a disabled layer is
+        /// not "hidden at this zoom", it is just off.
+        public var menuTitle: String {
+            isEnabled && !isRendering ? "\(label) — hidden at this zoom" : label
+        }
+    }
+
     /// One row of the View ▸ Trend Lanes menu.
     public struct TrendLaneMenuItem: Identifiable, Equatable {
         public let id: String
@@ -168,6 +210,9 @@ public struct BedsideCommands {
         notesDrawerVisible: Bool = false,
         trendLanes: [TrendLaneMenuItem] = [],
         toggleTrendLane: @escaping (String) -> Void = { _ in },
+        fiducialLayers: [FiducialLayerMenuItem] = [],
+        toggleFiducialLayer: @escaping (String) -> Void = { _ in },
+        fiducialLayerExplanation: String? = nil,
         toggleEditing: @escaping () -> Void = {},
         toggleWindowHold: @escaping () -> Void = {},
         windowHeldTo10s: Bool = false,
@@ -205,6 +250,9 @@ public struct BedsideCommands {
         self.notesDrawerVisible = notesDrawerVisible
         self.trendLanes = trendLanes
         self.toggleTrendLane = toggleTrendLane
+        self.fiducialLayers = fiducialLayers
+        self.toggleFiducialLayer = toggleFiducialLayer
+        self.fiducialLayerExplanation = fiducialLayerExplanation
         self.toggleEditing = toggleEditing
         self.toggleWindowHold = toggleWindowHold
         self.windowHeldTo10s = windowHeldTo10s
