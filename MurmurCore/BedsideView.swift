@@ -85,6 +85,8 @@ struct BedsideView: View {
     /// for display. In-memory only for now; a future pass persists them
     /// to the bundle's `annotations.json` so they survive across launches.
     @State private var attachedAnnotations: [Annotation] = []
+    /// #263 — the global import-progress state the info bar's strip reads.
+    @State private var importProgress = ImportProgressContext.shared
     /// #250 — in-session display-label overrides for analyst-authored
     /// findings, keyed by annotation id. Applied in `allAnnotations` and
     /// persisted through the bundle sidecar on every rename.
@@ -1241,6 +1243,16 @@ struct BedsideView: View {
                 // Confirm a region but do NOT export — lets an XCUI test drive
                 // the real export button + confirm alert.
                 seedConfirmedRegionForTests()
+            }
+            if UITestSupport.seedImportProgress {
+                // #263 — freeze a mid-import state so the info bar's strip
+                // is assertable; a real synthetic import outruns XCUI.
+                ImportProgressContext.shared.update(
+                    recordName: "synth-02",
+                    fractionComplete: 0.41,
+                    completedRecords: 3,
+                    totalRecords: 12
+                )
             }
             if UITestSupport.authorRange {
                 // Drive the drag-to-author handler directly (the DragGesture
@@ -3046,6 +3058,17 @@ struct BedsideView: View {
                 Text(start)
             }
             Spacer(minLength: 12)
+            // #263 — the 12a import strip: one GLOBAL progress surface, in
+            // the bar, mounted only while an import is in flight. Per the
+            // launch-state spec this is the only chrome that changes state
+            // between empty and loaded.
+            if let importSummary = importProgress.summary {
+                ProgressView(value: importProgress.fractionComplete)
+                    .controlSize(.small)
+                    .frame(width: 90)
+                Text(importSummary)
+                Spacer(minLength: 12)
+            }
             Text(windowRangeLabel)
             // The tier stands alone when there is no points-per-beat reading.
             // With no beats in the window the selector reports NaN — which is

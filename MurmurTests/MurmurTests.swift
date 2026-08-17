@@ -8450,6 +8450,55 @@ struct SidePanelCoexistenceTests {
     }
 }
 
+// MARK: - #263 · Import-progress strip
+
+/// The info bar's import strip states the 12a sentence — record name, N of
+/// M records, percent — and states nothing at all when no import runs.
+@MainActor
+@Suite("Import progress context (#263)")
+struct ImportProgressContextTests {
+
+    @Test("The strip's sentence carries name, counts, and percent")
+    func summaryComposition() {
+        let ctx = ImportProgressContext()
+        ctx.update(recordName: "synth-02", fractionComplete: 0.41,
+                   completedRecords: 3, totalRecords: 12)
+        #expect(ctx.summary == "synth-02 · 3 of 12 records · 41%")
+    }
+
+    @Test("A single-record folder reads as a record, not records")
+    func singularRecord() {
+        let ctx = ImportProgressContext()
+        ctx.update(recordName: "synth", fractionComplete: 0.5,
+                   completedRecords: 0, totalRecords: 1)
+        #expect(ctx.summary == "synth · 0 of 1 record · 50%")
+    }
+
+    @Test("No import in flight, no sentence — the strip unmounts")
+    func idleIsNil() {
+        let ctx = ImportProgressContext()
+        #expect(ctx.summary == nil)
+        #expect(!ctx.isActive)
+        ctx.update(recordName: "r", fractionComplete: 0.2,
+                   completedRecords: 0, totalRecords: 2)
+        #expect(ctx.isActive)
+        ctx.clear()
+        #expect(ctx.summary == nil)
+        #expect(!ctx.isActive)
+    }
+
+    @Test("Fractions clamp — a producer overshoot cannot claim 120%")
+    func fractionClamps() {
+        let ctx = ImportProgressContext()
+        ctx.update(recordName: "r", fractionComplete: 1.2,
+                   completedRecords: 0, totalRecords: 2)
+        #expect(ctx.fractionComplete == 1.0)
+        ctx.update(recordName: "r", fractionComplete: -0.3,
+                   completedRecords: 0, totalRecords: 2)
+        #expect(ctx.fractionComplete == 0.0)
+    }
+}
+
 // MARK: - #250 · Name your own finding
 
 /// Renaming an analyst-authored finding edits `label` — the row title —

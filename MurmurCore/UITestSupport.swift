@@ -349,6 +349,15 @@ enum UITestSupport {
         ProcessInfo.processInfo.arguments.contains("--ui-test-export-wfdb")
     }
 
+    /// True when `--ui-test-seed-import-progress` is passed. BedsideView
+    /// seeds `ImportProgressContext.shared` with fixed mid-import values on
+    /// appear (#263) so the info bar's strip is assertable — a real
+    /// synthetic import finishes in well under a second, far too fast for
+    /// XCUI to catch the strip mounted.
+    static var seedImportProgress: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-seed-import-progress")
+    }
+
     /// True when `--ui-test-seed-analyst-finding` is passed. The synthetic
     /// fixture then ships one analyst-authored finding (#250) — category
     /// ANALYST_FINDING, label "Analyst mark", source `murmur.annotation` —
