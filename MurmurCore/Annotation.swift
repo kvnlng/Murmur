@@ -63,6 +63,31 @@ public struct Annotation: Codable, Equatable, Sendable, Identifiable {
 
     public var displayLabel: String { label ?? category }
 
+    /// #250 — the same finding under a new display label. The model is
+    /// immutable by design and persistence is whole-file, so renaming is
+    /// replace-in-place: copy with the new `label`, swap, rewrite the
+    /// bundle. Everything else — identity, category, provenance, and above
+    /// all `citationCaption` — is untouched: the label-vs-caption split
+    /// exists so what the analyst CALLS a finding can evolve without
+    /// corrupting what was MEASURED.
+    public func withLabel(_ newLabel: String) -> Annotation {
+        Annotation(
+            id: id,
+            kind: kind,
+            sampleIndex: sampleIndex,
+            endSampleIndex: endSampleIndex,
+            unixMillisStart: unixMillisStart,
+            unixMillisEnd: unixMillisEnd,
+            category: category,
+            label: newLabel,
+            confidence: confidence,
+            source: source,
+            note: note,
+            lead: lead,
+            evidenceContextSeconds: evidenceContextSeconds,
+            citationCaption: citationCaption)
+    }
+
     /// The end sample for rendering purposes — equals `sampleIndex` for point events.
     public var renderEndSample: Int64 { endSampleIndex ?? sampleIndex }
 
