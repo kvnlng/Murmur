@@ -18,6 +18,7 @@
 //  opens a large recording.
 //
 
+import CryptoKit
 import Foundation
 import MurmurCore
 import MurmurMetrics
@@ -136,6 +137,24 @@ struct IntervalMarkingsOrchestrator: View {
         // through to the unadjudicated default when nothing re-attaches
         // (orphaned endorsements — the drawer surfaces those).
         let endorsements = await MainActor.run { morphologyContext.endorsements }
+
+        // Bundle cache. The key carries EVERYTHING the analyst can dial into
+        // this pipeline — formula, reliability threshold, and a digest of the
+        // endorsements — because a stale fiducial store is a wrong clinical
+        // measurement, not a cosmetic bug. Anything unkeyed is covered by the
+        // app-version stamp (the algorithms land via exact-pin bumps).
+        let parametersKey = "qtc=\(qtcFormula.rawValue);threshold=\(reliabilityThreshold);"
+            + "endorsements=\(Self.endorsementsDigest(endorsements))"
+        if let hit = await Task.detached(priority: .userInitiated, operation: {
+            BundleDerivedCache.load(
+                MarkingsCachePayload.self, producer: "interval-markings",
+                parametersKey: parametersKey, from: directory)
+        }).value {
+            measuredBeatCount = hit.beats.count
+            guard !Task.isCancelled else { return }
+            await publish(cached: hit, sampleRate: sampleRate)
+            return
+        }
         if !endorsements.isEmpty {
             let annotatedBeats = recording.annotatedBeats()
             let clusterSamples = conventionalLeads.first?.samples ?? legacySamples
@@ -150,21 +169,11 @@ struct IntervalMarkingsOrchestrator: View {
                     qtcFormula: Self.metricsFormula(from: qtcFormula),
                     reliabilityThreshold: reliabilityThreshold,
                     leadName: leadName)
-                let published = await Task.detached(priority: .userInitiated) {
-                    Self.endorsedComputed(input)
-                }.value
-                guard !Task.isCancelled else { return }
-                if let published {
-                    await MainActor.run {
-                        markingsContext.set(
-                            beats: published.beats,
-                            sampleRate: sampleRate,
-                            template: published.template,
-                            qtWithheldReason: qtWithheldReason,
-                            modes: published.modes)
-                    }
-                    return
-                }
+                let handled = await publishEndorsed(
+                    input: input, sampleRate: sampleRate,
+                    qtWithheldReason: qtWithheldReason,
+                    parametersKey: parametersKey, directory: directory)
+                if handled { return }
             }
         }
 
@@ -200,6 +209,12 @@ struct IntervalMarkingsOrchestrator: View {
             from: computed.template, leadName: leadName,
             spanStart: spanStart, spanEnd: spanEnd, adjudicationBasis: nil)
 
+        Self.storeCache(
+            MarkingsCachePayload(
+                beats: computed.beats,
+                template: computed.beats.isEmpty ? nil : coreTemplate,
+                qtWithheldReason: qtWithheldReason, modes: []),
+            parametersKey: parametersKey, directory: directory)
         await MainActor.run {
             if computed.beats.isEmpty {
                 markingsContext.clear()
@@ -652,5 +667,91 @@ private extension IntervalMarkingsOrchestrator {
             ? built.flatMap { mode in mode.beats.map { $0.named(mode: mode.name) } }
             : built.flatMap(\.beats)
         return EndorsedBaseline(beats: tagged, template: published, modes: modes)
+    }
+}
+
+
+/// What the bundle cache holds for this producer — both publish paths
+/// (endorsed multi-mode and unadjudicated default) collapse to this shape;
+/// empty `beats` means the delineation legitimately produced nothing and the
+/// context should clear.
+private struct MarkingsCachePayload: Codable, Sendable {
+    let beats: [MarkingsBeat]
+    let template: MarkingsTemplate?
+    let qtWithheldReason: String?
+    let modes: [MarkingsMode]
+}
+
+extension IntervalMarkingsOrchestrator {
+    /// The X112c endorsed path's compute-and-publish half. Returns true when
+    /// recompute should stop here: the endorsed pipeline published, or the
+    /// task was cancelled mid-compute (falling through to the default path
+    /// after cancellation would compute for a record that is gone). False —
+    /// nothing re-attached — falls through to the unadjudicated default.
+    fileprivate func publishEndorsed(
+        input: EndorsedComputeInput, sampleRate: Double,
+        qtWithheldReason: String?, parametersKey: String, directory: URL
+    ) async -> Bool {
+        let published = await Task.detached(priority: .userInitiated) {
+            Self.endorsedComputed(input)
+        }.value
+        guard !Task.isCancelled else { return true }
+        guard let published else { return false }
+        Self.storeCache(
+            MarkingsCachePayload(
+                beats: published.beats, template: published.template,
+                qtWithheldReason: qtWithheldReason, modes: published.modes),
+            parametersKey: parametersKey, directory: directory)
+        await MainActor.run {
+            markingsContext.set(
+                beats: published.beats,
+                sampleRate: sampleRate,
+                template: published.template,
+                qtWithheldReason: qtWithheldReason,
+                modes: published.modes)
+        }
+        return true
+    }
+
+    /// Publish a cache hit — the same empty-means-clear decision both
+    /// compute paths make.
+    @MainActor fileprivate func publish(cached hit: MarkingsCachePayload, sampleRate: Double) {
+        if hit.beats.isEmpty {
+            markingsContext.clear()
+        } else {
+            markingsContext.set(
+                beats: hit.beats, sampleRate: sampleRate,
+                template: hit.template,
+                qtWithheldReason: hit.qtWithheldReason,
+                modes: hit.modes)
+        }
+    }
+
+    /// Fire-and-forget cache write off the main actor. Losing one (record
+    /// swapped mid-write, read-only bundle) costs a recompute, nothing more.
+    fileprivate static func storeCache(
+        _ payload: MarkingsCachePayload, parametersKey: String, directory: URL
+    ) {
+        Task.detached(priority: .utility) {
+            BundleDerivedCache.store(
+                payload, producer: "interval-markings",
+                parametersKey: parametersKey, in: directory)
+        }
+    }
+
+    /// Deterministic digest of the endorsements for the cache key. NOT
+    /// `Hashable` — Swift's hasher is seeded per process, so its values
+    /// cannot key anything persistent. Canonical form: each endorsement
+    /// JSON-encoded with sorted keys, the encodings sorted, then SHA-256.
+    static func endorsementsDigest(_ endorsements: [MorphologyEndorsement]) -> String {
+        guard !endorsements.isEmpty else { return "none" }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let parts = endorsements
+            .compactMap { try? encoder.encode($0) }
+            .map { String(decoding: $0, as: UTF8.self) }
+            .sorted()
+        let canonical = Data(parts.joined(separator: "\n").utf8)
+        return SHA256.hash(data: canonical).map { String(format: "%02x", $0) }.joined()
     }
 }

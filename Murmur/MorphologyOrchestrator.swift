@@ -52,6 +52,22 @@ struct MorphologyOrchestrator: View {
         var measuredBeatCount = 0
         let signpost = ComputeSignpost.begin("Morphology")
         defer { ComputeSignpost.end(signpost, workSize: measuredBeatCount) }
+
+        // Bundle cache: the summary is a pure function of the record's beats
+        // and samples — no analyst dials feed it (endorsements act downstream,
+        // in the markings pipeline), so the parameters key is empty and the
+        // app-version stamp carries all invalidation.
+        if let hit = await Task.detached(priority: .userInitiated, operation: {
+            BundleDerivedCache.load(
+                MorphologyCachePayload.self, producer: "morphology",
+                parametersKey: "", from: directory)
+        }).value {
+            measuredBeatCount = hit.beatCount
+            guard !Task.isCancelled else { return }
+            await MainActor.run { morphologyContext.set(summary: hit.summary) }
+            return
+        }
+
         let beats = recording.annotatedBeats()
         measuredBeatCount = beats.count
         // Same lead-selection order as the markings pipeline: conventional
@@ -78,6 +94,11 @@ struct MorphologyOrchestrator: View {
         // never publish a stale record's clusters over the new one's.
         guard !Task.isCancelled else { return }
 
+        let cachePayload = MorphologyCachePayload(summary: summary, beatCount: beats.count)
+        Task.detached(priority: .utility) {
+            BundleDerivedCache.store(
+                cachePayload, producer: "morphology", parametersKey: "", in: directory)
+        }
         await MainActor.run { morphologyContext.set(summary: summary) }
     }
 
@@ -147,4 +168,11 @@ struct MorphologyOrchestrator: View {
             totalBeats: total,
             matchThreshold: parameters.distanceThreshold)
     }
+}
+
+
+/// What the bundle cache holds for this producer.
+private struct MorphologyCachePayload: Codable, Sendable {
+    let summary: MorphologySummary
+    let beatCount: Int
 }

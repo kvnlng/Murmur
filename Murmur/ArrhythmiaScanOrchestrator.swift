@@ -124,6 +124,25 @@ struct ArrhythmiaScanOrchestrator: View {
         let pauseConfig = PauseConfig()
         let afibConfig = AFibConfig()
 
+        // Bundle cache: keyed by the dials — the same values the caption
+        // echoes. Checked BEFORE the placeholder publish above would matter:
+        // a hit replaces the placeholder within the same turn of the loop,
+        // so the queue never flashes "scanning…" for work that isn't run.
+        let parametersKey = "low=\(rhythmConfig.lowBpm);high=\(rhythmConfig.highBpm);"
+            + "minDur=\(rhythmConfig.minDurationSeconds);minRun=\(rhythmConfig.minRunBeats)"
+        if let hit = await Task.detached(priority: .userInitiated, operation: {
+            BundleDerivedCache.load(
+                ArrhythmiaCachePayload.self, producer: "arrhythmia-scan",
+                parametersKey: parametersKey, from: directory)
+        }).value {
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                scanContext.setCandidates(hit.candidates, parametersCaption: hit.caption,
+                                          preflightWindows: hit.preflightWindows)
+            }
+            return
+        }
+
         // Detect off the main actor — QRS over a multi-hour record is real
         // work, and the RR detectors ride on its output.
         let result = await Task.detached(priority: .userInitiated) {
@@ -154,6 +173,13 @@ struct ArrhythmiaScanOrchestrator: View {
             rhythmConfig: rhythmConfig, pauseConfig: pauseConfig,
             afibConfig: afibConfig, quality: result.quality, leadName: leadName)
 
+        let cachePayload = ArrhythmiaCachePayload(
+            candidates: annotations, caption: caption, preflightWindows: preflightWindows)
+        Task.detached(priority: .utility) {
+            BundleDerivedCache.store(
+                cachePayload, producer: "arrhythmia-scan",
+                parametersKey: parametersKey, in: directory)
+        }
         await MainActor.run {
             scanContext.setCandidates(annotations, parametersCaption: caption,
                                       preflightWindows: preflightWindows)
@@ -244,4 +270,12 @@ struct ArrhythmiaScanOrchestrator: View {
         case .atrialFibrillation: return .atrialFibrillation
         }
     }
+}
+
+
+/// What the bundle cache holds for this producer — the published triple.
+private struct ArrhythmiaCachePayload: Codable, Sendable {
+    let candidates: [Annotation]
+    let caption: String?
+    let preflightWindows: [ArrhythmiaPreflightWindow]
 }

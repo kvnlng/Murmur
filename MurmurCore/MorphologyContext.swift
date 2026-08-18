@@ -28,7 +28,7 @@ import Observation
 /// One cluster, ready to render. Strings are pre-formatted by the
 /// orchestrator (the paid side owns digits); the representative waveform
 /// rides along for the thumbnail and for endorsement identity.
-public struct MorphologyClusterCard: Sendable, Equatable, Identifiable {
+public struct MorphologyClusterCard: Sendable, Equatable, Identifiable, Codable {
     /// Positional rank (0 = largest cluster). Positional, not UUID —
     /// XCUI predicate cost, see ContextDrawer's note-row rationale.
     public let id: Int
@@ -59,7 +59,7 @@ public struct MorphologyClusterCard: Sendable, Equatable, Identifiable {
 }
 
 /// The whole-record morphology summary, ready to render.
-public struct MorphologySummary: Sendable, Equatable {
+public struct MorphologySummary: Sendable, Equatable, Codable {
     /// Descending by member count — card 0 is the majority shape.
     public let cards: [MorphologyClusterCard]
     /// "remainder: 23 beats in 4 small clusters · 6 windows unusable" —
