@@ -113,7 +113,7 @@ private struct PurchasesSettingsTab: View {
             } header: {
                 Text("Developer — grant entitlements (DEBUG)")
             } footer: {
-                Text("Debug builds only. Flips local ownership so paid features can be exercised without a StoreKit purchase. Grant \"Murmur Studio\", open a recording, then use any paid feature (the metrics lanes, annotation authoring, or the \"Scan for VT/VF candidates\" toolbar button).")
+                Text("Debug builds only. Flips local ownership so paid features can be exercised without a StoreKit purchase. Grant \"Murmur Pro\", open a recording, then use any paid feature (the metrics lanes, annotation authoring, or the \"Scan for VT/VF candidates\" toolbar button).")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }

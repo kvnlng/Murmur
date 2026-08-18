@@ -133,7 +133,7 @@ struct MorphologyPanel: View {
             .disabled(!canAuthor)
             .help(canAuthor
                   ? "Endorse this cluster as a patient baseline — recorded with date, saved with the session"
-                  : "Unlock Editing (and Studio) to endorse a baseline")
+                  : "Unlock Editing (and Pro) to endorse a baseline")
             .accessibilityIdentifier("morphology-endorse-\(card.id)")
         } else {
             Button("Withdraw endorsement") {
@@ -143,7 +143,7 @@ struct MorphologyPanel: View {
             .disabled(!canAuthor)
             .help(canAuthor
                   ? "Withdraw this baseline endorsement — reverts to the unadjudicated annotator-normal template"
-                  : "Unlock Editing (and Studio) to withdraw an endorsement")
+                  : "Unlock Editing (and Pro) to withdraw an endorsement")
             .accessibilityIdentifier("morphology-withdraw-\(card.id)")
         }
     }
@@ -166,7 +166,7 @@ struct MorphologyPanel: View {
             .disabled(!canAuthor)
             .help(canAuthor
                   ? "Withdraw the orphaned endorsement"
-                  : "Unlock Editing (and Studio) to withdraw an endorsement")
+                  : "Unlock Editing (and Pro) to withdraw an endorsement")
             .accessibilityIdentifier("morphology-orphan-withdraw-\(index)")
         }
         .padding(6)
