@@ -81,6 +81,11 @@ struct MurmurApp: App {
         // opens after launch is younger than the cutoff). See TempScratchSweeper.
         Task.detached(priority: .utility) {
             TempScratchSweeper.sweepAtLaunch()
+            // Same launch-is-the-safe-moment reasoning, aimed at Application
+            // Support: recording bundles from before source-fingerprint
+            // reuse can never be matched by a future import and had piled
+            // up to 16 GB. See RecordingBundleSweeper's header.
+            RecordingBundleSweeper.sweepAtLaunch()
         }
 
         // Publish-side jank measurement (#17): time every main-run-loop turn

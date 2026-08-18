@@ -27,24 +27,35 @@ final class RecordingStore {
         if let rootURL {
             self.rootURL = rootURL
         } else {
-            do {
-                let appSupport = try fileManager.url(
-                    for: .applicationSupportDirectory,
-                    in: .userDomainMask,
-                    appropriateFor: nil,
-                    create: true
-                )
+            if let appSupport = try? fileManager.url(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: true
+            ) {
                 Self.migrateLegacyAppSupportIfNeeded(parent: appSupport, fileManager: fileManager)
-                self.rootURL = appSupport
-                    .appendingPathComponent("Murmur", isDirectory: true)
-                    .appendingPathComponent("recordings", isDirectory: true)
-            } catch {
-                self.rootURL = fileManager.temporaryDirectory
-                    .appendingPathComponent("Murmur", isDirectory: true)
-                    .appendingPathComponent("recordings", isDirectory: true)
             }
+            self.rootURL = Self.defaultRootURL(fileManager: fileManager)
         }
         try? fileManager.createDirectory(at: self.rootURL, withIntermediateDirectories: true)
+    }
+
+    /// The default bundles root — Application Support / Murmur / recordings,
+    /// with the same tmp fallback `init` has always had. Split out and
+    /// `nonisolated` so the launch-time bundle sweeper can resolve the same
+    /// path without touching the store (or the main actor). Does NOT run the
+    /// legacy migration — that stays an init concern; a sweep before
+    /// migration finds an empty root and does nothing, which is correct.
+    nonisolated static func defaultRootURL(fileManager: FileManager = .default) -> URL {
+        let parent = (try? fileManager.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )) ?? fileManager.temporaryDirectory
+        return parent
+            .appendingPathComponent("Murmur", isDirectory: true)
+            .appendingPathComponent("recordings", isDirectory: true)
     }
 
     /// First-launch rename: if the user has data under the old `Plotting/`
