@@ -30,6 +30,40 @@ struct BedsideView: View {
     /// every ChannelPanel, exactly like `viewport`.
     @State private var calibration = Calibration()
     @State private var filter = FindingFilter()
+    /// Memoized render-path annotation arrays (#17). Rebuilt off-main by the
+    /// `.task(id:)` below whenever an input changes; every RENDER site reads
+    /// this instead of the O(N)-per-access computed chain. Persistence and
+    /// export paths keep using `allAnnotations` — a stale write is a worse
+    /// bug than a slow one.
+    @State private var derived = AnnotationDerivations()
+    /// Memoized `recording.beatSourceAbsence()` — rebuilt alongside
+    /// `derived` (same task, same late-populate contract). Nil both when
+    /// beats exist and before the first rebuild lands; the disclosure line
+    /// simply appears a frame late on a beat-less record.
+    @State private var beatAbsence: BeatSourceAbsence?
+    /// Memoized trend-lane projections of `derived.all` — rebuilt in the
+    /// same task. As computed properties these each re-walked the full
+    /// annotation array (with per-annotation string trimming) on every
+    /// body eval; measured in the #17 scroll-stall profile after the
+    /// bigger rebuilds were fixed. See `buildTrendLaneEvents` /
+    /// `buildAuthoredRangeFindings` for the rules, verbatim from the old
+    /// computed properties.
+    @State private var trendLaneEvents: [IntervalTrendEvent] = []
+    @State private var authoredRangeFindings: [IntervalTrendRangeFinding] = []
+
+    /// What the derivations depend on. `annotationsCount` stands in for the
+    /// recording's annotation set: the set only changes via
+    /// `onRecordingMutated` republishes, and comparing the full array here
+    /// would be the very O(N)-per-eval this memo removes. A same-count
+    /// in-place edit would slip past — no current mutation path does that
+    /// (renames ride `renamedLabels`; authoring appends).
+    private struct DerivationKey: Equatable {
+        let recordingID: UUID
+        let annotationsCount: Int
+        let attached: [Annotation]
+        let renamed: [UUID: String]
+        let filter: FindingFilter
+    }
     /// X82: the review-queue inspector's open state lives in the coexistence
     /// context — the analyst's intent, arbitrated against the navigator and
     /// the window width so neither panel ever renders partially clipped.
@@ -257,6 +291,10 @@ struct BedsideView: View {
     /// attached via the "Attach findings…" toolbar action. Every downstream
     /// surface — canvas overlays, findings panel, density timeline, summary
     /// chips — reads from this so attached findings are first-class.
+    /// PERSISTENCE/EXPORT PATHS ONLY — a fresh O(N) computation per access
+    /// (5.8 ms at 100k annotations). Render paths read the `derived` memo
+    /// instead (#17); a new render-path caller of this property reintroduces
+    /// the mount convoy one access at a time.
     private var allAnnotations: [Annotation] {
         // #250 — rename overlay. `recording` is immutable and a reopened
         // bundle's findings live in `recording.annotations` (the sidecar
@@ -270,20 +308,6 @@ struct BedsideView: View {
             guard let newLabel = renamedLabels[annotation.id] else { return annotation }
             return annotation.withLabel(newLabel)
         }
-    }
-
-    /// Annotations that survive the current filter. Drives the canvas, the
-    /// findings panel, and the density timeline so all three stay in sync.
-    private var filteredAnnotations: [Annotation] {
-        allAnnotations.filter(filter.matches)
-    }
-
-    /// Annotations that should render on `channel`'s waveform panel.
-    /// Lead-tagged findings only show on the channel whose name matches;
-    /// lead-less findings (the common case — whole-recording
-    /// observations like AFib) show on every channel.
-    private func annotationsForChannel(_ channel: Channel) -> [Annotation] {
-        filteredAnnotations.filter { $0.matchesChannel(channel.name) }
     }
 
     /// VT/VF candidate episodes to draw on `channel`'s trace. Same
@@ -461,7 +485,7 @@ struct BedsideView: View {
     /// VT/VF model candidates + their region-keyed disposition store.
     private var findingsInspector: some View {
         FindingsPanel(
-            annotations: allAnnotations,
+            annotations: derived.all,
             viewport: viewport,
             sampleRate: recording.channels.first?.sampleRate ?? 250,
             headerComments: recording.headerComments,
@@ -484,6 +508,11 @@ struct BedsideView: View {
             },
             onRenameFieldActive: { findingRenameActive = $0 }
         )
+        // Pan-tick skip (#17): this body re-runs on every viewport tick
+        // (the channels legitimately read the viewport), and the queue is
+        // by far the most expensive child to rebuild. See the Equatable
+        // conformance on FindingsPanel for the fingerprint contract.
+        .equatable()
         .inspectorColumnWidth(min: 260, ideal: 340, max: 500)
         // The Review Queue owns its own scrolling, so its content height is
         // its business and not the window's. Without this floor the queue
@@ -509,6 +538,50 @@ struct BedsideView: View {
             // not the stage's, so it stays put in both layout modes — strips
             // mode scrolls wholesale and would otherwise carry it off-screen.
             infoBar
+        }
+        // #17: rebuild the memoized annotation derivations off-main when an
+        // input changes. First frames render the empty memo (blank inspector
+        // and overlays for one beat) — the same late-populate contract the
+        // orchestrator lanes already follow.
+        .task(id: DerivationKey(
+            recordingID: recording.id,
+            annotationsCount: recording.annotations.count,
+            attached: attachedAnnotations,
+            renamed: renamedLabels,
+            filter: filter
+        )) {
+            let annotations = recording.annotations
+            let attached = attachedAnnotations
+            let renamed = renamedLabels
+            let filter = filter
+            let channelNames = ecgChannels.map(\.name)
+            let recordingValue = recording
+            let channelSampleRate = recording.channels.first?.sampleRate ?? 0
+            let viewportSampleRate = viewport.sampleRate
+            // The extra derivations ride the same rebuild: each one walks
+            // (and string-trims) the full annotation array, and as computed
+            // properties they re-ran that walk on every body eval — each
+            // measured at a double-digit share of main-thread samples during
+            // a scroll burst on a 100k-annotation record (#17). All depend
+            // only on inputs this task's key already covers.
+            let (built, absence, events, ranges) = await Task.detached(priority: .userInitiated) {
+                let built = AnnotationDerivations.build(
+                    recordingAnnotations: annotations, attached: attached,
+                    renamedLabels: renamed, filter: filter,
+                    channelNames: channelNames
+                )
+                return (built,
+                        recordingValue.beatSourceAbsence(),
+                        Self.buildTrendLaneEvents(
+                            from: built.all, sampleRate: channelSampleRate),
+                        Self.buildAuthoredRangeFindings(
+                            from: built.all, sampleRate: viewportSampleRate))
+            }.value
+            guard !Task.isCancelled else { return }
+            derived = built
+            beatAbsence = absence
+            trendLaneEvents = events
+            authoredRangeFindings = ranges
         }
         // X73: publish the viewport so the metrics block can scope to it.
         // Published on every change and DEBOUNCED on the orchestrator side —
@@ -1319,7 +1392,7 @@ struct BedsideView: View {
     /// export — drives the toolbar button's enabled state.
     private var amberFindingCount: Int {
         WFDBAnnotationExport.amberFindings(
-            annotations: allAnnotations,
+            annotations: derived.all,
             annotationDispositions: dispositionStore.records,
             confirmedRegions: candidateDispositionStore.records
         ).count
@@ -1468,7 +1541,7 @@ struct BedsideView: View {
     /// viewport centre. No-op when there are no findings ahead.
     private func jumpToNextFinding() {
         let centre = (viewport.startSample + viewport.endSample) / 2
-        guard let next = Annotation.nextFinding(after: centre, in: filteredAnnotations) else { return }
+        guard let next = Annotation.nextFinding(after: centre, in: derived.filtered) else { return }
         let total = max(1, viewport.totalSamples)
         viewport.animateJump(toFraction: Double(next.sampleIndex) / Double(total), duration: 0.18)
     }
@@ -1477,7 +1550,7 @@ struct BedsideView: View {
     /// viewport centre.
     private func jumpToPreviousFinding() {
         let centre = (viewport.startSample + viewport.endSample) / 2
-        guard let prev = Annotation.previousFinding(before: centre, in: filteredAnnotations) else { return }
+        guard let prev = Annotation.previousFinding(before: centre, in: derived.filtered) else { return }
         let total = max(1, viewport.totalSamples)
         viewport.animateJump(toFraction: Double(prev.sampleIndex) / Double(total), duration: 0.18)
     }
@@ -1525,7 +1598,7 @@ struct BedsideView: View {
         let toleranceSamples = Int64(markingsContext.sampleRate * 0.1)
         let center = beat.rPeakSampleIndex
         let ectopicCategories: Set<String> = ["V", "PVC", "F", "E", "J", "S", "e", "j", "P", "r"]
-        for ann in allAnnotations where ann.kind == .point {
+        for ann in derived.all where ann.kind == .point {
             guard abs(ann.sampleIndex - center) <= toleranceSamples else { continue }
             let normalized = ann.category.trimmingCharacters(in: .whitespaces).uppercased()
             if ectopicCategories.contains(normalized) || normalized == "PVC" {
@@ -1551,7 +1624,7 @@ struct BedsideView: View {
     private func dispositionFocused(_ action: DispositionAction) -> Bool {
         guard isEditing else { return false }
         let centre = (viewport.startSample + viewport.endSample) / 2
-        guard let target = Annotation.closest(to: centre, in: filteredAnnotations) else {
+        guard let target = Annotation.closest(to: centre, in: derived.filtered) else {
             return false
         }
         switch action {
@@ -1599,7 +1672,7 @@ struct BedsideView: View {
                             directory: recordingDirectory,
                             viewport: viewport,
                             calibration: calibration,
-                            annotations: annotationsForChannel(channel),
+                            annotations: derived.byChannel[channel.name] ?? [],
                             candidates: candidatesForChannel(channel),
                             sizing: .strip,
                             noteAuthoring: noteAuthoringHooks
@@ -1671,7 +1744,7 @@ struct BedsideView: View {
     /// hole would read as three faults instead of one property of the record.
     @ViewBuilder
     private var beatSourceDisclosure: some View {
-        if let absence = recording.beatSourceAbsence() {
+        if let absence = beatAbsence {
             BeatSourceDisclosure(
                 absence: absence,
                 siblingBeatFileName: BeatSourceDisclosure.siblingBeatFileName(
@@ -1930,7 +2003,7 @@ struct BedsideView: View {
                     directory: recordingDirectory,
                     viewport: viewport,
                     calibration: calibration,
-                    annotations: annotationsForChannel(channel),
+                    annotations: derived.byChannel[channel.name] ?? [],
                     candidates: candidatesForChannel(channel),
                     sizing: .focus,
                     overlayChannels: overlayChannels,
@@ -1982,7 +2055,7 @@ struct BedsideView: View {
             HStack(alignment: .center, spacing: 10) {
                 bandLabel("Record", detail: RecordListEntry.duration(totalDurationSeconds))
                 OverviewMap(
-                    annotations: filteredAnnotations,
+                    annotations: derived.filtered,
                     totalSamples: channel.sampleCount,
                     sampleRate: channel.sampleRate,
                     viewport: viewport,
@@ -2329,6 +2402,31 @@ struct BedsideView: View {
     /// the empty set when there's no entitlement, no recording, or too
     /// few beats. Feature scope + build order come from
     /// `project_variability_lane_design.md`.
+    /// ECG-sourced hover, resolved to the CENTER of the lane window it
+    /// lands in — the granularity the lane actually displays at
+    /// (`VariabilityLane.hoveredSample` highlights whole windows). Passing
+    /// the raw cursor seconds instead re-rendered the lane's Chart on every
+    /// mouse-moved event for a display that only changes at window
+    /// boundaries — measured as part of the #17 scroll-stall profile.
+    private var variabilityHoverWindowCenter: Double? {
+        guard laneContext.hoveredSource == .ecg,
+              let t = laneContext.hoveredTimeSeconds else { return nil }
+        return laneContext.sample(atTimeSeconds: t)?.windowCenterSeconds
+    }
+
+    /// Same resolution contract for the interval trend lane, whose hover
+    /// highlight is per-BIN (`IntervalTrendLane.hoveredBin`). Bin centers
+    /// are derived arithmetically — the bins live inside the memoized
+    /// strip, but they are regular `binSeconds` divisions of the record,
+    /// so the center lands in the same bin the cursor is in.
+    private var trendHoverBinCenter: Double? {
+        guard laneContext.hoveredSource == .ecg,
+              let t = laneContext.hoveredTimeSeconds else { return nil }
+        let bin = trendLaneContext.binSeconds
+        guard bin > 0 else { return t }
+        return (t / bin).rounded(.down) * bin + bin / 2
+    }
+
     @ViewBuilder
     private var variabilityLaneStrip: some View {
         if !laneContext.samples.isEmpty {
@@ -2348,9 +2446,9 @@ struct BedsideView: View {
                 showsMetricLabel: false,
                 // Read hover state so the lane highlights coordinate
                 // with ECG-side hovers when that direction lands.
-                externalHoverTimeSeconds: laneContext.hoveredSource == .ecg
-                    ? laneContext.hoveredTimeSeconds
-                    : nil,
+                // Window-center resolution, not raw seconds — see
+                // `variabilityHoverWindowCenter`.
+                externalHoverTimeSeconds: variabilityHoverWindowCenter,
                 selectedPreset: laneContext.windowPreset,
                 onLaneHover: { time in
                     laneContext.setHover(time: time, from: .lane)
@@ -2359,6 +2457,10 @@ struct BedsideView: View {
                     laneContext.windowPreset = preset
                 }
             )
+            // Pan-tick skip (#17): the lane spans the whole record, so a
+            // viewport change is not a reason to re-lay-out its Chart. See
+            // the Equatable conformance on VariabilityLane.
+            .equatable()
         }
     }
 
@@ -2391,9 +2493,10 @@ struct BedsideView: View {
                 selectedBinPreset: trendLaneContext.binPreset,
                 guides: trendGuideStore.guides(for: trendLaneContext.metric),
                 events: trendLaneEvents,
-                externalHoverTimeSeconds: laneContext.hoveredSource == .ecg
-                    ? laneContext.hoveredTimeSeconds
-                    : nil,
+                // Bin-center resolution, not raw seconds — see
+                // `trendHoverBinCenter`. Raw seconds defeat the strip's
+                // `.equatable()` skip on every mouse-moved event.
+                externalHoverTimeSeconds: trendHoverBinCenter,
                 rangeFindings: authoredRangeFindings,
                 authoringEnabled: canAuthorFindings,
                 onLaneHover: { time in
@@ -2451,16 +2554,17 @@ struct BedsideView: View {
     /// Analyst-authored range findings, projected onto the trend lane's time
     /// axis. Sourced from the same `Annotation` store everything else reads, so
     /// they persist and also flow to the review queue + WFDB export.
-    private var authoredRangeFindings: [IntervalTrendRangeFinding] {
-        let sr = viewport.sampleRate
-        guard sr > 0 else { return [] }
-        return allAnnotations
+    nonisolated static func buildAuthoredRangeFindings(
+        from annotations: [Annotation], sampleRate: Double
+    ) -> [IntervalTrendRangeFinding] {
+        guard sampleRate > 0 else { return [] }
+        return annotations
             .filter { $0.kind == .range && $0.source == Annotation.analystAuthoredSource }
             .map { ann in
                 IntervalTrendRangeFinding(
                     id: ann.id,
-                    startSeconds: Double(ann.sampleIndex) / sr,
-                    endSeconds: Double(ann.renderEndSample) / sr,
+                    startSeconds: Double(ann.sampleIndex) / sampleRate,
+                    endSeconds: Double(ann.renderEndSample) / sampleRate,
                     label: ann.displayLabel
                 )
             }
@@ -2517,11 +2621,11 @@ struct BedsideView: View {
     /// `drug` / `dose` category) surfaces as a vertical marker on the
     /// trend axis. No app-asserted classification — this is a pure
     /// rendering rule over what the analyst / producer already wrote.
-    private var trendLaneEvents: [IntervalTrendEvent] {
-        guard let firstChannel = recording.channels.first,
-              firstChannel.sampleRate > 0 else { return [] }
-        let sr = firstChannel.sampleRate
-        return allAnnotations.compactMap { ann in
+    nonisolated static func buildTrendLaneEvents(
+        from annotations: [Annotation], sampleRate: Double
+    ) -> [IntervalTrendEvent] {
+        guard sampleRate > 0 else { return [] }
+        return annotations.compactMap { ann in
             guard ann.kind == .point else { return nil }
             guard isEventCategory(ann.category) else { return nil }
             let trimmedNote = ann.note?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2529,13 +2633,13 @@ struct BedsideView: View {
                 ?? ann.displayLabel
             return IntervalTrendEvent(
                 id: ann.id,
-                timeSeconds: Double(ann.sampleIndex) / sr,
+                timeSeconds: Double(ann.sampleIndex) / sampleRate,
                 label: label
             )
         }
     }
 
-    private func isEventCategory(_ category: String) -> Bool {
+    private nonisolated static func isEventCategory(_ category: String) -> Bool {
         let key = category.trimmingCharacters(in: .whitespaces).lowercased()
         switch key {
         case "\"", "comment", "event", "note", "drug", "dose", "drug_admin":

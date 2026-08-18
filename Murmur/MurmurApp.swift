@@ -83,6 +83,13 @@ struct MurmurApp: App {
             TempScratchSweeper.sweepAtLaunch()
         }
 
+        // Publish-side jank measurement (#17): time every main-run-loop turn
+        // and persist the ones a person could feel, so "still clunky" can be
+        // correlated against the adjacent publish lines in the compute log.
+        Task { @MainActor in
+            MainThreadStallMonitor.install()
+        }
+
         // Register the baseline producers that ship with the free viewer.
         // The MurmurCore bootstrap encapsulates the DEBUG vs RELEASE
         // policy — in DEBUG it registers the synthetic producer so the

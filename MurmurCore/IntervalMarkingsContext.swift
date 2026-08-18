@@ -664,7 +664,13 @@ public final class IntervalMarkingsContext {
     // MARK: - Focus / caliper state
 
     /// Report the beat under the cursor, or `nil` on mouse-exit.
+    ///
+    /// Equality-guarded like `set(renderPolicy:)` above: this is written on
+    /// every mouse-moved event, and the nearest beat changes far less often
+    /// than the cursor does — an unguarded write fires an observation
+    /// transaction for every observer on every event, for no visible change.
     public func focus(beatSampleIndex: Int64?) {
+        guard hoveredBeatSampleIndex != beatSampleIndex else { return }
         hoveredBeatSampleIndex = beatSampleIndex
     }
 

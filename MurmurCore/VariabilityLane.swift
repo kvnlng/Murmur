@@ -543,3 +543,31 @@ struct VariabilityLane: View {
         return yDomain.lowerBound
     }
 }
+
+// MARK: - Equatable (pan-tick skip)
+
+/// `.equatable()`-skips the lane when `BedsideView.body` re-runs for reasons
+/// unrelated to it — the lane spans the whole record (X74), so pan/zoom of
+/// the ECG viewport never changes what it draws, yet every viewport tick was
+/// re-laying-out its Chart (measured in the #17 scroll-stall profile; Swift
+/// Charts layout dominated the samples once the findings queue was skipped).
+///
+/// Same contract as `IntervalTrendLaneMemoizedStrip`: closures are excluded —
+/// rebuilt on every parent pass but capturing the same owner hooks, so
+/// skipping body on closure identity alone is safe. `samples` uses full `==`,
+/// which is O(1) on the hot path: the array keeps its storage identity
+/// between orchestrator publishes. `externalHoverTimeSeconds` arrives
+/// window-center-resolved (see `BedsideView.variabilityHoverWindowCenter`),
+/// so it only changes when the highlight actually moves to another window.
+extension VariabilityLane: Equatable {
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.samples == rhs.samples
+            && lhs.timeRangeSeconds == rhs.timeRangeSeconds
+            && lhs.metricLabel == rhs.metricLabel
+            && lhs.unit == rhs.unit
+            && lhs.windowCaption == rhs.windowCaption
+            && lhs.showsMetricLabel == rhs.showsMetricLabel
+            && lhs.externalHoverTimeSeconds == rhs.externalHoverTimeSeconds
+            && lhs.selectedPreset == rhs.selectedPreset
+    }
+}

@@ -185,6 +185,11 @@ public final class VariabilityLaneContext {
         if timeSeconds == nil && hoveredSource != source {
             return
         }
+        // Equality guard: hover is written per mouse-moved event, and a
+        // repeated (time, source) pair — a stationary cursor, a re-entered
+        // tracking area — must not fire an observation transaction for
+        // every observer with nothing to show for it.
+        guard hoveredTimeSeconds != timeSeconds || hoveredSource != source else { return }
         self.hoveredTimeSeconds = timeSeconds
         self.hoveredSource = source
     }
