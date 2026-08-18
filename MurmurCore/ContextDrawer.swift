@@ -59,6 +59,12 @@ struct ContextDrawer: View {
     /// to show (no entitlement, no annotated beats). The row and editor
     /// mount only when present.
     let morphologySummary: MorphologySummary?
+    /// Task #11 — true while the orchestrator is computing with no cached
+    /// summary to show. Renders a non-interactive "computing…" row in the
+    /// summary's place, so a cold open on a long record names its cost
+    /// instead of showing nothing (X91's "scanning…" reasoning). Defaulted
+    /// so snapshot/preview call sites are unaffected.
+    var morphologyComputing: Bool = false
     /// X112 — the analyst's endorsements: session work product owned by
     /// BedsideView, same lifecycle as `notes`.
     @Binding var morphologyEndorsements: [MorphologyEndorsement]
@@ -238,6 +244,8 @@ struct ContextDrawer: View {
                             preview: morphologyPreview(morphology),
                             identifier: "note-row-morphology"
                         )
+                    } else if morphologyComputing {
+                        morphologyComputingRow
                     }
                     ForEach(Array(filteredNotes.enumerated()), id: \.element.id) { index, note in
                         noteRow(note, index: index)
@@ -255,6 +263,32 @@ struct ContextDrawer: View {
         .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.quaternary, lineWidth: 0.5))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("notes-drawer-list")
+    }
+
+    /// The Morphology row's cold-open stand-in — `fixedRow`'s layout with
+    /// no Button: there is nothing to select until the clusters exist, and
+    /// a row that highlights on click but shows an empty editor would read
+    /// as broken rather than busy.
+    private var morphologyComputingRow: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: "waveform.path.ecg")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 6) {
+                    Text("Morphology").font(.caption.weight(.semibold))
+                    Text("computing…").font(.caption2).foregroundStyle(.tertiary)
+                }
+                Text("Clustering this recording's beats.")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(6)
+        .accessibilityIdentifier("note-row-morphology-computing")
     }
 
     private func fixedRow(

@@ -2743,6 +2743,7 @@ struct BedsideView: View {
                         currentLeadName: focusedChannel?.name,
                         savedNotes: CurrentRecordingContext.shared.sessionSavedNotes,
                         morphologySummary: morphologyContext.summary,
+                        morphologyComputing: morphologyContext.isComputing,
                         morphologyEndorsements: $morphologyEndorsements,
                         onJump: { note in jumpToNoteAnchor(note) }
                     )
