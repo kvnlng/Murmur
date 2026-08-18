@@ -75,12 +75,93 @@ final class RecordingStore {
             defer { if needsScope { folderURL.stopAccessingSecurityScopedResource() } }
 
             let heaURL = folderURL.appendingPathComponent(heaFilename)
-            return try WFDBImporter.importRecord(
+
+            // Reuse before import: an existing bundle whose source
+            // fingerprint matches is the same record already decoded —
+            // serving it skips the packed-sample decode and pyramid build,
+            // keeps `Recording.id` stable across opens (what per-bundle
+            // derived caches key on), and stops the abandoned-bundle leak
+            // that reached 16 GB before this landed. Any failure on this
+            // path falls through to a fresh import; reuse is an
+            // optimisation, never a correctness gate.
+            if let fingerprint = try? SourceFingerprint.compute(heaURL: heaURL),
+               let reused = Self.reusableSummary(matching: fingerprint, in: outputDir) {
+                return reused
+            }
+
+            let summary = try WFDBImporter.importRecord(
                 heaURL: heaURL,
                 outputDirectory: outputDir,
                 progress: progress
             )
+            // Stamp AFTER the import succeeds — a bundle only becomes
+            // reusable once it is known complete. Failure to stamp is not
+            // failure to import; the bundle simply won't be reused.
+            if let fingerprint = try? SourceFingerprint.compute(heaURL: heaURL) {
+                try? fingerprint.write(to: summary.directory)
+            }
+            return summary
         }.value
+    }
+
+    /// Scan `root` for a bundle stamped with `fingerprint` whose manifest
+    /// still loads. `nonisolated` — runs inside the detached import task.
+    ///
+    /// The scan reads one small JSON per bundle; against the observed
+    /// worst-case population (~1,000 bundles) that is milliseconds, and it
+    /// buys out a multi-minute decode. The manifest re-load is the
+    /// gutted-bundle guard: a fingerprint file that outlived its
+    /// recording.json must not be served.
+    private nonisolated static func reusableSummary(
+        matching fingerprint: SourceFingerprint,
+        in root: URL
+    ) -> ImportSummary? {
+        let fm = FileManager.default
+        guard let children = try? fm.contentsOfDirectory(
+            at: root, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+        ) else { return nil }
+
+        for child in children {
+            // Rebuild from the caller's root rather than returning the
+            // enumerated URL: contentsOfDirectory resolves /var -> /private/var,
+            // and the fresh-import path returns root-relative URLs — the two
+            // spellings must not differ by which path produced the bundle.
+            let bundleDir = root.appendingPathComponent(child.lastPathComponent, isDirectory: true)
+            guard SourceFingerprint.read(from: bundleDir) == fingerprint else { continue }
+            guard let recording = try? Self.loadManifestForReuse(at: bundleDir) else { continue }
+            return ImportSummary(
+                recording: recording,
+                directory: bundleDir,
+                signalsImported: recording.channels.count,
+                totalSamples: recording.channels.reduce(0) { $0 + $1.sampleCount }
+            )
+        }
+        return nil
+    }
+
+    /// The manifest+sidecar load, minus the main-actor isolation of
+    /// `loadManifest` — same semantics, callable from the import task.
+    private nonisolated static func loadManifestForReuse(at directory: URL) throws -> Recording {
+        let manifestURL = directory.appendingPathComponent("recording.json")
+        let data = try Data(contentsOf: manifestURL)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let recording = try decoder.decode(Recording.self, from: data)
+        guard let sidecar = BundleAnnotationsFile.read(from: directory) else {
+            return recording
+        }
+        return Recording(
+            version: recording.version,
+            id: recording.id,
+            device: recording.device,
+            createdAt: recording.createdAt,
+            sourceFileName: recording.sourceFileName,
+            channels: recording.channels,
+            annotations: sidecar,
+            headerComments: recording.headerComments,
+            notesFileName: recording.notesFileName,
+            hasAbsoluteStartTime: recording.hasAbsoluteStartTime
+        )
     }
 
     /// Loads the manifest from a recording directory. If a sibling

@@ -352,7 +352,7 @@ public struct MarkingsTemplate: Sendable, Equatable, Codable {
 /// the template is built from THAT mode's beats through the same X53/X58
 /// gated pipeline as the single-template case — exclude-and-count applies
 /// per mode.
-public struct MarkingsMode: Sendable, Equatable {
+public struct MarkingsMode: Sendable, Equatable, Codable {
     public let name: String
     public let beatCount: Int
     public let template: MarkingsTemplate

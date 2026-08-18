@@ -94,7 +94,7 @@ public enum ArrhythmiaCandidateSource {
 /// calibration table's error band) into this before publishing. The numbers
 /// are the σ lookup: what the NSTDB-calibrated table says QRS detection is
 /// worth at this window's measured signal quality.
-public struct ArrhythmiaPreflightWindow: Sendable, Equatable {
+public struct ArrhythmiaPreflightWindow: Sendable, Equatable, Codable {
     public let startSeconds: Double
     public let endSeconds: Double
     /// Calibrated detection sensitivity at this window's quality.

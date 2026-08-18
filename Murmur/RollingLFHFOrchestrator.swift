@@ -81,6 +81,7 @@ struct RollingLFHFOrchestrator: View {
         #endif
         guard store.hasStudio,
               let recording = recordingContext.recording,
+              let directory = recordingContext.directory,
               let sampleRate = recording.channels.first?.sampleRate else {
             lfhfContext.clear()
             return
@@ -88,6 +89,27 @@ struct RollingLFHFOrchestrator: View {
         var measuredBeatCount = 0
         let signpost = ComputeSignpost.begin("RollingLFHF")
         defer { ComputeSignpost.end(signpost, workSize: measuredBeatCount) }
+
+        // Bundle cache: the series depends only on the record's beats and
+        // the (fixed) window/step config, so a stamped blob in the bundle is
+        // the whole answer. Read off-main — the blob is small but the beat
+        // walk on a miss is not, and both belong on the same side.
+        let parametersKey = "window=\(Self.windowSeconds);step=\(Self.stepSeconds)"
+        if let hit = await Task.detached(priority: .userInitiated, operation: {
+            BundleDerivedCache.load(
+                LFHFCachePayload.self, producer: "rolling-lfhf",
+                parametersKey: parametersKey, from: directory)
+        }).value {
+            measuredBeatCount = hit.beatCount
+            if Task.isCancelled { return }
+            if hit.samples.isEmpty {
+                lfhfContext.clear()
+            } else {
+                lfhfContext.set(samples: hit.samples, caption: hit.caption)
+            }
+            return
+        }
+
         let beats = recording.normalBeatSampleIndices()
         measuredBeatCount = beats.count
         guard let series = ECGMetricsExtractor.rrSeries(
@@ -105,6 +127,18 @@ struct RollingLFHFOrchestrator: View {
             stepSeconds: Self.stepSeconds
         )
         if Task.isCancelled { return }
+        let cachePayload = LFHFCachePayload(
+            samples: samples,
+            caption: samples.contains(where: { $0.band != nil })
+                ? RollingLFHFContext.provenanceCaption + " · 2-min band"
+                : RollingLFHFContext.provenanceCaption,
+            beatCount: beats.count
+        )
+        Task.detached(priority: .utility) {
+            BundleDerivedCache.store(
+                cachePayload, producer: "rolling-lfhf",
+                parametersKey: parametersKey, in: directory)
+        }
         if samples.isEmpty {
             lfhfContext.clear()
         } else {
@@ -154,4 +188,13 @@ struct RollingLFHFOrchestrator: View {
             )
         }
     }
+}
+
+
+/// What the bundle cache holds for this producer — exactly what gets
+/// published, plus the beat count the signpost reports on a hit.
+private struct LFHFCachePayload: Codable, Sendable {
+    let samples: [VariabilityLaneSample]
+    let caption: String
+    let beatCount: Int
 }
