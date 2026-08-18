@@ -495,7 +495,9 @@ struct FindingsPanel: View {
     /// stream — factual counts, never a verdict. Recording-level, so it reads
     /// the full annotation set (not the filtered subset).
     private var ectopySummary: EctopyRunSummary {
-        EctopyAnalyzer.summarize(annotations)
+        ComputeSignpost.measure("FindingsEctopy", workSize: { annotations.count }) {
+            EctopyAnalyzer.summarize(annotations)
+        }
     }
 
     @ViewBuilder
@@ -730,14 +732,12 @@ struct FindingsPanel: View {
             .sorted { $0.sampleIndex < $1.sampleIndex }
     }
 
-    /// The rhythm label prevailing at the current viewport start — the last
-    /// `+` marker at or before it, since a `+` sets the rhythm until the next
-    /// one. Gives the analyst the "which rhythm am I in right now" context the
-    /// review queue otherwise can't answer (C2). Verbatim annotator label.
-    private var prevailingRhythm: String? {
-        let start = viewport.startSample
-        let labelled = rhythmMarkers.filter { $0.note?.isEmpty == false }
-        return (labelled.last { $0.sampleIndex <= start } ?? labelled.first)?.note
+    /// Rhythm markers carrying a label — the population the "At viewport"
+    /// line searches. Computed HERE, not in `PrevailingRhythmLine`, so the
+    /// walk over the full annotation array happens per queue rebuild, not
+    /// per pan tick.
+    private var labelledRhythmMarkers: [Annotation] {
+        rhythmMarkers.filter { $0.note?.isEmpty == false }
     }
 
     private var rhythmContextBanner: some View {
@@ -752,22 +752,19 @@ struct FindingsPanel: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Rhythm context")
                     .font(.caption.weight(.semibold))
-                if let prevailing = prevailingRhythm {
-                    provenanceLine(
-                        label: "At viewport",
-                        detail: prevailing,
-                        source: "prevailing `.atr` rhythm marker at the current view"
-                    )
-                }
+                PrevailingRhythmLine(
+                    viewport: viewport,
+                    labelledMarkers: labelledRhythmMarkers
+                )
                 if !atrRhythmTokens.isEmpty {
-                    provenanceLine(
+                    Self.provenanceLine(
                         label: "Rhythms",
                         detail: atrRhythmTokens.joined(separator: " · "),
                         source: "from `.atr` rhythm markers"
                     )
                 }
                 if !headerContextLines.isEmpty {
-                    provenanceLine(
+                    Self.provenanceLine(
                         label: "Clinical notes",
                         detail: headerContextLines.joined(separator: " · "),
                         source: "from `.hea` header — analyst-editable in Notes"
@@ -784,7 +781,7 @@ struct FindingsPanel: View {
         .accessibilityIdentifier("rhythm-context-banner")
     }
 
-    private func provenanceLine(label: String, detail: String, source: String) -> some View {
+    fileprivate static func provenanceLine(label: String, detail: String, source: String) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(label)
@@ -804,17 +801,19 @@ struct FindingsPanel: View {
     // MARK: - Queue list
 
     private var filtered: [Annotation] {
-        annotations
-            .filter(filter.matches)
-            .filter { annotation in
-                // Normals are never a review task (X34) — they collapse into
-                // their own row and must not vanish when the analyst looks at
-                // "Confirmed", which would make that row's count contradict
-                // the queue around it.
-                if isNormalCategory(annotation.category) { return true }
-                if recentlyActed.contains(annotation.id) { return true }
-                return dispositionFilter.admits(dispositionStore.state(for: annotation.id))
-            }
+        ComputeSignpost.measure("FindingsFilter", workSize: { annotations.count }) {
+            annotations
+                .filter(filter.matches)
+                .filter { annotation in
+                    // Normals are never a review task (X34) — they collapse
+                    // into their own row and must not vanish when the analyst
+                    // looks at "Confirmed", which would make that row's count
+                    // contradict the queue around it.
+                    if isNormalCategory(annotation.category) { return true }
+                    if recentlyActed.contains(annotation.id) { return true }
+                    return dispositionFilter.admits(dispositionStore.state(for: annotation.id))
+                }
+        }
     }
 
     @ViewBuilder
@@ -1305,6 +1304,12 @@ struct FindingsPanel: View {
     /// `.departure` sort, or by the requested mode otherwise. Normal-
     /// beat annotations are pulled out into `collapsedNormals` first.
     private var deviationRankedGroups: [FindingGroup] {
+        ComputeSignpost.measure("FindingsGrouping", workSize: { annotations.count }) {
+            buildDeviationRankedGroups()
+        }
+    }
+
+    private func buildDeviationRankedGroups() -> [FindingGroup] {
         var buckets: [String: [FindingEntry]] = [:]
         for ann in filtered where !isNormalCategory(ann.category) {
             let departure = departureScore(for: ann)
@@ -2284,4 +2289,80 @@ private struct FindingEntry {
 private struct CollapsedNormalsSummary {
     let count: Int
     let entries: [Annotation]
+}
+
+// MARK: - Equatable (pan-tick skip)
+
+/// `.equatable()`-skips the queue when `BedsideView.body` re-runs for
+/// reasons unrelated to the queue — the dominant case being pan/zoom of the
+/// ECG viewport, which re-evaluates the bedside body on every tick and
+/// re-creates this struct with fresh closure identities. Without this
+/// conformance SwiftUI cannot prove the panel unchanged, so the whole queue
+/// (LazyVStack, group derivation, the full-array walks) rebuilt per tick —
+/// measured at 40% of all main-thread samples during a scroll burst on a
+/// 100k-annotation record (#17).
+///
+/// Same contract as `IntervalTrendLaneMemoizedStrip`:
+/// - Closures are excluded — rebuilt every parent pass, but they capture the
+///   same owner hooks, so skipping body on closure identity alone is safe.
+/// - The `filter` binding is excluded — both sides read the same live
+///   storage at compare time (the comparison is vacuous), and a body read
+///   of a binding registers its own dependency on that storage.
+/// - Stores are compared by identity — they are `@Observable` classes, so
+///   body reads of their properties register their own dependencies and a
+///   disposition change invalidates the panel without the parent's help.
+/// - `annotations`/`candidates` use full `==`, which is O(1) on the hot
+///   path: the arrays keep their storage identity between derivation
+///   rebuilds, and `Array.==` short-circuits on identical buffers.
+extension FindingsPanel: Equatable {
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.annotations == rhs.annotations
+            && lhs.viewport === rhs.viewport
+            && lhs.sampleRate == rhs.sampleRate
+            && lhs.headerComments == rhs.headerComments
+            && lhs.dispositionStore === rhs.dispositionStore
+            && lhs.isEditing == rhs.isEditing
+            && lhs.lockZoom == rhs.lockZoom
+            && lhs.candidates == rhs.candidates
+            && lhs.candidateDispositionStore === rhs.candidateDispositionStore
+            && lhs.regulatoryNotice == rhs.regulatoryNotice
+            && lhs.parametersCaption == rhs.parametersCaption
+            && lhs.candidateProvenance == rhs.candidateProvenance
+            && lhs.arrhythmiaCandidates == rhs.arrhythmiaCandidates
+            && lhs.arrhythmiaDispositionStore === rhs.arrhythmiaDispositionStore
+            && lhs.arrhythmiaParametersCaption == rhs.arrhythmiaParametersCaption
+            && lhs.arrhythmiaRegulatoryNotice == rhs.arrhythmiaRegulatoryNotice
+            && lhs.arrhythmiaPreflightWindows == rhs.arrhythmiaPreflightWindows
+    }
+}
+
+/// The one line of the rhythm banner that depends on the live viewport.
+///
+/// A leaf view ON PURPOSE: `RecordingViewport` is `@Observable` and its start
+/// moves on every pan tick. When `FindingsPanel.body` read `startSample`
+/// directly, the whole queue — LazyVStack, group derivation, the full-array
+/// annotation walks — rebuilt on every tick (measured at a third of all
+/// main-thread samples while scrolling a long record). Reading it here scopes
+/// that invalidation to this one line, whose recompute is a scan over the
+/// handful of labelled rhythm markers.
+///
+/// The prevailing rhythm is the last `+` marker at or before the viewport
+/// start, since a `+` sets the rhythm until the next one — the "which rhythm
+/// am I in right now" context the review queue otherwise can't answer (C2).
+/// Verbatim annotator label.
+private struct PrevailingRhythmLine: View {
+    let viewport: RecordingViewport
+    let labelledMarkers: [Annotation]
+
+    var body: some View {
+        let start = viewport.startSample
+        if let prevailing = (labelledMarkers.last { $0.sampleIndex <= start }
+                                ?? labelledMarkers.first)?.note {
+            FindingsPanel.provenanceLine(
+                label: "At viewport",
+                detail: prevailing,
+                source: "prevailing `.atr` rhythm marker at the current view"
+            )
+        }
+    }
 }
