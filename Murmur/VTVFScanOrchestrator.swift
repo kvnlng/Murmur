@@ -103,6 +103,10 @@ struct VTVFScanOrchestrator: View {
 
         // Load the model once, the first time the IAP is owned.
         guard owned, model == nil, modelLoadError == nil else { return }
+        // Core ML model compile is a real cold-start cost the header calls
+        // out; measure it like any other component.
+        let signpost = ComputeSignpost.begin("VTVFModelLoad")
+        defer { ComputeSignpost.end(signpost) }
         do {
             let loaded = try await Task.detached(priority: .userInitiated) {
                 try VTVFModel()

@@ -62,6 +62,8 @@ struct QualifyingWindowOrchestrator: View {
             await MainActor.run { QualifyingWindowContext.shared.clear() }
             return
         }
+        let signpost = ComputeSignpost.begin("QualifyingWindow")
+        defer { ComputeSignpost.end(signpost, workSize: beats.count) }
         let tolerance = QualifyingWindowComputer.defaultStabilityToleranceBpm
 
         // RR series straight off the delineated beats — the same series the

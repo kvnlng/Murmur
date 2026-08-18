@@ -87,6 +87,10 @@ struct ArrhythmiaScanOrchestrator: View {
             await MainActor.run { scanContext.clearCandidates() }
             return
         }
+        let signpost = ComputeSignpost.begin("ArrhythmiaScan")
+        defer {
+            ComputeSignpost.end(signpost, workSize: leads.reduce(0) { $0 + $1.count })
+        }
         let sampleRate = ecgChannel.sampleRate
 
         // Drop the previous candidates BEFORE the compute — on a long record
