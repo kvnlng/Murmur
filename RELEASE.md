@@ -25,14 +25,20 @@ exercised on a real machine before paying users see it.
 
 ## Archive + TestFlight upload
 
-**Preferred (once Xcode Cloud is wired — see XCODE_CLOUD.md):**
+**Preferred — Xcode Cloud (see XCODE_CLOUD.md):**
 
-1. Bump version numbers
-2. `git tag v1.X && git push --tags`
-3. Xcode Cloud runs tests, archives, and ships the build to TestFlight
-   automatically. You get an email when it's ready (~10–15 min).
+1. Bump version numbers (still manual), merge to `main`.
+2. `git tag v1.X && git push --tags` — the tag records which commit
+   ships. It does not trigger anything.
+3. **Start the archive yourself** — `scripts/xcode-cloud.rb start main
+   "Release Build"`, or App Store Connect → Xcode Cloud → **Release
+   Build** → Start Build. Nothing starts on its own: pushing, tagging,
+   and merging all start nothing (both workflows are manual-start;
+   XCODE_CLOUD.md documents this against the actual workflow configs).
+   Wait for the archive email (~10–15 min). Step 3 is a step, not a
+   consequence of step 2.
 
-**Manual fallback (current default until Xcode Cloud is set up):**
+**Local archive (fallback when Cloud is unavailable):**
 
 1. **Destination**: top of the Xcode window, change destination to
    **Any Mac (Apple Silicon, Intel)**. Not "My Mac" — that builds a
