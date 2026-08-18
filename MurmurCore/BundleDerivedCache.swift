@@ -31,8 +31,19 @@
 //
 
 import Foundation
+import OSLog
 
 public enum BundleDerivedCache {
+
+    /// Same persisted category as the compute signposts, so one log read
+    /// tells the whole story: which components hit, which missed and WHY,
+    /// and what the blob decode cost. Exists because the first field read
+    /// of the cache required filesystem archaeology (blob mtimes) to prove
+    /// the hits happened — the durations alone were dominated by
+    /// main-actor wait and looked like misses.
+    private static let log = Logger(
+        subsystem: "com.kevinlong.murmur", category: "compute"
+    )
 
     static let cacheSubdirectory = "cache"
 
@@ -54,13 +65,28 @@ public enum BundleDerivedCache {
         parametersKey: String,
         from bundleDirectory: URL
     ) -> T? {
+        let started = DispatchTime.now().uptimeNanoseconds
         let url = blobURL(producer: producer, in: bundleDirectory)
-        guard let blob = try? Data(contentsOf: url) else { return nil }
+        guard let blob = try? Data(contentsOf: url) else {
+            log.notice("Cache MISS (no blob) — \(producer, privacy: .public)")
+            return nil
+        }
         let stamp = CacheStamp(
             producer: producer, version: appVersionStamp, parametersKey: parametersKey
         )
-        guard let payload = MurSessionCache.decode(blob, expected: stamp) else { return nil }
-        return try? JSONDecoder().decode(T.self, from: payload)
+        guard let payload = MurSessionCache.decode(blob, expected: stamp) else {
+            // The stored stamp is inside the blob; naming both sides makes a
+            // version or parameter drift diagnosable from the log alone.
+            log.notice("Cache MISS (stamp) — \(producer, privacy: .public) expected \(appVersionStamp, privacy: .public) / \(parametersKey, privacy: .public)")
+            return nil
+        }
+        guard let value = try? JSONDecoder().decode(T.self, from: payload) else {
+            log.error("Cache MISS (payload decode) — \(producer, privacy: .public), \(payload.count, privacy: .public) bytes")
+            return nil
+        }
+        let ms = (DispatchTime.now().uptimeNanoseconds &- started) / 1_000_000
+        log.notice("Cache HIT — \(producer, privacy: .public) in \(ms, privacy: .public) ms (\(blob.count, privacy: .public) bytes)")
+        return value
     }
 
     /// Persist a producer's payload into a bundle. Failures are silent — a
