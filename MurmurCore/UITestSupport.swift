@@ -164,13 +164,23 @@ enum UITestSupport {
             .filter { !$0.isEmpty }
     }
 
-    /// True when the process was launched with ANY `--ui-test-*` argument —
-    /// i.e. it's an XCUI run, not a normal DEBUG launch from Xcode. Used to
-    /// suppress display-size-dependent open-state behaviour (X50's Standard-View
-    /// snap) that would otherwise make every bare-`--ui-test-sample` test's
-    /// initial viewport width vary by the runner's physical screen.
+    /// True when the process is an XCUI run, not a normal DEBUG launch from
+    /// Xcode. Used to suppress display-size-dependent open-state behaviour
+    /// (X50's Standard-View snap) and the first-run RUO sheet.
+    ///
+    /// Two signals, either sufficient:
+    ///  - any `--ui-test-*` argument (the original heuristic), and
+    ///  - the `XCODE_TEST_PLAN_NAME` environment the test runner injects
+    ///    into every app it launches (probed empirically — macOS injects no
+    ///    `XCTestSessionIdentifier` here), which covers a BARE
+    ///    `app.launch()`. A normal Cmd-R run has no test plan.
+    ///    Build 149's fresh container proved the gap: a launch-shell test
+    ///    with no arguments met the first-run RUO sheet, which swallowed its
+    ///    clicks. Locally the sheet never presents (the acknowledgement is
+    ///    persisted), so only a fresh VM could surface it.
     static var isRunningUITest: Bool {
         ProcessInfo.processInfo.arguments.contains { $0.hasPrefix("--ui-test") }
+            || ProcessInfo.processInfo.environment["XCODE_TEST_PLAN_NAME"] != nil
     }
 
     /// If `--ui-test-inject-qtc-lane=<qtcMs>` is set, returns the QTc value (ms)

@@ -163,9 +163,11 @@ public enum WindowSizing {
     }
 
     /// Applies the X100 window policy (a CONTENT size) to the main window on
-    /// EVERY DEBUG XCUI launch. Called from ContentView's launch task; a
-    /// no-op outside XCUI runs, so bare production-path launch tests (no
-    /// `--ui-test*` argument at all) keep the untouched launch experience.
+    /// EVERY DEBUG XCUI launch — including a bare `app.launch()` with no
+    /// `--ui-test*` argument, which `isRunningUITest` recognizes by the
+    /// `XCODE_TEST_PLAN_NAME` environment since Build 149's RUO-sheet fix.
+    /// Called from ContentView's launch task; a no-op outside XCUI runs, so
+    /// a normal Cmd-R DEBUG launch keeps the untouched launch experience.
     ///
     /// Two timing realities this must survive: the `.task` can fire before
     /// the NSWindow exists, and SwiftUI applies its own sizing after first
