@@ -54,6 +54,7 @@ struct LaunchShellView: View {
                     idleStage
                     Divider()
                     VStack(alignment: .leading, spacing: 12) {
+                        idleContextBar
                         idleContext
                     }
                     .padding(16)
@@ -61,6 +62,18 @@ struct LaunchShellView: View {
                 }
             }
             .frame(minHeight: 0)
+            // #305 / X83: the whole-record summary reads ABOVE the monitor —
+            // the same top inset, the same strip, the same height cap as the
+            // bedside's focus layout. With no recording the shared context is
+            // clear, so the strip renders its unmeasured card: the launch
+            // card IS the loaded card, values withheld.
+            .safeAreaInset(edge: .top, spacing: 0) {
+                VariabilityMetricsStrip()
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(.background)
+                    .modifier(MetricsStripInsetHeight())
+            }
             Divider()
             idleInfoBar
         }
@@ -273,6 +286,28 @@ struct LaunchShellView: View {
         .accessibilityIdentifier("calibration-controls")
     }
 
+    /// #305 — the collapsed Context bar, idle: the loaded bar's anatomy
+    /// (chevron, title, detail line) with the one honest thing it can say
+    /// before a record supplies notes.md and the `.hea` comments. Disabled —
+    /// there is no drawer to open yet — but present, so loading a record
+    /// changes the detail text, never mounts a bar.
+    private var idleContextBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "chevron.right")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text("Context")
+                .font(.caption.weight(.semibold))
+            Text("no record — notes.md loads with the record")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Context. No record — notes.md loads with the record")
+        .accessibilityIdentifier("context-bar")
+    }
+
     /// #285 / 12a — "The trend stack renders all five lane rows with their
     /// accent rails, label columns, y-axis ticks and gridlines; plots are
     /// empty and values are em-dashes. The context region scrolls exactly as
@@ -293,52 +328,61 @@ struct LaunchShellView: View {
     /// static parts of the loaded lanes' provenance and em-dash the numbers
     /// a record would supply — inventing provenance for data that does not
     /// exist yet is the one trade DECISIONS forbids.
-    private static let idleLanes: [TrendStackLane] = [
+    ///
+    /// #305: the y-axes draw each lane's DEFAULT scale (the design's values)
+    /// rather than em-dashes — axes are furniture, and the decided reading
+    /// of 12a is that only VALUES are blank. The quality lane keeps its
+    /// em-dashes: a 26 pt row has no room for a scale.
+    ///
+    /// Internal (not private) so the snapshot suite can render the idle
+    /// stack directly — the gutter is deliberately hidden from
+    /// accessibility, so the scales can only be pinned visually.
+    static let idleLanes: [TrendStackLane] = [
         TrendStackLane(
             id: BedsideTrendStack.hrLaneID,
             title: "Trends · HR",
             subtitle: "bpm · trend channel only",
             height: 86,
             accent: TrendStackLane.hrAccent
-        ) { idlePlot() },
+        ) { idlePlot(ticks: ["160", "100", "40"]) },
         TrendStackLane(
             id: "rmssd",
             title: "RMSSD",
             subtitle: "ms · rolling window",
             height: 86,
             accent: TrendStackLane.variabilityAccent
-        ) { idlePlot() },
+        ) { idlePlot(ticks: ["750", "375", "0"]) },
         TrendStackLane(
             id: "interval-trend",
             title: "Interval trend",
             subtitle: "— · — min bins",
             height: 86,
             accent: TrendStackLane.intervalAccent
-        ) { idlePlot() },
+        ) { idlePlot(ticks: ["500", "400", "300"]) },
         TrendStackLane(
             id: BedsideTrendStack.lfhfLaneID,
             title: "LF / HF",
             subtitle: "rolling 5 min",
             height: 86,
             accent: TrendStackLane.lfhfAccent
-        ) { idlePlot() },
+        ) { idlePlot(ticks: ["5.0", "2.5", "0"]) },
         TrendStackLane(
             id: BedsideTrendStack.qualityLaneID,
             title: "Quality",
             subtitle: "artifact ratio · outline over 10%",
             height: 26,
             accent: TrendStackLane.qualityAccent
-        ) { idlePlot() },
+        ) { idlePlot(ticks: ["—", "—", "—"]) },
     ]
 
     /// An empty plot cell that still draws the scale furniture 12a asks
-    /// for: em-dash ticks in the shared y-gutter, faint gridlines at the
-    /// same fractions. The gridline style matches `trendLaneYAxis()`'s
+    /// for: ticks in the shared y-gutter (top to bottom), faint gridlines at
+    /// the same fractions. The gridline style matches `trendLaneYAxis()`'s
     /// `AxisGridLine`, so idle and loaded lanes share one visual grammar.
-    private static func idlePlot() -> some View {
-        let fractions: [Double] = [0.15, 0.5, 0.85]
+    private static func idlePlot(ticks labels: [String]) -> some View {
+        let fractions: [Double] = [0.85, 0.5, 0.15]
         return HStack(spacing: 0) {
-            TrendLaneScaleGutter(ticks: fractions.map { ($0, "—") })
+            TrendLaneScaleGutter(ticks: Array(zip(fractions, labels)))
             Canvas { context, size in
                 for fraction in fractions {
                     let y = (1 - fraction) * size.height
@@ -373,7 +417,14 @@ struct LaunchShellView: View {
                 Text(importSummary)
                 Spacer(minLength: 12)
             }
+            // #305 — the full trailing cluster, em-dashed. The loaded bar
+            // omits a reading it does not have; the launch bar shows every
+            // slot blank, because at launch absence IS the value and the
+            // frame these slots occupy must not appear on load.
             Text("window —")
+            Text("zoom tier —")
+            Text("LOD —")
+            Text("notes —")
         }
         .font(.caption2)
         .monospacedDigit()
@@ -392,8 +443,8 @@ struct LaunchShellView: View {
         // The explicit label must carry the strip too — `.ignore` means
         // nothing else will speak it.
         .accessibilityLabel(importProgress.summary
-            .map { "— · — leads · — Hz · — · importing \($0) · window —" }
-            ?? "— · — leads · — Hz · — · window —")
+            .map { "— · — leads · — Hz · — · importing \($0) · window — · zoom tier — · LOD — · notes —" }
+            ?? "— · — leads · — Hz · — · window — · zoom tier — · LOD — · notes —")
         .accessibilityIdentifier("info-bar")
     }
 

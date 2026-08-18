@@ -266,6 +266,25 @@ final class SnapshotTests: XCTestCase {
         assertSnapshot(of: render(view, size: CGSize(width: 552, height: 120)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
     }
 
+    /// #305 / 12a — the launch shell's idle trend stack: all five lane rows
+    /// with numeric DEFAULT scales in the y-gutters (HR 160/100/40, RMSSD
+    /// 750/375/0, Interval 500/400/300, LF/HF 5.0/2.5/0; quality keeps
+    /// em-dashes) and em-dash values. Pinned as a snapshot because the
+    /// gutter is deliberately `.accessibilityHidden` — the XCUI launch suite
+    /// cannot see axis furniture, so this image is the scales' only guard.
+    @MainActor
+    func testLaunchIdleTrendStack() {
+        let view = TrendStack(
+            lanes: LaunchShellView.idleLanes,
+            recordingRange: 0...0,
+            viewportRange: 0...0
+        )
+        .frame(width: 700)
+        .padding()
+        .background(Color.white)
+        assertSnapshot(of: render(view, size: CGSize(width: 740, height: 480)), as: .image(precision: 0.98, perceptualPrecision: 0.96))
+    }
+
     func testTrendStack_withLegendRowAndGridlines() {
         // Phase 3 of #261: the HR Canvas lane draws gridlines at its
         // tick fractions (matching the Charts lanes' AxisGridLine ink),
