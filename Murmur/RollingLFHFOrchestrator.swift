@@ -85,7 +85,11 @@ struct RollingLFHFOrchestrator: View {
             lfhfContext.clear()
             return
         }
+        var measuredBeatCount = 0
+        let signpost = ComputeSignpost.begin("RollingLFHF")
+        defer { ComputeSignpost.end(signpost, workSize: measuredBeatCount) }
         let beats = recording.normalBeatSampleIndices()
+        measuredBeatCount = beats.count
         guard let series = ECGMetricsExtractor.rrSeries(
             fromBeatSampleIndices: beats,
             sampleRate: sampleRate

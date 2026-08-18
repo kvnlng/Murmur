@@ -32,6 +32,8 @@ struct VariabilityMetricsOrchestrator: View {
     @State private var scopeContext = MetricsScopeContext.shared
     @State private var store = PurchaseStore.shared
 
+    @State private var reportCache: ReportCache?
+
     /// Recompute key. Beat count stands in for "the fiducial store changed" —
     /// the QTVI half reads `markingsContext.beats`, which arrives
     /// asynchronously after delineation finishes.
@@ -82,12 +84,11 @@ struct VariabilityMetricsOrchestrator: View {
                     try? await Task.sleep(nanoseconds: Self.scopeDebounceNS)
                     if Task.isCancelled { return }
                 }
-                recompute(range: range)
+                await recompute(range: range)
             }
     }
 
-    @MainActor
-    private func recompute(range: Range<Int64>?) {
+    private func recompute(range: Range<Int64>?) async {
         guard let recording = recordingContext.recording else {
             metricsContext.clear()
             return
@@ -100,41 +101,108 @@ struct VariabilityMetricsOrchestrator: View {
             metricsContext.setLocked()
             return
         }
+        // The beat walk, range filter, RR series, full HRV report, and QTVI
+        // segmentation run in `Task.detached` — they measured 4.8 s of blocked
+        // main thread on a 25-hour nsrdb record (100k beats). Main-actor state
+        // is gathered here, before detaching; only the publish hops back.
+        // `defer` so the insufficient-beats and no-series returns are
+        // measured too.
+        var measuredBeatCount = 0
+        let signpost = ComputeSignpost.begin("VariabilityMetrics")
+        defer { ComputeSignpost.end(signpost, workSize: measuredBeatCount) }
+        let sampleRate = recording.channels.first?.sampleRate
+        let markingsBeats = markingsContext.beats
+        let markingsSampleRate = markingsContext.sampleRate
+        let cached = reportCache.flatMap {
+            $0.matches(recordingID: recording.id, range: range) ? $0 : nil
+        }
+        let outcome = await Task.detached(priority: .userInitiated) {
+            Self.computeOutcome(
+                recording: recording,
+                range: range,
+                sampleRate: sampleRate,
+                markings: (beats: markingsBeats, sampleRate: markingsSampleRate),
+                cached: cached
+            )
+        }.value
+
+        // A recording swap cancels this .task but not the detached compute —
+        // never publish a stale record's summary over the new one's (the
+        // Morphology precedent).
+        switch outcome {
+        case .empty(let beatCount):
+            measuredBeatCount = beatCount
+            guard !Task.isCancelled else { return }
+            // Too few beats to measure. On the WHOLE record that is silence —
+            // the pre-X73 behaviour, and nothing the analyst can dial changes
+            // it. But a SCOPED range (window / hour) that comes up short must
+            // keep the strip mounted (X95): unmounting takes the scope picker
+            // with it, so "zoom to 10 s in Window scope" read as the whole
+            // pane vanishing, with no way back except zooming out.
+            if range != nil {
+                metricsContext.setInsufficient(scope: scopeContext.scope, beatCount: beatCount)
+            } else {
+                metricsContext.clear()
+            }
+        case .computed(let report, let qtvi, let beatCount):
+            measuredBeatCount = beatCount
+            guard !Task.isCancelled else { return }
+            reportCache = ReportCache(
+                recordingID: recording.id,
+                rangeStart: range?.lowerBound,
+                rangeEnd: range?.upperBound,
+                report: report,
+                beatCount: beatCount
+            )
+            metricsContext.set(summary: Self.summary(
+                report: report,
+                qtvi: qtvi,
+                recordName: recording.device,
+                scope: scopeContext.scope
+            ))
+        }
+    }
+
+    /// The full chain, pure over its inputs — `nonisolated static` so the
+    /// detached task can run it without touching the View's
+    /// main-actor-inferred members.
+    private nonisolated static func computeOutcome(
+        recording: Recording,
+        range: Range<Int64>?,
+        sampleRate: Double?,
+        markings: (beats: [MarkingsBeat], sampleRate: Double),
+        cached: ReportCache?
+    ) -> Outcome {
+        // Cache hit: this re-key came from the markings side (delineation
+        // finished, or endorsements changed the fiducial store) — only
+        // the QTVI half can have changed. Skip the beat walk and report.
+        if let cached {
+            // Sub-measured: the Release run of 2026-08-18 logged 6.6 s for
+            // this supposedly-QTVI-only path, which is out of proportion to
+            // the work. This signpost splits the question — if
+            // VariabilityQTVI ≈ the parent interval, QTVI itself is the
+            // cost; if it is small, the cache missed and the full path ran.
+            let qtvi = ComputeSignpost.measure("VariabilityQTVI", workSize: { markings.beats.count }) {
+                qtviSummary(beats: markings.beats, sampleRate: markings.sampleRate)
+            }
+            return .computed(report: cached.report, qtvi: qtvi, beatCount: cached.beatCount)
+        }
         var beats = recording.normalBeatSampleIndices()
         if let range {
             beats = beats.filter { range.contains($0) }
         }
-        // Too few beats to measure. On the WHOLE record that is silence — the
-        // pre-X73 behaviour, and nothing the analyst can dial changes it. But
-        // a SCOPED range (window / hour) that comes up short must keep the
-        // strip mounted (X95): unmounting takes the scope picker with it, so
-        // "zoom to 10 s in Window scope" read as the whole pane vanishing,
-        // with no way back except zooming out.
-        func publishEmpty() {
-            if range != nil {
-                metricsContext.setInsufficient(scope: scopeContext.scope, beatCount: beats.count)
-            } else {
-                metricsContext.clear()
-            }
-        }
-        guard let sampleRate = recording.channels.first?.sampleRate,
+        guard let sampleRate,
               let series = ECGMetricsExtractor.rrSeries(
                   fromBeatSampleIndices: beats,
                   sampleRate: sampleRate
-              ) else {
-            publishEmpty()
-            return
+              ),
+              let report = ECGMetricsService.compute(from: series) else {
+            return .empty(beatCount: beats.count)
         }
-        guard let report = ECGMetricsService.compute(from: series) else {
-            publishEmpty()
-            return
+        let qtvi = ComputeSignpost.measure("VariabilityQTVI", workSize: { markings.beats.count }) {
+            qtviSummary(beats: markings.beats, sampleRate: markings.sampleRate)
         }
-        metricsContext.set(summary: Self.summary(
-            report: report,
-            qtvi: qtviSummary(),
-            recordName: recording.device,
-            scope: scopeContext.scope
-        ))
+        return .computed(report: report, qtvi: qtvi, beatCount: beats.count)
     }
 
     // MARK: - Summary assembly
@@ -308,14 +376,6 @@ struct VariabilityMetricsOrchestrator: View {
 
     // MARK: - QT Variability Index (X47)
 
-    private struct QTVISummary {
-        let medianQTVI: Double
-        let medianSDQTMs: Double
-        let medianSDNNMs: Double
-        let medianMeanNNMs: Double
-        let segmentCount: Int
-    }
-
     /// QTVI over qualifying 5-min segments of the delineated beats. A segment
     /// qualifies when it is artifact-free (no excluded RR) AND its rate is
     /// stable within Malik 2008's ±2 bpm — the spec's "stable rate, no ectopic
@@ -329,9 +389,13 @@ struct VariabilityMetricsOrchestrator: View {
     /// within a few beats, so it qualified 0 of 4,620 segments across the whole
     /// normal-sinus database. Two copies of one rule is how they diverged —
     /// there is now one.
-    private func qtviSummary() -> QTVISummary? {
-        let beats = markingsContext.beats
-        let sampleRate = markingsContext.sampleRate
+    /// Pure over its inputs — `nonisolated static` so the detached compute
+    /// can call it; the context reads happen on the main actor before
+    /// detaching.
+    private nonisolated static func qtviSummary(
+        beats: [MarkingsBeat],
+        sampleRate: Double
+    ) -> QTVISummary? {
         guard sampleRate > 0, beats.count > 1 else { return nil }
         let segmentSeconds = QTVarianceComputer.minSegmentSeconds
 
@@ -363,10 +427,53 @@ struct VariabilityMetricsOrchestrator: View {
         )
     }
 
-    private static func median(_ values: [Double]) -> Double {
+    private nonisolated static func median(_ values: [Double]) -> Double {
         guard !values.isEmpty else { return 0 }
         let sorted = values.sorted()
         let mid = sorted.count / 2
         return sorted.count.isMultiple(of: 2) ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
     }
+}
+
+// MARK: - Compute plumbing (file scope, off the View type)
+
+/// What the detached compute resolves to. `beatCount` rides along on every
+/// case so the insufficient-beats publish and the signpost can report it.
+private enum Outcome: Sendable {
+    case empty(beatCount: Int)
+    case computed(report: ECGMetricsReport, qtvi: QTVISummary?, beatCount: Int)
+}
+
+/// The HRV report keyed by what it actually depends on. The recompute Key
+/// deliberately includes `markingsContext.beats.count` so the QTVI half
+/// refreshes when delineation lands — but the report half depends only on
+/// (recording, range), so a markings-only re-key was paying the full beat
+/// walk + HRV compute twice per record open (measured: 4.8 s then 3.5 s over
+/// the same 100,216 beats on nsrdb 16265). On a hit, only QTVI recomputes.
+///
+/// Sound under analyst edits: the report reads `normalBeatSampleIndices`,
+/// which filters to `wfdb.atr`-sourced annotations — the immutable source
+/// set. Authoring lands under a different source, so a same-id republish via
+/// `onRecordingMutated` cannot change the report's inputs; a re-import
+/// assigns a fresh recording id and misses the cache.
+private struct ReportCache {
+    let recordingID: UUID
+    let rangeStart: Int64?
+    let rangeEnd: Int64?
+    let report: ECGMetricsReport
+    let beatCount: Int
+
+    func matches(recordingID: UUID, range: Range<Int64>?) -> Bool {
+        self.recordingID == recordingID
+            && rangeStart == range?.lowerBound
+            && rangeEnd == range?.upperBound
+    }
+}
+
+private struct QTVISummary: Sendable {
+    let medianQTVI: Double
+    let medianSDQTMs: Double
+    let medianSDNNMs: Double
+    let medianMeanNNMs: Double
+    let segmentCount: Int
 }

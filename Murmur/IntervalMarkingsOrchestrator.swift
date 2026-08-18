@@ -79,7 +79,11 @@ struct IntervalMarkingsOrchestrator: View {
             await MainActor.run { markingsContext.clear() }
             return
         }
+        var measuredBeatCount = 0
+        let signpost = ComputeSignpost.begin("IntervalMarkings")
+        defer { ComputeSignpost.end(signpost, workSize: measuredBeatCount) }
         let beatSampleIndices = recording.normalBeatSampleIndices()
+        measuredBeatCount = beatSampleIndices.count
         // X108 (cardiologist review §1.1): QT is measured on the CONVENTIONAL
         // leads when the recording carries any — II, then V5, per-beat median
         // across them when both exist. Before X108 the lead was whatever

@@ -49,7 +49,11 @@ struct MorphologyOrchestrator: View {
             await MainActor.run { morphologyContext.clear() }
             return
         }
+        var measuredBeatCount = 0
+        let signpost = ComputeSignpost.begin("Morphology")
+        defer { ComputeSignpost.end(signpost, workSize: measuredBeatCount) }
         let beats = recording.annotatedBeats()
+        measuredBeatCount = beats.count
         // Same lead-selection order as the markings pipeline: conventional
         // QT lead when present, first channel otherwise.
         let conventional = recording.conventionalQTLeads(inDirectory: directory)
