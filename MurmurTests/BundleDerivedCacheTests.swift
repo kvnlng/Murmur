@@ -135,3 +135,87 @@ struct DerivedCacheBlobPayloadTests {
         #expect(SessionSaveSet.derivedCacheBlobs(in: dir).isEmpty)
     }
 }
+
+@Suite("BundleDerivedCache — payload compression")
+struct BundleDerivedCacheCompressionTests {
+    private struct Payload: Codable, Equatable {
+        let values: [Double]
+        let caption: String
+    }
+
+    private func makeBundleDir() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("derived-cache-zip-test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    @Test("A legacy raw-JSON blob (no compression prefix) still loads")
+    func legacyRawBlobLoads() throws {
+        // Forge a blob the way builds before compression wrote them: stamp +
+        // raw JSON payload, no magic prefix. Blobs restored out of .mur saves
+        // written by those builds surface exactly this format, so it must
+        // stay a HIT, not a migration.
+        let dir = try makeBundleDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let payload = Payload(values: [3.5, 4.25], caption: "legacy")
+        let stamp = CacheStamp(
+            producer: "lfhf", version: BundleDerivedCache.appVersionStamp,
+            parametersKey: "w=300")
+        let blob = try MurSessionCache.encode(
+            stamp: stamp, payload: JSONEncoder().encode(payload))
+        let cacheDir = dir.appendingPathComponent("cache", isDirectory: true)
+        try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+        try blob.write(to: cacheDir.appendingPathComponent("lfhf.blob"))
+
+        let loaded = BundleDerivedCache.load(
+            Payload.self, producer: "lfhf", parametersKey: "w=300", from: dir)
+        #expect(loaded == payload)
+    }
+
+    @Test("A markings-scale payload round-trips and lands far smaller on disk")
+    func markingsScalePayloadShrinks() throws {
+        let dir = try makeBundleDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        // 100k synthetic beats shaped like the field payload that measured
+        // 47 MB: fiducials present, every interval populated — the highly
+        // repetitive JSON this change exists to shrink. Values vary per beat
+        // so the corpus is not trivially constant.
+        let beats = (0..<100_000).map { (i: Int) -> MarkingsBeat in
+            let r = Int64(i) * 180
+            return MarkingsBeat(
+                rPeakSampleIndex: r,
+                rPeakConfidence: 0.90 + Double(i % 10) / 100.0,
+                qrsOnset: MarkingsFiducial(kind: .qrsOnset, sampleIndex: r - 12, confidence: 0.9),
+                qrsOffset: MarkingsFiducial(kind: .qrsOffset, sampleIndex: r + 14, confidence: 0.9),
+                tOnset: MarkingsFiducial(kind: .tOnset, sampleIndex: r + 40, confidence: 0.8),
+                tOffset: MarkingsFiducial(kind: .tOffset, sampleIndex: r + 88, confidence: 0.8),
+                prMs: 150.0 + Double(i % 20),
+                qrsMs: 90.0 + Double(i % 12),
+                qtMs: 380.0 + Double(i % 40),
+                qtcMs: 400.0 + Double(i % 35),
+                precedingRRMs: 700.0 + Double(i % 90)
+            )
+        }
+        struct BeatsPayload: Codable, Equatable { let beats: [MarkingsBeat] }
+        let payload = BeatsPayload(beats: beats)
+
+        BundleDerivedCache.store(payload, producer: "interval-markings",
+                                 parametersKey: "bench", in: dir)
+        let loaded = BundleDerivedCache.load(
+            BeatsPayload.self, producer: "interval-markings",
+            parametersKey: "bench", from: dir)
+        #expect(loaded == payload)
+
+        let rawJSONBytes = try JSONEncoder().encode(payload).count
+        let blobURL = dir.appendingPathComponent("cache", isDirectory: true)
+            .appendingPathComponent("interval-markings.blob")
+        let blobBytes = try Data(contentsOf: blobURL).count
+        // LZFSE on this corpus measures well past this bound; 4x is the
+        // conservative floor the change must clear to be worth its seam.
+        let shrinkFloor = rawJSONBytes / 4
+        #expect(blobBytes < shrinkFloor)
+        print("markings-scale bench: raw JSON \(rawJSONBytes) bytes, blob on disk \(blobBytes) bytes")
+    }
+}
