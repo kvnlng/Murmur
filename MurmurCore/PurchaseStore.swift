@@ -183,7 +183,7 @@ public final class PurchaseStore {
     /// and non-main-actor callers can reach it without a hop.
     public nonisolated static func fallbackDisplayName(for id: ProductID) -> String {
         switch id {
-        case .studio: return "Murmur Studio"
+        case .studio: return "Murmur Pro"
         }
     }
 

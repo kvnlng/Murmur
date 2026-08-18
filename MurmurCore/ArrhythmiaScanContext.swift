@@ -129,7 +129,7 @@ public final class ArrhythmiaScanContext {
 
     /// Candidates from the most recent scan of the current recording,
     /// as range annotations, in time order. Empty when no recording is
-    /// loaded, Murmur Studio isn't owned, or the scan found nothing.
+    /// loaded, Murmur Pro isn't owned, or the scan found nothing.
     public private(set) var candidates: [Annotation] = []
 
     /// Human-readable summary of the operating points + per-recording

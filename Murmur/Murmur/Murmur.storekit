@@ -3,18 +3,18 @@
   "nonRenewingSubscriptions" : [],
   "products" : [
     {
-      "displayPrice" : "199.99",
+      "displayPrice" : "299.99",
       "familyShareable" : false,
       "internalID" : "MURMUR-STUDIO-0001",
       "localizations" : [
         {
           "description" : "Unlocks every research feature at once: on-device ECG metrics and trend lanes (HRV, RR-interval statistics, interval measurements), annotation authoring, and arrhythmia candidate detection. Research use only — the analyst adjudicates; the app proposes candidates, never verdicts. The free viewer's reading, disposition, and export stay free.",
-          "displayName" : "Murmur Studio",
+          "displayName" : "Murmur Pro",
           "locale" : "en_US"
         }
       ],
       "productID" : "com.kevinlong.murmur.studio",
-      "referenceName" : "Murmur Studio (all-inclusive)",
+      "referenceName" : "Murmur Pro (all-inclusive)",
       "type" : "NonConsumable"
     }
   ],

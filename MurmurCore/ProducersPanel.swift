@@ -79,7 +79,7 @@ struct ProducersPanel: View {
                     // retired, and told the analyst to "install" something —
                     // the paid frameworks ship inside the app and are gated by
                     // entitlement, so there was never anything to install.
-                    description: Text("Murmur Studio adds producers for annotation authoring, interval metrics, and rhythm candidate detection.")
+                    description: Text("Murmur Pro adds producers for annotation authoring, interval metrics, and rhythm candidate detection.")
                 )
                 .frame(maxWidth: .infinity)
             } else {

@@ -309,7 +309,7 @@ public struct VariabilityMetricsStrip: View {
             Image(systemName: "lock.fill")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
-            Text("Heart-rate and QT variability for this recording — Murmur Studio")
+            Text("Heart-rate and QT variability for this recording — Murmur Pro")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }

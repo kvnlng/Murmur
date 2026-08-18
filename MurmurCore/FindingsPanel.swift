@@ -583,12 +583,12 @@ struct FindingsPanel: View {
     /// Menu item title — names the purchase that unlocks `.departure` when
     /// the measurement layer can't back it, so the paid seam reads as
     /// what it is (a locked capability, not a mystery inert option).
-    /// Names "Murmur Studio", the actual product: the former "ECG Metrics"
+    /// Names "Murmur Pro", the actual product: the former "ECG Metrics"
     /// label pointed at a per-module IAP retired in the single-IAP pivot,
     /// so it sent the reader looking for something unbuyable.
     private func sortMenuTitle(_ mode: FindingSort) -> String {
         if mode == .departure && !departureSortAvailable {
-            return "\(mode.displayName) — Murmur Studio"
+            return "\(mode.displayName) — Murmur Pro"
         }
         return mode.displayName
     }
@@ -613,7 +613,7 @@ struct FindingsPanel: View {
                 Image(systemName: "lock.fill")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-                Text("Rank by departure from this patient's normal — Murmur Studio")
+                Text("Rank by departure from this patient's normal — Murmur Pro")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
