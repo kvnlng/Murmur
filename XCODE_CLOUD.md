@@ -99,19 +99,13 @@ isolate it — a change you suspect, or one you would rather not have
 
 ## Updating the release process
 
-After Xcode Cloud is wired up, the "Archive + TestFlight upload"
-section in `RELEASE.md` simplifies to:
-
-1. Bump version numbers (still manual)
-2. `git tag v1.1 && git push --tags`
-3. **Start the archive yourself** — `scripts/xcode-cloud.rb start main
-   "Release Build"`. The tag does not trigger it; `Release Build` has no
-   tag start condition. Wait for the archive email (~10–15 min).
-4. Smoke-test the build in the TestFlight app
-5. Promote in App Store Connect when ready
-
-No more Product → Archive → Organizer → Distribute clicks — but step 3
-is a step, not a consequence of step 2.
+Applied — `RELEASE.md`'s "Archive + TestFlight upload" section now
+carries this flow (tag for provenance, then start `Release Build` by
+hand) and is the single place the release steps live. Before the
+update, that section claimed the tag push itself made Xcode Cloud
+test, archive, and ship — a start condition neither workflow has
+ever had. If the two files disagree again, this one is checked
+against the actual workflow configs; trust it.
 
 ## Cost / quota notes
 
