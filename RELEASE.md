@@ -106,6 +106,53 @@ public review.
 - [ ] No console errors during normal use (check Console.app
       filtered to the process).
 
+## Testing the purchase experience
+
+The purchase FLOW is tested locally with Xcode's StoreKit test store,
+not on TestFlight. The reason is a trap that cost a debugging session:
+TestFlight builds run against the production **sandbox**, and a sandbox
+purchase of a non-consumable is **permanent for that Apple ID** — once
+bought, the IAP shows "Owned" in every TestFlight build forever, and
+there is no user-facing way to un-buy it. TestFlight can prove the
+product loads; it cannot exercise the buying experience twice.
+
+### Local flow (repeatable)
+
+Both shared schemes (`Murmur`, `Murmur Release Measure`) reference
+`Murmur/Murmur/Murmur.storekit`, so any Xcode run talks to the local
+test store instead of App Store Connect:
+
+1. Run the app from Xcode. The paywall shows the product from the
+   `.storekit` file — display name, description, and price come from
+   that file locally, from ASC in TestFlight, so keep the two aligned
+   when either changes.
+2. Buy. The purchase sheet is Xcode's test store — no Apple ID, no
+   charge. Entitled features unlock immediately.
+3. **Debug → StoreKit → Manage Transactions…** lists the test
+   purchase. Delete it to return to un-owned and test the flow again;
+   use the same window to test refunds and failed/interrupted
+   purchases (failure injection lives in the `.storekit` file's
+   settings).
+
+The test-store purchase persists per machine, which is deliberate:
+it is what keeps Release-configuration runs of `Murmur Release
+Measure` entitled without touching the sandbox. Deleting it in
+Manage Transactions de-entitles those runs until you buy again.
+
+### What TestFlight adds (once per Apple ID)
+
+The one thing local testing cannot prove is the real product: that
+`com.kevinlong.murmur.studio` loads from App Store Connect with the
+intended name and price, and that the purchase completes against the
+sandbox. Verify that ONCE, knowingly — after that first sandbox
+purchase the account shows "Owned" permanently, restore is the only
+remaining exercisable path, and that is expected, not a bug.
+
+- [ ] Paywall shows the ASC product (name and price as configured).
+- [ ] Purchase completes; entitled features unlock.
+- [ ] Quit, relaunch: entitlement persists.
+- [ ] Restore Purchases re-entitles after any state reset.
+
 ## Promoting to public App Store
 
 When the smoke test is clean:
