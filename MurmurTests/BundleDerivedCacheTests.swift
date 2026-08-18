@@ -93,3 +93,45 @@ struct BundleDerivedCacheTests {
             Payload.self, producer: "lfhf", parametersKey: "", from: dir) == nil)
     }
 }
+
+@Suite("Derived cache blobs travel with .mur saves")
+struct DerivedCacheBlobPayloadTests {
+
+    @Test("payloads() collects a bundle's cache blobs; reconstitution restores them")
+    @MainActor
+    func blobsRoundTripThroughPayloads() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("blob-payload-test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        struct Payload: Codable, Equatable { let x: Int }
+        BundleDerivedCache.store(Payload(x: 7), producer: "morphology", parametersKey: "", in: dir)
+
+        let blobs = SessionSaveSet.derivedCacheBlobs(in: dir)
+        #expect(blobs.count == 1)
+        #expect(blobs["morphology.blob"] != nil)
+
+        // The blob is verbatim — writing it into another bundle's cache dir
+        // (what package read does) must decode under the same stamp.
+        let restored = FileManager.default.temporaryDirectory
+            .appendingPathComponent("blob-payload-restored-\(UUID().uuidString)", isDirectory: true)
+        let restoredCache = restored.appendingPathComponent("cache", isDirectory: true)
+        try FileManager.default.createDirectory(at: restoredCache, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: restored) }
+        try blobs["morphology.blob"]!.write(to: restoredCache.appendingPathComponent("morphology.blob"))
+        let loaded = BundleDerivedCache.load(
+            Payload.self, producer: "morphology", parametersKey: "", from: restored)
+        #expect(loaded == Payload(x: 7))
+    }
+
+    @Test("A bundle without a cache dir contributes no blobs")
+    @MainActor
+    func absentCacheDirIsEmpty() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("blob-payload-empty-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        #expect(SessionSaveSet.derivedCacheBlobs(in: dir).isEmpty)
+    }
+}

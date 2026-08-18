@@ -198,7 +198,8 @@ public enum SessionSaveSet {
                     recording: openRecording,
                     recordingDirectory: openDirectory,
                     provenanceJSON: provenanceJSON,
-                    sessionJSON: sessionJSON
+                    sessionJSON: sessionJSON,
+                    cacheBlobs: derivedCacheBlobs(in: openDirectory)
                 ),
             ]
         }
@@ -208,8 +209,26 @@ public enum SessionSaveSet {
                 recording: record.recording,
                 recordingDirectory: record.directory,
                 provenanceJSON: isOpen ? provenanceJSON : nil,
-                sessionJSON: isOpen ? sessionJSON : carriedSessionJSONByID[record.id]
+                sessionJSON: isOpen ? sessionJSON : carriedSessionJSONByID[record.id],
+                cacheBlobs: derivedCacheBlobs(in: record.directory)
             )
         }
+    }
+
+    /// The bundle's derived-result cache blobs (BundleDerivedCache), carried
+    /// into the package verbatim — each is a MurSessionCache blob whose own
+    /// stamp is validated on use, so a reopen on a newer app simply
+    /// recomputes. Package read already restores these into the
+    /// reconstituted record's cache/ directory; this is the save-side half.
+    static func derivedCacheBlobs(in directory: URL) -> [String: Data] {
+        let cacheDir = directory.appendingPathComponent("cache", isDirectory: true)
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: cacheDir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+        ) else { return [:] }
+        return files
+            .filter { $0.pathExtension == "blob" }
+            .reduce(into: [:]) { blobs, url in
+                blobs[url.lastPathComponent] = try? Data(contentsOf: url)
+            }
     }
 }
