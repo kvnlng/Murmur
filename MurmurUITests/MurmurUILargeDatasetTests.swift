@@ -184,48 +184,37 @@ final class MurmurUILargeDatasetTests: XCTestCase {
         // measured block ran before any row existed (Build 146/147, all
         // retries). Wait once out here, so the clock metric still times
         // the jump and never the load.
-        XCTAssertTrue(app.buttons.matching(identifier: "finding-row-VF").firstMatch
-            .waitForExistence(timeout: 30),
-            "the findings list should populate before the jumps are timed")
-
-        // The queue groups by category and renders lazily. In this pinned
-        // regime the VF group's 30 rows alone overfill the ~419 pt viewport,
-        // and the VT group below them never enters the accessibility tree at
-        // all — not slowly, NEVER: Build 148 waited 30 s with all 60 findings
-        // loaded ("60 of 60") and no VT row ever existed. So scroll the panel
-        // toward the VF/VT boundary until a VT row materializes; there both
-        // kinds exist at once, which the measured block's alternating clicks
-        // require.
-        let vtRow = app.buttons.matching(identifier: "finding-row-VT").firstMatch
-        let queueScroll = app.groups.matching(identifier: "findings-panel")
-            .firstMatch.scrollViews.firstMatch
-        var scrollBudget = 20
-        while !vtRow.exists && scrollBudget > 0 {
-            queueScroll.scroll(byDeltaX: 0, deltaY: -150)
-            scrollBudget -= 1
-        }
-        XCTAssertTrue(vtRow.waitForExistence(timeout: 10),
-                      "a VT row should materialize once the queue is scrolled to the "
-                      + "VF/VT group boundary — if it does not, the lazy list is failing "
-                      + "to realize the range-kind group regardless of scroll position")
+        //
+        // The jumps cycle between two rows of the SAME group, deliberately.
+        // The previous VT↔VF alternation died twice on the short-display
+        // regime: first the VT group never materialized at all (Build 148 —
+        // the group below the fold never enters the AX tree), then, with a
+        // scroll-to-boundary fix, each click's own scroll-to-reveal moved
+        // the queue far enough that the OTHER group dematerialized between
+        // iterations (Build 149: clicking VF scrolled 835 pt back up and VT
+        // vanished for iteration 2). Two adjacent VF rows materialize
+        // together and stay together — and the measured quantity, one
+        // animateJump per click on an hour-long viewport, is identical.
+        let vfRows = app.buttons.matching(identifier: "finding-row-VF")
+        XCTAssertTrue(vfRows.firstMatch.waitForExistence(timeout: 30),
+                      "the findings list should populate before the jumps are timed")
+        let rowA = vfRows.element(boundBy: 0)
+        let rowB = vfRows.element(boundBy: 1)
+        XCTAssertTrue(rowB.waitForExistence(timeout: 10),
+                      "the scaled fixture seeds 30 VF findings — two rows to cycle between")
 
         let measureOptions = XCTMeasureOptions()
         measureOptions.iterationCount = 3
         measure(metrics: [XCTClockMetric()], options: measureOptions) {
             let initial = viewportState.label
-            // Cycle between two rows so each iteration has somewhere to jump.
-            let vt = app.buttons.matching(identifier: "finding-row-VT").firstMatch
-            XCTAssertTrue(vt.exists)
-            vt.click()
+            rowA.click()
             let changed = NSPredicate(format: "label != %@", initial)
             _ = XCTWaiter.wait(
                 for: [XCTNSPredicateExpectation(predicate: changed, object: viewportState)],
                 timeout: 5
             )
             let resetLabel = viewportState.label
-            let vf = app.buttons.matching(identifier: "finding-row-VF").firstMatch
-            XCTAssertTrue(vf.exists)
-            vf.click()
+            rowB.click()
             let changedAgain = NSPredicate(format: "label != %@", resetLabel)
             _ = XCTWaiter.wait(
                 for: [XCTNSPredicateExpectation(predicate: changedAgain, object: viewportState)],

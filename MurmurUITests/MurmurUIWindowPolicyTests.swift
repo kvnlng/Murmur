@@ -199,6 +199,16 @@ final class MurmurUIWindowPolicyTests: XCTestCase {
     /// Stated as "the frame fills the visible frame" rather than in terms of
     /// content, because that is what `max` means and it is the form that
     /// cannot be satisfied by the wrong rect.
+    ///
+    /// The height tolerance is 8 pt, not 2, because the yardstick itself
+    /// drifts: this runner process and the app read `visibleFrame` from
+    /// different processes, and on Cloud's Tahoe VMs they deterministically
+    /// disagree by 4 pt (Build 149: the app converged at a 696 pt frame that
+    /// the recording shows seated exactly between menu bar and Dock, while
+    /// this process read 692 on every retry — a menu-bar/Dock metrics
+    /// reading difference, not a sizing bug). The defect this test exists to
+    /// catch is a full chrome allowance short (~52–66 pt, #241), which 8 pt
+    /// still fails loudly.
     @MainActor
     func testMaxFillsTheVisibleFrame() throws {
         let visible = try XCTUnwrap(NSScreen.main?.visibleFrame)
@@ -208,9 +218,9 @@ final class MurmurUIWindowPolicyTests: XCTestCase {
         let frame = mainWindowFrame(app)
         XCTAssertEqual(frame.width, visible.width - Self.chromeAllowance, accuracy: 2,
                        "--ui-test-window=max should fill the visible width minus the chrome allowance")
-        XCTAssertEqual(frame.height, visible.height, accuracy: 2,
+        XCTAssertEqual(frame.height, visible.height, accuracy: 8,
                        "--ui-test-window=max resolved a \(frame.height) pt frame on a "
-                       + "\(visible.height) pt visible frame — the window is short by "
-                       + "\(visible.height - frame.height) pt and `max` is not maximized")
+                       + "\(visible.height) pt visible frame — the window is off by "
+                       + "\(frame.height - visible.height) pt and `max` is not maximized")
     }
 }
