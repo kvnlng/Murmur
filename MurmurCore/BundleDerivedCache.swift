@@ -23,11 +23,16 @@
 //  For measurements that feed clinical review, over-invalidation is the
 //  right side to err on.
 //
-//  Payloads are Codable and JSON-encoded. JSON is not the fastest choice
-//  for the largest payload (the ~100k-beat markings array), but every cache
-//  read runs inside its orchestrator's ComputeSignpost interval, so if
-//  decode cost ever rivals recompute cost it will be visible in the same
-//  log that motivated this file.
+//  Payloads are Codable and JSON-encoded, then LZFSE-compressed behind a
+//  magic prefix. JSON keeps the payload format debuggable and Release
+//  decode was measured fast enough (~710 ms for the 47 MB markings blob);
+//  what JSON is NOT is small — the ~100k-beat markings array is ~47 MB of
+//  highly repetitive text, carried verbatim into every .mur save. LZFSE
+//  shrinks that at a decompress cost far below the JSON parse it feeds.
+//  The prefix, not the stamp, carries the format: a payload without it is
+//  legacy raw JSON and still decodes — blobs written by older builds
+//  (including ones restored out of existing .mur saves) need no migration,
+//  they just get compressed on their next rewrite.
 //
 
 import Foundation
@@ -80,7 +85,8 @@ public enum BundleDerivedCache {
             log.notice("Cache MISS (stamp) — \(producer, privacy: .public) expected \(appVersionStamp, privacy: .public) / \(parametersKey, privacy: .public)")
             return nil
         }
-        guard let value = try? JSONDecoder().decode(T.self, from: payload) else {
+        guard let json = decompressed(payload),
+              let value = try? JSONDecoder().decode(T.self, from: json) else {
             log.error("Cache MISS (payload decode) — \(producer, privacy: .public), \(payload.count, privacy: .public) bytes")
             return nil
         }
@@ -104,8 +110,33 @@ public enum BundleDerivedCache {
             producer: producer, version: appVersionStamp, parametersKey: parametersKey
         )
         guard let payload = try? JSONEncoder().encode(value),
-              let blob = try? MurSessionCache.encode(stamp: stamp, payload: payload) else { return }
+              let blob = try? MurSessionCache.encode(stamp: stamp, payload: compressed(payload)) else { return }
         try? blob.write(to: blobURL(producer: producer, in: bundleDirectory), options: .atomic)
+    }
+
+    // MARK: - Payload compression
+
+    /// Marks a payload as LZFSE-compressed. JSON can never begin with these
+    /// bytes (a payload starts with `{` or `[`), so ABSENCE of the prefix is
+    /// the legacy format — see header.
+    private static let compressionMagic = Data("MRZ1".utf8)
+
+    /// LZFSE-compress an encoded payload, magic-prefixed. Falls back to the
+    /// raw bytes when compression fails or wouldn't pay — the load side keys
+    /// on the prefix, so either form round-trips.
+    private static func compressed(_ payload: Data) -> Data {
+        guard let squeezed = try? (payload as NSData).compressed(using: .lzfse) as Data,
+              squeezed.count + compressionMagic.count < payload.count else { return payload }
+        return compressionMagic + squeezed
+    }
+
+    /// Undo `compressed(_:)`. Raw (un-prefixed) payloads pass through; a
+    /// prefixed payload that fails to decompress is nil — corruption, which
+    /// the caller treats as a miss like every other decode failure.
+    private static func decompressed(_ payload: Data) -> Data? {
+        guard payload.starts(with: compressionMagic) else { return payload }
+        let body = Data(payload.dropFirst(compressionMagic.count))
+        return try? (body as NSData).decompressed(using: .lzfse) as Data
     }
 
     private static func blobURL(producer: String, in bundleDirectory: URL) -> URL {
