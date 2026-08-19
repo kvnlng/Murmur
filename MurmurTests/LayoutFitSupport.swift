@@ -33,3 +33,10 @@ func demandedSize<V: View>(_ view: V, proposal: CGSize) -> CGSize {
 func demandedHeightGivenRoom<V: View>(_ view: V, width: CGFloat) -> CGFloat {
     demandedSize(view, proposal: CGSize(width: width, height: 4000)).height
 }
+
+/// Rendered width of `string` at `font` — for pinning a fixed column against
+/// its measured worst-case content instead of a hardcoded number that goes
+/// stale when the format or the font metrics change.
+func measuredWidth(_ string: String, font: NSFont) -> CGFloat {
+    (string as NSString).size(withAttributes: [.font: font]).width.rounded(.up)
+}

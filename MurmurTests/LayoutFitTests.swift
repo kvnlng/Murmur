@@ -94,6 +94,17 @@ struct LayoutFitTests {
                 rPeakSampleIndex: 12500, prMs: 155.0, qrsMs: 92.0,
                 qtMs: 410.0, qtcMs: 445.0, precedingRRMs: 820.0,
                 tOffsetCensored: true, qtCalibratedHalfWidthMs: 22.0))),
+            // The field case: a +183.3 ms QT departure with a ±100 ms
+            // calibrated half-width — the widest delta cell the calibration
+            // bins actually emit (p95AbsErr reaches three digits). At the
+            // original formatting this overflowed the 78 pt cell, the
+            // "±100 ms" text wrapped to a second line, and the card — and
+            // with it the whole stage, whose canvas fills the tallest
+            // column — changed size on hover.
+            ("large departure with 3-digit CI", height(of: MarkingsBeat(
+                rPeakSampleIndex: 12500, prMs: 263.9, qrsMs: 94.8,
+                qtMs: 476.3, qtcMs: 511.2, precedingRRMs: 820.0,
+                qtCalibratedHalfWidthMs: 100.0))),
         ]
         for (name, h) in states {
             #expect(abs(h - normal) < 0.5,
@@ -105,11 +116,20 @@ struct LayoutFitTests {
     func caliperColumnBudget() {
         #expect(BeatCalipers.Columns.totalWidth <= BedsideGeometry.dockedColumnWidth)
         // Widest strings measured at .caption.monospacedDigit(): "QRS" 21,
-        // "≥ 545.0 ms" 56, "+117.0 ±22 ms" 75. Each column keeps a little
-        // over its worst case so a font-metric nudge doesn't clip a digit.
+        // "≥ 545.0 ms" 56, and for the delta cell "−999 ±999 ms" — the
+        // with-CI delta is quoted at integer precision, so three digits of
+        // delta and three of half-width is the structural worst case. Each
+        // column keeps a little over its worst case so a font-metric nudge
+        // doesn't clip a digit. The measurement is live (not a hardcoded
+        // number) so a font or format change re-measures itself.
         #expect(BeatCalipers.Columns.label >= 21)
         #expect(BeatCalipers.Columns.value >= 56)
-        #expect(BeatCalipers.Columns.delta >= 75)
+        let worstDelta = measuredWidth("−999 ±999 ms",
+                                       font: NSFont.monospacedDigitSystemFont(
+                                           ofSize: NSFont.preferredFont(forTextStyle: .caption2).pointSize,
+                                           weight: .regular))
+        #expect(BeatCalipers.Columns.delta >= worstDelta + 2,
+                "Delta column \(BeatCalipers.Columns.delta) pt < worst case \(worstDelta) pt — the cell will wrap or truncate")
     }
 
     // MARK: - #208 · a ceiling that stopped claiming

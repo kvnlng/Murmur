@@ -218,7 +218,11 @@ struct BeatCalipers: View {
     ///
     /// Each width is the measured worst-case string plus a little slack, at
     /// `.caption.monospacedDigit()`: "QRS" 21 pt, "≥ 545.0 ms" 56 pt,
-    /// "+117.0 ±22 ms" 75 pt.
+    /// "+400.0 ms" without a CI or "−999 ±999 ms" with one (the delta is
+    /// quoted at integer precision whenever a calibrated half-width rides
+    /// along — tenths beside ±100 ms are false precision, and they are what
+    /// pushed "+183.3 ±100 ms" past this cell and wrapped it, growing the
+    /// card mid-hover).
     enum Columns {
         static let label: CGFloat = 22
         static let value: CGFloat = 58
@@ -418,17 +422,28 @@ struct BeatCalipers: View {
                 // ±half-width. Avoids "+117.0 ms ± 22 ms" wrapping in
                 // the compact panel while keeping units unambiguous.
                 if let hw = halfWidthMs {
-                    Text("\(sign)\(String(format: "%.1f", abs(d)))")
+                    // Integer precision when the CI is shown, twice over:
+                    // quoting +183.3 beside ±100 ms is false precision (the
+                    // tenths digit asserts a resolution the calibrated
+                    // uncertainty has already disclaimed), and the tenths
+                    // are what pushed the widest real cell ("+183.3 ±100 ms")
+                    // past the 78 pt column — where the ± text wrapped and
+                    // the card, whose height the stage canvas follows, grew
+                    // under the analyst's eye (#246's invariant).
+                    Text("\(sign)\(String(format: "%.0f", abs(d)))")
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.primary)
+                        .lineLimit(1)
                     Text("±\(String(format: "%.0f", hw)) ms")
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.tertiary)
+                        .lineLimit(1)
                         .accessibilityIdentifier("beat-calipers-ci-halfwidth")
                 } else {
                     Text("\(sign)\(String(format: "%.1f", abs(d))) ms")
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.primary)
+                        .lineLimit(1)
                 }
             }
         } else {
