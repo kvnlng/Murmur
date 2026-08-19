@@ -120,10 +120,26 @@ public final class MorphologyContext {
     /// same as `CurrentRecordingContext.liveSessionState`.
     public private(set) var endorsements: [MorphologyEndorsement] = []
 
+    /// True while the orchestrator is computing clusters for the current
+    /// record with no cached summary to show — the cold-open case. Drives
+    /// the drawer's "computing…" row (task #11): the compute on a long
+    /// record takes real seconds off-main, and rendering NOTHING for its
+    /// duration reads as "this record has no morphology" — the same
+    /// invisible-cost problem X91's "scanning…" placeholder fixed for the
+    /// arrhythmia queue. Reset by every publish or clear; a cancelled
+    /// compute leaves it to the successor task, which always ends in one
+    /// of those.
+    public private(set) var isComputing = false
+
     public init() {}
+
+    public func beginCompute() {
+        isComputing = true
+    }
 
     public func set(summary: MorphologySummary?) {
         self.summary = summary
+        isComputing = false
     }
 
     public func setEndorsements(_ endorsements: [MorphologyEndorsement]) {
@@ -134,6 +150,7 @@ public final class MorphologyContext {
     public func clear() {
         self.summary = nil
         self.endorsements = []
+        isComputing = false
     }
 
     // MARK: - Endorsement re-attachment

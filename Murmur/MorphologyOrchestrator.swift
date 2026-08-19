@@ -68,6 +68,13 @@ struct MorphologyOrchestrator: View {
             return
         }
 
+        // Cache missed — the compute ahead takes real seconds on a long
+        // record. Name that cost while it is paid (task #11, X91's
+        // "scanning…" reasoning): the drawer shows a "computing…" row
+        // instead of nothing. Every exit below publishes or clears, which
+        // resets the flag.
+        await MainActor.run { morphologyContext.beginCompute() }
+
         let beats = recording.annotatedBeats()
         measuredBeatCount = beats.count
         // Same lead-selection order as the markings pipeline: conventional
