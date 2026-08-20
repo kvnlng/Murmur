@@ -14,7 +14,62 @@ The PhysioNet WFDB record (`.hea` + `.dat`) is the substrate. Findings —
 whether upstream-producer output or analyst-authored — are the primary
 data surface; the waveform is the context that gives each finding meaning.
 
-## Current state (updated 2026-07-04)
+## Current state (updated 2026-08-19)
+
+**Live on the Mac App Store (2026-08-19)** — version 1.3 went
+READY_FOR_SALE with the **Murmur Pro** in-app purchase approved
+alongside it ($299.99, non-consumable,
+`com.kevinlong.murmur.studio`). Store metadata (six screenshots,
+promotional text, description, keywords) and the docs site were
+refreshed to match the shipped product the same day.
+
+**Single-IAP pivot** — the three per-module IAPs planned below
+(Annotation Authoring / ECG Metrics / VT-VF Detection) were collapsed
+into one all-inclusive **Murmur Pro** purchase before launch. The
+three private frameworks still exist and still conform to the same
+seams; they unlock together behind the one entitlement
+(`PurchaseStore.hasStudio`). The per-module product IDs were retired
+in App Store Connect. Sections below that describe three separate
+IAPs are historical record of the plan, not the shipped model.
+
+**Shipped since the 2026-07-04 entry** (each landed with its own PR
+write-up — the provenance chain lives in the merged PRs):
+
+- **Calibrated paper (X40)** — Standard View (25 mm/s · 10 mm/mV),
+  gain/speed preset ladder, honest actual-scale seam, calibration
+  lock across zoom.
+- **Arrhythmia scan** — in-app VT/VF candidate episodes plus
+  rhythm-event candidates (AF, pauses); recall-biased, user-adjustable
+  τ dial persisted per session; "candidates, not detections" framing
+  with RUO badges throughout.
+- **Morphology (X112)** — whole-record beat clustering with
+  representative shapes, analyst endorsement as the only path to a
+  baseline ("the algorithm clusters; the analyst classifies"),
+  endorsements persisted in the session document.
+- **Annotation authoring** — right-click note/finding authoring and
+  drag-to-author range findings under the Editing latch, persisted
+  with the session.
+- **Session documents + exports** — portable `.mur` session (⌘S),
+  WFDB annotation export, citable report export.
+- **QT uncertainty wire-up** — calibrated per-beat CI half-widths on
+  QT/QTc (calipers show `±X ms`; censored T-offsets render as lower
+  bounds), quality gates echoed as chips on the QTc trend lane.
+- **Performance overhaul (task list #8–#18, PRs #310–#318)** — scroll
+  stalls on 100k-beat records went from multi-second to sub-frame:
+  FindingsPanel Equatable isolation, hover quantization, derivation
+  memoization, LZFSE-compressed derived caches (13× smaller), launch
+  sweep of unreusable recording bundles.
+- **Launch shell** — the persistent bedside shell replaced the
+  welcome card; every surface exists idle at launch ("Try a sample
+  recording" is now DEBUG-only, #242).
+
+Test suite at launch: **1012 unit + 187 UI**. Remaining open
+workstreams: remote model updates (IAP Phase 4 below — not started),
+citation routing Phases B–D, and the PhysioNet directory listing.
+
+---
+
+## Historical state (2026-07-04 entry and earlier)
 
 **Persistent-stage redesign (2026-07-04)** — the ECG canvas + docked
 beat inspector + one-map overview now pin at the top of the center
@@ -229,7 +284,8 @@ so existing analyst data stays intact.
   the imported bundle and records its filename on the manifest so the
   context panel can read/write it.
 
-**Tests** — 346 total (287 unit + 59 UI). Suite has grown ~135 → 346
+**Tests** — 346 total (287 unit + 59 UI) as of this 2026-07-04 entry;
+**1012 unit + 187 UI at the 1.3 launch.** Suite has grown ~135 → 346
 across the App-Store-rejection fix, the open-core architecture work
 in `758b040`, the producer-pipeline coverage, and the bypass-test
 push to 100% interaction coverage.
@@ -511,6 +567,17 @@ IAP under the open-core split below.)*
 
 ## Paid features roadmap (open-core + IAPs)
 
+> **Status 2026-08-19 — shipped, with one structural change.** The
+> open-core model shipped, but as a **single all-inclusive purchase**
+> (Murmur Pro, $299.99) rather than three per-module IAPs — renaming
+> or splitting product IDs after purchases exist would orphan buyers,
+> so the pivot happened before launch. Phase 0 ✅, Phase 1 (metrics)
+> ✅, Phase 2 (authoring) ✅, Phase 3 (VT/VF scan) ✅ — all live under
+> the one entitlement. **Phase 4 (remote model updates) is not
+> started** and is the main open item in this section. The phase
+> descriptions below are kept as the historical plan; per-phase
+> status notes mark what shipped differently.
+
 Strategic pivot recorded 2026-06-28: the app becomes an **open-core
 product**. The viewer is a free, MIT-licensed, open-source native
 macOS WFDB tool; three paid IAPs ride on top as research/commercial
@@ -557,15 +624,13 @@ in App Store review.
   the paid frameworks at runtime via entitlement checks. The split
   is *source distribution*, not *binary distribution*.
 
-**Pricing direction** (open, to refine before Phase 1 submission):
-
-- Annotation Authoring → non-consumable one-time purchase.
-- ECG Metrics → non-consumable one-time purchase.
-- VT Detection → **lifetime non-consumable one-time purchase**
-  (reversed 2026-07-03 from the earlier annual-subscription lean;
-  buyer-fit rationale and price points tracked privately in planning
-  memory). Annual subscription demoted to the alternative.
-- Possible bundle SKU later once usage data informs the decision.
+**Pricing direction** — RESOLVED 2026-08: one all-inclusive
+non-consumable, **Murmur Pro at $299.99** (`com.kevinlong.murmur.studio`),
+covering every instrument current and future. The per-module SKUs
+below were retired in App Store Connect before launch; Small Business
+Program enrollment completed before first sale. *(Historical plan:
+per-module non-consumables — Annotation Authoring, ECG Metrics, VT
+Detection lifetime — with a possible bundle SKU later.)*
 
 ### Layering
 
@@ -632,11 +697,12 @@ validates the StoreKit wiring before higher-risk IAPs follow.
       `Product.products(for:)` on launch, listens forever to
       `Transaction.updates`, exposes `owns(_:) -> Bool`, `purchase(_:)`,
       and `restore()`. Refuses unverified transactions.
-- [ ] Product IDs registered in App Store Connect:
-      `com.kevinlong.murmur.metrics` (non-consumable),
-      `com.kevinlong.murmur.annotationauthoring` (non-consumable),
-      `com.kevinlong.murmur.vtdetection` (non-consumable;
-      subscription demoted 2026-07-03).
+- [x] Product registration in App Store Connect — SUPERSEDED by the
+      single-IAP pivot: one product, `com.kevinlong.murmur.studio`
+      ("Murmur Pro"), registered and approved with the 1.3
+      submission. The per-module IDs (`…murmur.metrics`,
+      `…murmur.annotationauthoring`, `…murmur.vtdetection`) were
+      retired unused.
 - [x] Restore Purchases UI surface (Apple-mandated).
 - [x] ECG Metrics pipeline ported to Swift inside `MurmurMetrics`
       framework — `ECGMetricsService.compute(fromRRIntervalsMs:)`
@@ -792,30 +858,40 @@ and fiducial-edit UX (nudge-to-recompute).
 
 ### Phase 2 — Annotation Authoring IAP
 
+> **Status 2026-08-19: shipped under Murmur Pro.** Authoring landed
+> as right-click note/finding creation and drag-to-author range
+> findings (X84), gated behind the Editing latch + the Pro
+> entitlement; authored work persists with the session document, so
+> re-running producers never collides with it. Reading and
+> disposition stayed free, as planned.
+
 Second paid submission. Lower scrutiny than VT (no ML, no medical
 claims) but introduces user-generated content workflows.
 
-- [ ] Authoring UI inside `MurmurAnnotation` framework: marker
-      placement (click to drop a point, drag to draw a range), edit
-      panel (category / label / note), delete affordance.
-- [ ] Wires into the existing `Editing` toolbar latch — author mode
+- [x] Authoring UI: right-click to author a note or point/range
+      finding on the trace; drag-to-author range findings.
+- [x] Wired into the existing `Editing` toolbar latch — author mode
       requires the latch unlocked, matching the notes-edit gating
       pattern.
-- [ ] Authored annotations persisted to a separate sidecar from
-      upstream-produced ones (or same sidecar with `source =
-      "murmur.author"`) so re-running the producer cluster never
-      collides with user authoring.
-- [ ] Locked-variant gate on every authoring entry point (toolbar
-      button, context menu, keyboard shortcut). Reading and
+- [x] Authored work persists with the session (`.mur` document),
+      separate from producer output.
+- [x] Entitlement gate on authoring entry points; reading and
       disposition stay free.
-- [ ] StoreKit purchase + restore flow for the authoring entitlement.
+- [x] StoreKit purchase + restore flow (shared Murmur Pro
+      entitlement).
 - [ ] Update `docs/annotation-schema.md` to document the
-      `murmur.author` source value.
+      analyst-authored source value.
 
 ### Phase 3 — VT Detection with bundled model
 
-Third paid submission. Highest scrutiny (medical-app + ML). Lock
-RUO framing before submitting.
+> **Status 2026-08-19: shipped under Murmur Pro.** The in-app
+> arrhythmia scan ships the on-device model with a recall-biased,
+> user-adjustable τ dial persisted per session, "candidates, not
+> detections" copy, RUO badges on the group headers and rows, and
+> operating-point provenance echoed in the queue header — every
+> starred design decision below landed as specced. Still open:
+> `docs/vtdetect-schema.md` (the stable I/O schema document was
+> never written).
 
 - [ ] PyTorch → Core ML conversion of SE-ResLSTM via `coremltools`.
       Verify LSTM ops convert cleanly; document any custom layers.
@@ -865,6 +941,14 @@ RUO framing before submitting.
       breaking changes (treated like database migrations).
 
 ### Phase 4 — Remote model updates (and the reproducibility moat)
+
+> **Status 2026-08-19: not started.** The shipped scan runs the
+> bundled on-device model only — no `ModelRegistry`, no manifest
+> fetch, no network entitlement. This is the main open engineering
+> workstream in this section, and Citation Phase C (freeze toggle,
+> per-version DOIs) depends on it. Until it lands, reproducibility
+> is simpler than the moat design assumed: the model is pinned to
+> the app version, which is itself DOI-addressable.
 
 Invisible to Apple once Phase 3 is approved — just upgrades weights
 of an existing capability. Tightly coupled to Citation Phase C below
@@ -992,34 +1076,37 @@ automatically fixes attribution at the source.
 | **ECG Metrics IAP** | Tool only | Murmur Studio release DOI (no separate method paper — measures are community-standard) |
 | **VT IAP** | Method + production implementation | Murmur Studio + the specific VT model version DOI |
 
-### Phase A — Zenodo DOIs for MurmurCore
+### Phase A — Zenodo DOIs for MurmurCore (✅ DONE)
 
-- [ ] Enable GitHub-to-Zenodo integration on the repo; configure
-      `.zenodo.json` with authors, ORCID, keywords, license.
-- [ ] Add `CITATION.cff` at the repo root (GitHub renders a "Cite this
-      repository" button from it).
-- [ ] First tagged release after v1.0 generates the canonical DOI;
-      pin it in the README and the app's About box.
-- [ ] Document the citation in `docs/` (probably `docs/citation.md`)
-      with copy-pasteable BibTeX/RIS entries.
+- [x] GitHub-to-Zenodo integration enabled; `.zenodo.json` configured.
+- [x] `CITATION.cff` at the repo root.
+- [x] Concept DOI `10.5281/zenodo.21077528` minted 2026-06-30; DOI
+      badge pinned in the README.
+- [x] `docs/citation.md` carries copy-pasteable BibTeX/RIS entries
+      (refreshed 2026-08-19 for the single-purchase model).
 
-### Phase B — "Copy citation" menu item
+### Phase B — "Copy citation" menu item (partially shipped)
 
-- [ ] Menu item under App / Help / or context menu in the findings
-      panel — emits BibTeX (primary) and RIS (secondary) for the
-      currently-loaded state.
-- [ ] Context-aware generation: inspect what's loaded — MurmurCore
-      only? ECG Metrics report visible? VT findings present, and at which
-      model version? — and emit the corresponding entries per the
-      routing table above.
-- [ ] Tie generation to the Zenodo DOIs from Phase A; don't ship this
-      before the DOIs exist or there'd be nothing valid to emit.
-- [ ] Likely ships alongside the ECG Metrics IAP (the first version with
-      multiple citation entries to merge).
+- [x] **Help ▸ Copy Citation (BibTeX)** and **(RIS)** shipped — emit
+      the viewer entry for the running version to the clipboard via
+      `CitationBuilder`.
+- [ ] Context-aware generation — largely mooted by the single-IAP
+      pivot (one tool entry covers viewer + instruments; see the
+      refreshed routing table in `docs/citation.md`). The remaining
+      real case is appending scan operating-point provenance
+      (model, τ, ranking basis) to the emitted entry instead of
+      leaving it in the queue header alone.
+- [x] Generation tied to the Phase A DOI.
 
 ### Phase C — Versioned VT model manifests (reproducibility)
 
-Tightly coupled to the IAP Phase 3 (Remote model updates) above —
+> **Status 2026-08-19: blocked on IAP Phase 4** (remote model
+> updates, not started). Until then the model version is pinned to
+> the app version, which is DOI-addressable via Phase A — so
+> reproducibility holds today by a simpler mechanism than the one
+> designed here.
+
+Tightly coupled to the IAP Phase 4 (Remote model updates) above —
 build this *into* the manifest scheme from day one, not bolted on
 after.
 
@@ -1049,8 +1136,11 @@ after.
 
 ### PhysioNet directory listing
 
-Once v1.0 ships and Phase A's DOI exists, submit Murmur Studio to
-`https://physionet.org/about/software/`. That catalog is the *de
-facto* discovery channel for the target audience; inclusion puts us
-in the same surface as PhysioNet CVST and ECG-Kit. Keep submission
-copy consistent with the RUO framing.
+> **Status 2026-08-19: unblocked.** Both preconditions are met — the
+> app is live on the store and the DOI exists. This is now the
+> highest-leverage open item in the citation workstream.
+
+Submit Murmur Studio to `https://physionet.org/about/software/`.
+That catalog is the *de facto* discovery channel for the target
+audience; inclusion puts us in the same surface as PhysioNet CVST
+and ECG-Kit. Keep submission copy consistent with the RUO framing.
