@@ -4,31 +4,36 @@ title: Citing Murmur Studio
 
 # Citing Murmur Studio
 
-If you use Murmur Studio in research, please cite it. The free viewer
-is open-source under MIT and tracked by Zenodo for DOI-stable citation;
-each paid extension carries its own citation surface so attribution
-routes back to the right artifact.
+If you use Murmur Studio in research, please cite it. The viewer is
+open-source under MIT and tracked by Zenodo for DOI-stable citation.
 
-The in-app **Copy citation** action (App menu, planned for the v1.1
-release alongside ECG Metrics) emits the appropriate combination for
-the work currently loaded — researchers cite whatever the tool hands
-them, so the routing below is enforced automatically.
+The in-app **Copy Citation** actions (Help menu — BibTeX or RIS) emit
+the entry for the running version and write it to the clipboard, so the
+version you cite is the version you ran.
 
-## Routing by tier
+## What to cite
 
 | What was used | What to cite |
 |---|---|
-| **Free viewer only** (MurmurCore — file import, finding display, filter chips, viewport, disposition workflow) | Murmur Studio + the Zenodo release DOI |
-| **Annotation Authoring IAP** (manual finding create / edit / delete) | Murmur Studio + Zenodo release DOI. No method paper — the IAP wraps editing UX, not a published algorithm. |
-| **ECG Metrics IAP** (standard ECG analytic measures — HRV, intervals, RR-interval statistics) | Murmur Studio + Zenodo release DOI. No separate method paper — measures are community-standard. |
-| **VT/VF Detection IAP** (SE-ResLSTM inference) | SE-ResLSTM paper (citation TBD until publication) **plus** Murmur Studio + the specific VT model version DOI. Model version is encoded in each finding's metadata so screenshots in your paper self-document provenance. |
+| **The free viewer** (import, calibrated paper, annotation layers, review dispositions, exports) | Murmur Studio + the Zenodo release DOI. |
+| **Murmur Pro instruments** (beat calipers and interval trends, HRV / QT-variability metrics, the arrhythmia scan, morphology clustering, annotation authoring) | The same Murmur Studio entry + release DOI. The measures are community-standard (HRV statistics, interval measurement, QTc correction formulas named in-app); no separate method paper exists for the instrument implementations. |
+| **Arrhythmia scan findings** (VT/VF candidate episodes, rhythm-event candidates) | Murmur Studio + release DOI, **plus** the operating-point provenance the app displays with every candidate group — model, score threshold, and ranking basis are echoed in the queue header and in exported reports, so a screenshot or export self-documents how the candidates were produced. |
 
-## BibTeX (free viewer)
+## Provenance in the app
+
+Every computed surface states its own methods where you read it: which
+lead was measured, which window and formula, what was excluded and why.
+Lane headers and queue captions echo the exact configuration they ran
+with, and exports carry the same statements — the figure you publish
+names its provenance without a trip back to the app.
+
+## BibTeX
 
 The `doi` below is the **concept DOI** — it always resolves to the
 latest archived version. If you need to pin to a specific release for
 reproducibility, swap in the per-version DOI from the Zenodo record's
-"Versions" panel.
+"Versions" panel (or use the in-app Copy Citation action, which emits
+the running version).
 
 ```bibtex
 @software{murmur_studio,
@@ -37,13 +42,13 @@ reproducibility, swap in the per-version DOI from the Zenodo record's
                    PhysioNet WFDB recordings}},
   year         = {2026},
   publisher    = {Zenodo},
-  version      = {1.2.1},
+  version      = {1.3.0},
   doi          = {10.5281/zenodo.21077528},
   url          = {https://github.com/kvnlng/Murmur}
 }
 ```
 
-## RIS (free viewer)
+## RIS
 
 ```
 TY  - COMP
@@ -51,30 +56,11 @@ AU  - Long, Kevin
 TI  - Murmur Studio: A native macOS viewer for PhysioNet WFDB recordings
 PY  - 2026
 PB  - Zenodo
-ET  - 1.2.1
+ET  - 1.3.0
 DO  - 10.5281/zenodo.21077528
 UR  - https://github.com/kvnlng/Murmur
 ER  -
 ```
-
-## VT model versioning (reproducibility)
-
-The VT Detection IAP runs an on-device Core ML model that is
-continuously improved between app releases via signed manifest
-updates. **Every published model version stays DOI-addressable
-forever** — we never overwrite or delete a published version.
-
-If you cite a finding produced by the VT model, the Copy citation
-action includes the exact model version DOI alongside the Murmur
-Studio release DOI. To pin your analysis to a specific model version
-during a paper-in-progress, toggle **Freeze model version** in the
-Settings window; the app will refuse silent upgrades until you
-release the toggle.
-
-This is the structural advantage of an on-device, versioned-manifest
-model over cloud-inference services — your analysis is reproducible
-years after publication, even if the latest model version has moved
-on.
 
 ## Acknowledging the open ecosystem
 

@@ -10,8 +10,8 @@ nav_order: 3
 
 Murmur Studio ships as a single App Store binary that links one free
 open-source framework and three paid extension frameworks. The split
-is *source distribution*, not *binary distribution*: IAP entitlement
-checks unlock the paid frameworks at runtime.
+is *source distribution*, not *binary distribution*: the single
+**Murmur Pro** in-app purchase unlocks all paid frameworks at runtime.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -29,9 +29,9 @@ checks unlock the paid frameworks at runtime.
                               │ depended on by (private frameworks)
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  MurmurAnnotation  (paid — Annotation Authoring IAP)            │
-│  MurmurMetrics     (paid — ECG Metrics IAP)                     │
-│  MurmurInference   (paid — VT/VF Detection IAP)                 │
+│  MurmurAnnotation  (annotation authoring)      ┐                │
+│  MurmurMetrics     (ECG metrics, intervals)    ├─ Murmur Pro    │
+│  MurmurInference   (VT/VF detection)           ┘                │
 │    Each conforms to FindingProducer.                            │
 │    Source lives in the private kvnlng/Murmur-Extensions repo.   │
 └─────────────────────────────────────────────────────────────────┘
@@ -40,8 +40,7 @@ checks unlock the paid frameworks at runtime.
 The three paid framework targets aren't in this repo — they live in
 the private `kvnlng/Murmur-Extensions` repo and pull `MurmurCore` in
 via SPM. Their source isn't public; their behaviour is part of the
-App Store distribution. See [ROADMAP](../ROADMAP.md) "Paid features
-roadmap" for the IAP sequencing.
+App Store distribution.
 
 This document covers **MurmurCore**, which is what you're reading the
 source of.
@@ -87,9 +86,10 @@ Key design points:
 - **Confidence is the producer's responsibility.** `Annotation.confidence`
   is documented as already-calibrated (Platt-scaled or equivalent), so
   hosts treat it as comparable across producers.
-- **IAP gating is at the call site.** The registry doesn't know about
-  entitlements — the host filters `registry.all()` against
-  `PurchaseStore.owns(_:)` before exposing producers to the UI.
+- **Entitlement gating is at the call site.** The registry doesn't know
+  about purchases — the host filters `registry.all()` against the
+  Murmur Pro entitlement in `PurchaseStore` before exposing producers
+  to the UI.
 
 The free viewer registers `SyntheticFindingProducer` (a deterministic
 LCG-seeded fixture) at launch so the producer pipeline is exercised
