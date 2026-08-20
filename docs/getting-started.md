@@ -8,7 +8,7 @@ nav_order: 2
 
 ## Requirements
 
-- macOS 14 (Sonoma) or later
+- macOS 26.5 or later
 - A folder containing a WFDB record (`.hea` + `.dat`) you want to view —
   PhysioNet's [MIT-BIH Arrhythmia Database](https://physionet.org/content/mitdb/)
   is the canonical test set.
