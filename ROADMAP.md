@@ -65,7 +65,8 @@ write-up — the provenance chain lives in the merged PRs):
 
 Test suite at launch: **1012 unit + 187 UI**. Remaining open
 workstreams: remote model updates (IAP Phase 4 below — not started),
-citation routing Phases B–D, and the PhysioNet directory listing.
+citation routing Phases B–D, and the PhysioNet directory listing
+(submitted 2026-08-20, in editorial review).
 
 ---
 
@@ -1136,11 +1137,24 @@ after.
 
 ### PhysioNet directory listing
 
-> **Status 2026-08-19: unblocked.** Both preconditions are met — the
-> app is live on the store and the DOI exists. This is now the
-> highest-leverage open item in the citation workstream.
+> **Status 2026-08-20: submitted.** Version 1.3.0 went into
+> PhysioNet's software-track editorial review (≈4 weeks; expect
+> movement by mid-September). Scope is the open-source viewer;
+> the commercial instruments are disclosed in the abstract and
+> conflicts-of-interest statement but out of submission scope.
+> Submission copy lives in `Planning/marketing/physionet-submission.md`
+> and keeps the RUO framing throughout.
 
-Submit Murmur Studio to `https://physionet.org/about/software/`.
 That catalog is the *de facto* discovery channel for the target
 audience; inclusion puts us in the same surface as PhysioNet CVST
-and ECG-Kit. Keep submission copy consistent with the RUO framing.
+and ECG-Kit.
+
+Known risk carried into review: building from source fails for
+third parties because the project pins the private Murmur-Extensions
+package, so Xcode package resolution breaks on a fresh clone. If an
+editor tries to build, expect a revision request. The clean fix is a
+public stub package exposing the same product names
+(MurmurAnnotation / MurmurMetrics / MurmurInference) so
+clone → open → run yields the free viewer; the real package would
+override it locally. Worth doing regardless of the review outcome —
+the README's open-source claim leans on it too.
