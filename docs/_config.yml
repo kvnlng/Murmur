@@ -1,5 +1,5 @@
 title: Murmur Studio
-description: A macOS app for analyst review of clinical ECG findings over PhysioNet WFDB recordings. Available on the Mac App Store.
+description: A native-Mac scope for PhysioNet WFDB recordings — free calibrated viewer plus the Murmur Pro analysis instruments. Available on the Mac App Store.
 remote_theme: just-the-docs/just-the-docs
 
 # Site URL — let GitHub Pages set baseurl automatically for project pages.

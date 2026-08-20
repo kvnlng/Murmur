@@ -21,9 +21,9 @@ and launch it from Applications or Spotlight.
 
 ## Loading a record
 
-On launch the window shows an idle viewer — a flatline and a single
-pointer at the one action that matters. Two ways in, both in the File
-menu:
+On launch the window shows the full bedside shell in its idle state —
+every surface present, waiting for a record. Two ways in, both in the
+File menu:
 
 - **File ▸ Open Record… (⌘O)** opens the system file picker. The same
   action is inline in the empty window ("Open Record Folder…") and in
@@ -31,11 +31,6 @@ menu:
 - **File ▸ Open Recent** — folders you've opened before reopen with one
   click. Sandbox-safe: each entry stores a security-scoped bookmark,
   not a raw path.
-
-You'll need a WFDB record to open — see [Requirements](#requirements)
-above for PhysioNet's MIT-BIH Arrhythmia Database, the canonical test
-set. **Help ▸ Getting Started** brings you back to this page from
-inside the app.
 
 Once a folder is open:
 
@@ -45,103 +40,109 @@ Once a folder is open:
    decoder + min/max pyramid + manifest writer. Subsequent visits load
    instantly from the cache.
 
-The app is sandboxed (`ENABLE_APP_SANDBOX = YES`), so the file picker
-deliberately asks for a *folder* rather than a single file — that way the
-security scope covers both the `.hea` and its sibling `.dat`.
+The app is sandboxed, so the file picker deliberately asks for a
+*folder* rather than a single file — that way the security scope covers
+the `.hea`, its sibling `.dat`, and any annotation files. WFDB
+multi-frequency records (per-signal `.dat` files with `format[xspf]`
+suffixes) feed straight in; no separate ingest step.
 
 ## Reading the bedside view
 
-Above the canvas, two recording-level surfaces answer "what's in here?"
-before you ever scrub:
+The stage reads top to bottom in the order you navigate: whole record →
+hour → window.
 
-- **Summary chip row** — one chip per category in the recording (e.g.
-  `PVC 47 (12 critical)`, `AFib 38s`). Click a chip to toggle the filter
-  for that category — same effect as clicking the chip in the findings
-  panel.
-- **Finding density timeline** — one thin lane per surviving category
-  spanning the full recording. Points show as ticks, ranges as bars
-  proportional to their duration. Click anywhere on a lane to jump the
-  viewport to that fraction of the recording.
+- **Variability metrics strip** *(Murmur Pro)* — time- and
+  frequency-domain HRV and QT variability for the whole record, the
+  current window, or the hour, with a scope picker. Every number states
+  its provenance.
+- **Overview and hour bands** — the full recording's envelope with the
+  viewport marked, and a 60-minute band beneath it. Click either to
+  jump; drag to scrub.
+- **The paper** — a Metal-rendered ECG grid with the trace and its
+  annotation layers. **Standard View** pins the clinical calibration
+  (25 mm/s · 10 mm/mV); gain and speed presets (5/10/20 mm/mV,
+  25/50 mm/s) are one click away, and the seam beneath them always
+  discloses the *actual* on-screen scale. A lock holds calibration
+  across zoom gestures so paging a long record can't drift the paper.
+- **The docked inspector** — the calibration readout and the beat card.
+  Hover the trace to focus a beat; click to pin it. With Murmur Pro the
+  card reads per-beat PR, QRS, QT, and QTc (selectable correction
+  formula) against the patient's own normal template, with calibrated
+  uncertainty stated on every QT.
+- **Lead chips** — one chip per lead above the stage. Click to focus a
+  lead; ⌘-click to overlay it on the primary for comparison. Overlaid
+  reads carry a "Measured on …" attribution so a number is never
+  ambiguous about its source lead.
 
-If the record carries low-rate signals — Murmur treats anything below
-5 Hz as a "trend" channel: HR, SpO₂, etCO₂, tidal volume, GMM state
-probabilities, alarm flags, and so on — they render in their own strips
-below the ECG canvas, time-locked to the same viewport:
+If the record carries low-rate trend channels — anything below 5 Hz:
+HR, SpO₂, etCO₂, tidal volume, state probabilities, alarm flags — they
+render in their own strips below the ECG canvas, time-locked to the same
+viewport: vitals sparklines, one lane per boolean alarm channel, a
+ventilation-state backdrop, and a signal-quality heat band.
 
-- **Vitals sparkline strip.** Continuous-valued trend channels (HR, SpO₂,
-  etCO₂, tidal volume) appear as small line plots with a side label
-  showing the value at the middle of the visible window.
-- **Alarm strip.** Boolean alarm / status channels — anything whose name
-  ends in `_alarm`, `_status`, or `_silenced` — get one lane each.
-  Active runs render as colored bars; click any bar to jump the viewport
-  to that minute.
-- **State backdrop.** When both `prob_state_spontaneous` and
-  `prob_state_assist_control` are present, a one-row colored band shows
-  the dominant ventilation state per minute (warm = spontaneous breath,
-  cool = assist-control), with opacity tied to certainty.
-- **Quality strip.** Channels whose name ends in `_ratio` or contains
-  `artifact_ratio` (the Medallion `ecg_artifact_ratio` is the canonical
-  case) render as a gray heat band — opacity proportional to the ratio,
-  with an orange outline on cells past the 0.1 threshold so problematic
-  minutes are scannable at a glance.
+With Murmur Pro, the **trend stack** below the stage adds computed
+whole-record lanes — beat-derived heart rate, RMSSD, LF/HF, and the QTc
+interval trend — on one shared time axis. Click a lane to move the trace
+to that moment. Lanes toggle from **View ▸ Trend Lanes**.
 
-WFDB multi-frequency records (per-signal `.dat` files with `format[xspf]`
-suffixes on each signal line) feed straight in via the existing folder
-picker; no separate ingest step.
-
-Each ECG channel renders as a stacked panel:
-
-| Element | Purpose |
-|---|---|
-| Header strip | Lead name, unit, current time window, sample rate, off-scale count |
-| Main canvas | Metal-rendered ECG paper with the trace |
-| Time-axis labels | Major-gridline-aligned, adaptive density |
-| Voltage-axis labels | Left edge, mV grid |
-| Overview ribbon | Whole-recording envelope + viewport indicator |
-| Scale strip | Recording extent and current window in human time |
+The **context drawer** under the stage carries the record's documents:
+comments from the `.hea` header, your anchored notes, and (with Murmur
+Pro) the morphology section — whole-record beat clustering with
+representative shapes, where the algorithm clusters and the analyst
+classifies.
 
 ## Navigation
 
 | Gesture | Action |
 |---|---|
 | Drag chart left/right | Pan all channels in time-lock |
-| Pinch | Zoom around the center |
-| Click overview ribbon | Jump to that fraction of the recording |
-| Drag overview ribbon | Scrub continuously |
-| Click a finding in the panel | Center the viewport on the finding |
+| Pinch / ⌘-scroll | Zoom around the center |
+| Zoom presets (24 h … 2 s) | Set the window width directly |
+| Click overview or hour band | Jump to that point |
+| `J` / `K` | Next / previous finding |
+| `←` `→` | Pan one window |
+| Click a finding or queue row | Center the viewport on it |
 
-## Loading findings
+## Findings and annotation layers
 
-Drop a JSON file named `<recordName>.annotations.json` next to the
-record's `.hea` and re-import the record. The cluster's findings appear
-as:
+Findings reach the canvas three ways:
 
-- Translucent colored fills on the canvas for `range` findings
-- Thin colored rules at the sample index for `point` findings
-- A row in the right-side findings panel for every finding
+- **The record's own annotator layer** (e.g. a WFDB `.atr` file) renders
+  automatically — beat badges on the trace, categories in the review
+  queue.
+- **The in-app arrhythmia scan** *(Murmur Pro)* proposes ranked VT/VF
+  candidate episodes and rhythm-event candidates (AF, pauses), each with
+  its score, span, and model provenance.
+- **External producers** can drop a JSON file named
+  `<recordName>.annotations.json` next to the record's `.hea` — see the
+  [annotation schema]({{ site.baseurl }}/annotation-schema) for the wire
+  format. Range findings render as translucent fills, point findings as
+  thin rules at the sample index.
 
-Categories drive color (red = ventricular, purple = atrial, blue =
-conduction, slate = noise).
+## Reviewing and triaging
 
-See the [annotation schema]({{ site.baseurl }}/annotation-schema) for
-the wire format.
+The **review queue** (toolbar toggle, or **View ▸ Show Review Queue**)
+lists every finding and candidate, grouped and filterable by category
+and confidence. Unlock editing from the toolbar lock icon, then each
+row exposes the disposition controls:
 
-## Reviewing and triaging findings
+- **Confirm** (✓) — record the finding as VT, VF, or "confirmed
+  (unsure)."
+- **Dismiss** (✗) — mark it a false positive.
+- **Reset** (↶) — clear the disposition back to unreviewed.
 
-Unlock editing from the toolbar lock icon, then each row in the findings
-panel exposes three inline buttons:
+Tally chips track confirmed / dismissed / to-review counts. Dispositions
+persist inside the imported bundle, so re-running an upstream producer
+never overwrites your review. Notes, endorsements, and authored findings
+*(Murmur Pro)* save into a portable session document (⌘S), and confirmed
+findings can be exported as WFDB annotations or a citable report from
+the Export menu.
 
-- **Confirm** (✓) — opens a menu so you can record the finding as VT,
-  VF, or "confirmed (unsure)." Confirmed rows pick up a green border, a
-  ✓ marker, and an outline on their tick in the density timeline.
-- **Dismiss** (✗) — marks the finding as a false positive. Dismissed
-  rows strikethrough and dim to ~55% opacity; their density-timeline
-  tick drops to ~30% alpha.
-- **Reset** (↶) — clears the disposition back to unreviewed.
+## Murmur Pro
 
-Tally chips at the top of the findings panel and inside the summary
-chip row above the canvas show your progress at a glance — confirmed,
-dismissed, and unreviewed counts. Dispositions persist to
-`dispositions.json` inside the imported bundle, so re-running the
-upstream producer (which regenerates `<recordName>.annotations.json`)
-never overwrites your work.
+One in-app purchase (Settings ▸ Purchases) unlocks every instrument
+above marked *(Murmur Pro)*, current and future: beat calipers,
+variability metrics, computed trend lanes, the arrhythmia scan,
+morphology clustering, and annotation authoring. The viewer — import,
+calibrated paper, annotation layers, review dispositions, exports —
+stays free.
