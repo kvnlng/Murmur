@@ -18,11 +18,12 @@ arrhythmia review queue, and morphology clustering.
 
 ## Get the app
 
-Install Murmur Studio from the Mac App Store:
-**[Murmur Studio on the App Store](https://apps.apple.com/us/app/murmur-studio/id6782092325)**
+<a href="https://apps.apple.com/us/app/murmur-studio/id6782092325?itsct=apps_box_badge&itscg=30200">
+  <img src="https://toolbox.marketingtools.apple.com/api/badges/download-on-the-mac-app-store/black/en-us?size=250x83" alt="Download on the Mac App Store" height="54">
+</a>
 
-Requires macOS 14 (Sonoma) or later. No Xcode or developer tools needed
-— this is the documentation site for users of the app, not a build guide.
+Requires macOS 26.5 or later. No Xcode or developer tools needed —
+this is the documentation site for users of the app, not a build guide.
 
 ## What's here
 
