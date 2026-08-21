@@ -1,0 +1,158 @@
+// Murmur Studio - element styling for the Just the Docs theme.
+// Just the Docs imports `custom/custom.scss` last, after its own component
+// modules, so rules here win the cascade. The palette and theme variables
+// this file uses are declared in `color_schemes/murmur.scss`, which the
+// theme imports before its modules (and before this file).
+
+// ---- Element styling ----
+.site-title {
+  font-family: Newsreader, Georgia, serif !important;
+  font-size: 1.0625rem !important;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  color: $ink !important;
+}
+
+.site-header,
+.site-footer { border-color: $rule; }
+
+// Sidebar nav: hairline rules, rose marker on the current page.
+.nav-list .nav-list-item .nav-list-link {
+  font-size: 0.8125rem;
+  border-left: 2px solid transparent;
+  color: $ink-2;
+
+  &:hover { background: $paper; color: $ink; }
+
+  &.active {
+    font-weight: 600;
+    color: $ink;
+    background: $paper;
+    border-left-color: $rose;
+  }
+}
+.nav-list .nav-list .nav-list-item .nav-list-link { font-size: 0.78125rem; }
+
+// Page title in the editorial serif; section headings as rose mono rules.
+// Font sizes carry !important because Just the Docs sets heading, th, and td
+// sizes through its fs-* mixins, which are themselves !important and would
+// otherwise win regardless of import order.
+.main-content {
+  h1 {
+    font-family: Newsreader, Georgia, serif;
+    font-weight: 300;
+    font-size: 2.5rem !important;
+    letter-spacing: -0.015em;
+    margin-bottom: 0.75rem;
+  }
+
+  h2 {
+    font-size: 0.875rem !important;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: $rose;
+    margin-top: 2.25rem;
+    margin-bottom: 0.875rem;
+  }
+
+  h3 {
+    font-size: 1.0625rem !important;
+    font-weight: 600;
+    color: $ink;
+    margin-top: 1.75rem;
+  }
+
+  // Kramdown heading anchors stay quiet until hovered.
+  .anchor-heading svg { fill: $ink-3; }
+
+  p, li { font-size: 0.9375rem; }
+
+  a { text-underline-offset: 3px; }
+
+  code {
+    font-size: 0.84375rem;
+    padding: 1px 5px;
+    border: 0;
+  }
+
+  // Tables read as instrument readouts: mono uppercase head, hairline rows.
+  table {
+    border: 1px solid $rule;
+    box-shadow: none;
+    border-radius: 0;
+
+    thead {
+      background: $paper-2;
+      th {
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 0.65625rem !important;
+        font-weight: 400;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: $ink-3;
+        border-bottom: 1px solid $rule;
+      }
+    }
+
+    tbody {
+      tr { background: $paper; }
+      td {
+        border-bottom: 1px solid #F0E9E9;
+        font-size: 0.875rem !important;
+      }
+      td:first-child { color: $ink; }
+    }
+  }
+
+  // Blockquotes become rose note callouts.
+  blockquote {
+    border: 0;
+    border-left: 2px solid $rose;
+    background: $rose-tint;
+    padding: 1rem 1.125rem;
+    margin: 1.5rem 0;
+    color: #3A353F;
+
+    > :first-child { margin-top: 0; }
+    > :last-child { margin-bottom: 0; }
+  }
+
+  hr { border-color: $rule; }
+
+  img { border: 1px solid #CFC4C4; }
+}
+
+// Table of contents / auxiliary rails.
+.aux-nav-list-item a { color: $ink-2; }
+
+// Search field matches the app's control surfaces.
+.search-input {
+  background: $paper-2;
+  border: 1px solid #E0D7D7;
+  font-size: 0.8125rem;
+}
+.search-input:focus { background: $paper; }
+
+// Breadcrumbs in mono.
+.breadcrumb-nav-list {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  .breadcrumb-nav-list-item:last-child a { color: $rose; }
+}
+
+// Prev / next footer links.
+.site-footer { font-size: 0.75rem; color: $ink-3; }
+
+// App Store aux link reads as the one solid button on the page.
+.aux-nav-list-item:last-child a {
+  background: $ink;
+  color: $paper;
+  padding: 0.4375rem 0.875rem;
+  font-size: 0.78125rem;
+  font-weight: 500;
+
+  &:hover { background: $rose; text-decoration: none; }
+}

@@ -7,7 +7,7 @@ url: https://kvnlng.github.io
 baseurl: /Murmur
 
 # Just-the-docs config
-color_scheme: light
+color_scheme: murmur
 search_enabled: true
 heading_anchors: true
 nav_external_links:

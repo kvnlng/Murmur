@@ -1,0 +1,32 @@
+// Murmur Studio - custom Just the Docs colour scheme.
+// Enabled with `color_scheme: murmur` in _config.yml.
+// Loaded after the built-in `light` scheme, so plain assignments override it.
+
+// Palette variables ($ink, $rose, $paper, ...) live in custom/setup.scss.
+
+// ---- Type ----
+$body-font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+$mono-font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace;
+$root-font-size: 16px;
+$body-line-height: 1.5;
+$content-line-height: 1.7;
+$body-heading-line-height: 1.15;
+
+// ---- Just the Docs variable overrides ----
+$body-background-color:        $paper;
+$sidebar-color:                $paper-2;
+$search-background-color:      $paper;
+$table-background-color:       $paper;
+$code-background-color:        #F4EDEF;
+$feedback-color:               $rose-tint;
+
+$body-text-color:              #3A353F;
+$body-heading-color:           $ink;
+$link-color:                   $rose;
+$nav-child-link-color:         #6C6572;
+$search-result-preview-color:  $ink-3;
+
+$border-color:                 $rule;
+$btn-primary-color:            $ink;
+$base-button-color:            $paper;
+
