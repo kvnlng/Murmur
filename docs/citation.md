@@ -35,6 +35,7 @@ reproducibility, swap in the per-version DOI from the Zenodo record's
 "Versions" panel (or use the in-app Copy Citation action, which emits
 the running version).
 
+{% raw %}
 ```bibtex
 @software{murmur_studio,
   author       = {Long, Kevin},
@@ -47,6 +48,7 @@ the running version).
   url          = {https://github.com/kvnlng/Murmur}
 }
 ```
+{% endraw %}
 
 ## RIS
 
