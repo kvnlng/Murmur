@@ -1,0 +1,15 @@
+// Murmur Studio - palette.
+// Just the Docs imports `custom/setup.scss` into every stylesheet it compiles
+// (default, light, and dark) before any colour scheme, so these variables
+// are defined wherever `color_schemes/murmur.scss` or `custom/custom.scss`
+// is compiled. Declaring them in the scheme file alone breaks the light/dark
+// builds, which never import that scheme but do import custom.scss.
+$ink:        #17141A;
+$ink-2:      #4B4552;
+$ink-3:      #8A8290;
+$rose:       #B4315E;
+$rose-deep:  #7E1F41;
+$rose-tint:  #FBEEF2;
+$paper:      #FDFBFA;
+$paper-2:    #F8F3F1;
+$rule:       #E7DFDF;

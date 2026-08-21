@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="{{ site.lang | default: 'en-US' }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {% seo %}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,300;6..72,400;6..72,500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --ink: #17141A;
+      --ink-2: #4B4552;
+      --ink-3: #8A8290;
+      --rose: #B4315E;
+      --rose-deep: #7E1F41;
+      --rose-tint: #FBEEF2;
+      --paper: #FDFBFA;
+      --paper-2: #F8F3F1;
+      --rule: #E7DFDF;
+      --sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+      --serif: Newsreader, Georgia, serif;
+      --mono: 'IBM Plex Mono', ui-monospace, monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--sans);
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--rose); text-decoration: none; }
+    a:hover { color: var(--rose-deep); text-decoration: underline; text-underline-offset: 3px; }
+    ::selection { background: #FBD9E3; }
+    img { max-width: 100%; }
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 0 40px; }
+    .mono { font-family: var(--mono); }
+    .eyebrow {
+      font-family: var(--mono);
+      font-size: 11.5px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--rose);
+    }
+    .label {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+    }
+
+    /* top bar */
+    .topbar {
+      position: sticky; top: 0; z-index: 20;
+      height: 64px;
+      border-bottom: 1px solid var(--rule);
+      background: rgba(253,251,250,0.92);
+      backdrop-filter: saturate(1.4) blur(8px);
+    }
+    .topbar .wrap { display: flex; align-items: center; justify-content: space-between; gap: 32px; height: 100%; }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .mark { width: 26px; height: 26px; border: 1px solid var(--rose); display: flex; align-items: center; justify-content: center; flex: none; }
+    .mark > i { width: 16px; height: 10px; border: 1.5px solid var(--rose); border-bottom: 0; border-radius: 8px 8px 0 0; }
+    .brand b { font-family: var(--serif); font-size: 19px; font-weight: 400; letter-spacing: 0.01em; color: var(--ink); }
+    .topnav { display: flex; align-items: center; gap: 28px; font-size: 13.5px; }
+    .topnav a { color: var(--ink-2); }
+    .topnav a:hover { color: var(--rose); }
+    .btn-dark { background: var(--ink); color: var(--paper) !important; padding: 8px 16px; font-size: 13px; font-weight: 500; }
+    .btn-dark:hover { background: var(--rose); text-decoration: none; }
+
+    /* hero */
+    .hero {
+      padding: 88px 0 0;
+      background-color: var(--paper);
+      background-image:
+        repeating-linear-gradient(0deg, rgba(180,49,94,0.11) 0 1px, transparent 1px 8px),
+        repeating-linear-gradient(90deg, rgba(180,49,94,0.11) 0 1px, transparent 1px 8px),
+        repeating-linear-gradient(0deg, rgba(180,49,94,0.22) 0 1px, transparent 1px 40px),
+        repeating-linear-gradient(90deg, rgba(180,49,94,0.22) 0 1px, transparent 1px 40px);
+    }
+    h1.display {
+      margin: 28px 0 0;
+      max-width: 900px;
+      font-family: var(--serif);
+      font-weight: 300;
+      font-size: clamp(40px, 6vw, 76px);
+      line-height: 1.02;
+      letter-spacing: -0.02em;
+      text-wrap: pretty;
+    }
+    .lede { margin: 32px 0 0; max-width: 660px; font-size: 17px; line-height: 1.62; color: var(--ink-2); text-wrap: pretty; }
+    .lede strong { font-weight: 600; color: var(--ink); }
+    .cta { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; margin-top: 40px; }
+    .cta img { height: 52px; display: block; }
+    .cta .text-link { font-size: 14.5px; font-weight: 500; border-bottom: 1px solid var(--rose); padding-bottom: 2px; }
+    .cta .text-link:hover { text-decoration: none; }
+    .fineprint { font-family: var(--mono); font-size: 12px; color: var(--ink-3); margin-top: 28px; }
+
+    /* scale rail */
+    .rail { margin-top: 80px; border-top: 1px solid rgba(23,20,26,0.14); padding-top: 20px; display: flex; align-items: flex-end; gap: 24px; flex-wrap: wrap; }
+    .rail-copy { flex: 1 1 280px; display: flex; flex-direction: column; gap: 10px; }
+    .rail-copy p { margin: 0; font-family: var(--serif); font-size: 22px; line-height: 1.35; color: var(--ink); }
+    .steps { display: flex; align-items: flex-end; gap: 4px; }
+    .step { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 116px; }
+    .step .bar { width: 100%; background: #F6E7EC; border: 1px solid #E4BCCB; position: relative; }
+    .step .bar > i { position: absolute; top: 4px; bottom: 4px; right: 4px; background: var(--rose); }
+    .step span { font-family: var(--mono); font-size: 12.5px; color: var(--ink); }
+    .step.is-last .bar { background: var(--rose); border-color: var(--rose); height: 24px; }
+    .step.is-last span { color: var(--rose); font-weight: 500; }
+
+    /* shot */
+    .shot { margin-top: 44px; padding-bottom: 56px; }
+    .shot figure { margin: 0; border: 1px solid #CFC4C4; box-shadow: 0 40px 80px -40px rgba(30,20,25,0.5); background: #fff; }
+    .shot img { display: block; width: 100%; }
+    .captions { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 32px; margin-top: 24px; }
+    .captions > div { border-top: 2px solid var(--ink); padding-top: 12px; }
+    .captions > div.accent { border-top-color: var(--rose); }
+    .captions h3 { margin: 0 0 6px; font-size: 14px; font-weight: 600; }
+    .captions p { margin: 0; font-size: 13.5px; line-height: 1.55; color: var(--ink-2); }
+
+    /* sections */
+    section.band { padding: 72px 0; border-top: 1px solid var(--rule); }
+    section.band.tinted { background: var(--paper-2); }
+    h2.section { margin: 0; font-family: var(--serif); font-weight: 300; font-size: 36px; line-height: 1.12; }
+
+    .split { display: flex; gap: 64px; flex-wrap: wrap; }
+    .split > .side { width: 300px; flex: none; }
+    .split > .body { flex: 1 1 480px; }
+    .layers { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1px; background: var(--rule); border: 1px solid var(--rule); }
+    .layers > div { background: var(--paper); padding: 24px; }
+    .layers .n { font-family: var(--mono); font-size: 11.5px; color: var(--rose); margin-bottom: 10px; }
+    .layers h3 { margin: 0 0 8px; font-size: 14.5px; font-weight: 600; }
+    .layers p { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--ink-2); }
+
+    /* tiers */
+    .tiers { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1px; background: #DED5D5; border: 1px solid #DED5D5; }
+    .tier { background: var(--paper); padding: 32px 32px 36px; }
+    .tier.pro { border-top: 3px solid var(--rose); }
+    .tier header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+    .tier h3 { margin: 0; font-family: var(--serif); font-weight: 400; font-size: 26px; }
+    .tier .tag { font-family: var(--mono); font-size: 12px; color: var(--ink-3); }
+    .tier.pro .tag { color: var(--rose); }
+    .tier ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; font-size: 13.5px; line-height: 1.5; color: var(--ink-2); }
+    .tier code { font-family: var(--mono); font-size: 12.5px; }
+
+    /* docs index */
+    .doclist { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); border-top: 1px solid var(--rule); }
+    .doclist a { display: flex; gap: 20px; padding: 22px 24px; border-bottom: 1px solid var(--rule); color: inherit; }
+    .doclist a:hover { background: var(--rose-tint); text-decoration: none; }
+    .doclist .n { font-family: var(--mono); font-size: 11.5px; color: var(--rose); padding-top: 3px; }
+    .doclist h3 { margin: 0 0 5px; font-size: 15px; font-weight: 600; }
+    .doclist p { margin: 0; font-size: 13.5px; line-height: 1.55; color: var(--ink-2); }
+    .doclist code { font-family: var(--mono); font-size: 12.5px; }
+
+    /* footer */
+    footer.site { background: var(--ink); color: #D9D2D6; padding: 40px 0; }
+    footer.site .wrap { display: flex; gap: 64px; align-items: flex-start; flex-wrap: wrap; }
+    footer.site .disclaimer { flex: 1 1 420px; }
+    footer.site .label { color: #E0899F; }
+    footer.site p { margin: 12px 0 0; font-size: 14.5px; line-height: 1.6; max-width: 620px; }
+    footer.site nav { display: flex; flex-direction: column; gap: 8px; font-size: 13px; padding-top: 26px; }
+    footer.site nav a { color: #A79FA5; }
+    footer.site nav a.strong { color: var(--paper); }
+    footer.site .copy { font-family: var(--mono); font-size: 11.5px; color: #6E666C; margin-top: 8px; }
+
+    @media (max-width: 900px) {
+      .wrap { padding: 0 24px; }
+      .topnav a:not(.btn-dark) { display: none; }
+      .hero { padding-top: 56px; }
+      .steps { display: none; }
+      .split { gap: 32px; }
+      .split > .side { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="wrap">
+    <a class="brand" href="{{ site.baseurl }}/" style="color: inherit;">
+      <span class="mark"><i></i></span>
+      <b>{{ site.title }}</b>
+    </a>
+    <nav class="topnav">
+      <a href="{{ site.baseurl }}/getting-started">Getting started</a>
+      <a href="{{ site.baseurl }}/architecture">Architecture</a>
+      <a href="{{ site.baseurl }}/annotation-schema">Schema</a>
+      <a href="{{ site.baseurl }}/performance">Performance</a>
+      <a href="{{ site.baseurl }}/citation">Citation</a>
+      <a class="btn-dark" href="https://apps.apple.com/us/app/murmur-studio/id6782092325">App Store</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="hero">
+    <div class="wrap">
+      <p class="eyebrow" style="margin: 0;">macOS · PhysioNet WFDB · research use</p>
+      <h1 class="display">A microscope and a telescope for ECG waveform data.</h1>
+      <p class="lede">Open a PhysioNet/WFDB recording and range from the whole record down to a single heartbeat on calibrated ECG paper. The free viewer renders the signal with its annotation layers and a confirm/dismiss review workflow; a single <strong>Murmur Pro</strong> purchase unlocks the analysis instruments — beat calipers, whole-record trend lanes, variability metrics, a ranked arrhythmia review queue, and morphology clustering.</p>
+      <div class="cta">
+        <a href="https://apps.apple.com/us/app/murmur-studio/id6782092325?itsct=apps_box_badge&amp;itscg=30200"><img src="https://toolbox.marketingtools.apple.com/api/badges/download-on-the-mac-app-store/black/en-us?size=250x83" alt="Download on the Mac App Store"></a>
+        <a class="text-link" href="{{ site.baseurl }}/getting-started">Read the documentation</a>
+      </div>
+      <p class="fineprint">Requires macOS 26.5 or later · one-time in-app purchase for Pro</p>
+
+      <div class="rail">
+        <div class="rail-copy">
+          <span class="label">One viewport, six orders of magnitude</span>
+          <p>Every surface shares one viewport, so nothing ever falls out of time-lock.</p>
+        </div>
+        <div class="steps">
+          <div class="step"><div class="bar" style="height: 72px;"><i style="left: 84%;"></i></div><span>72 h</span></div>
+          <div class="step"><div class="bar" style="height: 60px;"><i style="left: 70%;"></i></div><span>1 h</span></div>
+          <div class="step"><div class="bar" style="height: 48px;"><i style="left: 52%;"></i></div><span>5 min</span></div>
+          <div class="step"><div class="bar" style="height: 36px;"><i style="left: 28%;"></i></div><span>10 s</span></div>
+          <div class="step is-last"><div class="bar"></div><span>2 s — one beat</span></div>
+        </div>
+      </div>
+
+      <div class="shot">
+        <figure>
+          <img src="{{ site.baseurl }}/assets/main-window.png" alt="Murmur Studio main window — record sidebar, bedside stage on calibrated ECG paper, and the ranked review queue.">
+        </figure>
+        <div class="captions">
+          <div>
+            <h3>Record sidebar</h3>
+            <p>Every record in the folder — signal count, sample rate, duration. The first import decodes and builds the pyramid; later visits load from cache.</p>
+          </div>
+          <div class="accent">
+            <h3>Bedside stage</h3>
+            <p>Variability metrics, whole-record overview and hour bands, and Metal-rendered paper pinned to 25 mm/s · 10 mm/mV.</p>
+          </div>
+          <div>
+            <h3>Review queue</h3>
+            <p>Ranked VT/VF candidates and rhythm events, each with score, span, and model provenance. Confirm, dismiss, reset.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <section class="band">
+    <div class="wrap split">
+      <div class="side">
+        <p class="label" style="margin: 0 0 14px;">How it holds up</p>
+        <h2 class="section">Three layers, one time axis.</h2>
+      </div>
+      <div class="body layers">
+        <div>
+          <div class="n">01 / DATA ENGINE</div>
+          <h3>Decode and pyramid</h3>
+          <p>WFDB decoder, min/max pyramid, manifest writer. Multi-frequency records feed straight in — no separate ingest step.</p>
+        </div>
+        <div>
+          <div class="n">02 / WAVEFORM CANVAS</div>
+          <h3>Draw at any scale</h3>
+          <p>An LOD selector and zero-copy GPU buffers keep pan and zoom smooth across multi-hour records.</p>
+        </div>
+        <div>
+          <div class="n">03 / CONTROL OVERLAY</div>
+          <h3>Calibrate and review</h3>
+          <p>Gain and speed presets, the calibration lock, annotation layers, and dispositions that persist in the bundle.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band tinted">
+    <div class="wrap">
+      <div class="tiers">
+        <div class="tier">
+          <header><h3>The viewer</h3><span class="tag">FREE</span></header>
+          <ul>
+            <li>Import WFDB records — <code>.hea</code> + <code>.dat</code>, multi-frequency included</li>
+            <li>Calibrated ECG paper with the gain / speed seam</li>
+            <li>The record’s own annotator layer, on trace and in queue</li>
+            <li>Confirm / dismiss / reset review dispositions</li>
+            <li>Low-rate trend strips: vitals, alarms, signal quality</li>
+            <li>Exports — WFDB annotations and citable reports</li>
+          </ul>
+        </div>
+        <div class="tier pro">
+          <header><h3>Murmur Pro</h3><span class="tag">ONE PURCHASE</span></header>
+          <ul>
+            <li>Beat calipers — PR, QRS, QT, QTc against the patient’s own template</li>
+            <li>Variability metrics: time domain, frequency domain, QT variability</li>
+            <li>Computed trend lanes on one shared 72 h axis</li>
+            <li>Ranked arrhythmia scan — VT/VF, AF, pauses, with provenance</li>
+            <li>Morphology clustering with representative shapes</li>
+            <li>Annotation authoring and portable session documents</li>
+          </ul>
+        </div>
+      </div>
+      <p class="fineprint">Every instrument marked (Murmur Pro) unlocks together, current and future. The viewer stays free.</p>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap">
+      <h2 class="section" style="margin-bottom: 32px;">Documentation</h2>
+      <div class="doclist">
+        <a href="{{ site.baseurl }}/getting-started">
+          <span class="n">01</span>
+          <span><h3>Getting started</h3><p>Open a record, read the bedside view, review findings, and what Murmur Pro adds.</p></span>
+        </a>
+        <a href="{{ site.baseurl }}/architecture">
+          <span class="n">02</span>
+          <span><h3>Architecture</h3><p>The three-layer Data Engine / Waveform Canvas / Control Overlay split and the key invariants.</p></span>
+        </a>
+        <a href="{{ site.baseurl }}/annotation-schema">
+          <span class="n">03</span>
+          <span><h3>Annotation JSON schema</h3><p>The wire format external producers can emit as <code>&lt;recordName&gt;.annotations.json</code>.</p></span>
+        </a>
+        <a href="{{ site.baseurl }}/performance">
+          <span class="n">04</span>
+          <span><h3>Performance notes</h3><p>How the pyramid, LOD selector, and zero-copy GPU buffers keep pan/zoom smooth on multi-hour records.</p></span>
+        </a>
+        <a href="{{ site.baseurl }}/citation">
+          <span class="n">05</span>
+          <span><h3>Citing Murmur Studio</h3><p>DOI-stable citation for published work, straight from the in-app Copy citation action.</p></span>
+        </a>
+        <a href="{{ site.baseurl }}/interaction-coverage/">
+          <span class="n">06</span>
+          <span><h3>Interaction coverage</h3><p>Every gesture, key, and control surface in the window, and what each one does.</p></span>
+        </a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <div class="disclaimer">
+      <p class="label" style="margin: 0;">For research</p>
+      <p>Murmur Studio is a tool for research and analysis of physiologic recordings. It is not a medical device and is not intended for diagnosis or clinical decision-making.</p>
+    </div>
+    <nav>
+      <a class="strong" href="https://apps.apple.com/us/app/murmur-studio/id6782092325">Mac App Store</a>
+      <a href="{{ site.baseurl }}/privacy">Privacy</a>
+      <a href="{{ site.baseurl }}/citation">Citation</a>
+      <span class="copy">{{ site.footer_content | default: "© 2026 Kevin Long." | strip_html }}</span>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>
