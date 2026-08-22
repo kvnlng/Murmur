@@ -25,14 +25,16 @@ struct ReviewTableCSVTests {
         start: Int64 = 0,
         state: String = "unreviewed",
         note: String? = nil,
-        category: String = "AFib"
+        category: String = "AFib",
+        confirmedCategory: String? = nil
     ) -> ReviewTableCSV.Row {
         ReviewTableCSV.Row(
             record: record, recordPath: path, annotationID: id, kind: "range",
             startSample: start, endSample: 5000,
             startSeconds: 0, endSeconds: 10,
             lead: "II", category: category, label: nil, source: "physionet-dx",
-            confidence: nil, state: state, confirmedKind: nil, note: note,
+            confidence: nil, state: state, confirmedKind: nil,
+            confirmedCategory: confirmedCategory, note: note,
             reviewedBy: nil, reviewedAt: nil, flagged: false, headerComments: []
         )
     }
@@ -47,7 +49,14 @@ struct ReviewTableCSVTests {
     func columnOrderIsStable() {
         #expect(ReviewTableCSV.columns.first == "record")
         #expect(ReviewTableCSV.columns.last == "header_comments")
-        #expect(ReviewTableCSV.columns.count == 20)
+        #expect(ReviewTableCSV.columns.count == 21)
+        // #331 — the override column sits immediately after the kind it
+        // generalises, so a consumer reading left-to-right meets "what the
+        // analyst said" right where it used to meet the closed VT/VF enum.
+        #expect(
+            ReviewTableCSV.columns.firstIndex(of: "confirmed_category")
+            == (ReviewTableCSV.columns.firstIndex(of: "confirmed_kind").map { $0 + 1 })
+        )
     }
 
     @Test("A note containing a comma, a quote and a newline is RFC 4180 quoted")

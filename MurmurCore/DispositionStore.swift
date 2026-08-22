@@ -66,13 +66,24 @@ final class DispositionStore {
 
     // MARK: - Mutate
 
-    /// Mark an annotation as `confirmed`. `kind` may narrow the VT/VF call
-    /// (or be `nil` if the analyst can't tell).
-    func confirm(_ annotationID: UUID, kind: AnnotationDisposition.ConfirmedKind?, note: String? = nil) {
+    /// Mark an annotation as `confirmed`.
+    ///
+    /// `kind` may narrow the VT/VF call (or be `nil` if the analyst can't
+    /// tell). `category` (#331) is what the analyst says the finding actually
+    /// IS — the producer's own category when they agree with the label,
+    /// something else when they don't. Free-form: the vocabulary belongs to
+    /// whoever produced the annotations.
+    func confirm(
+        _ annotationID: UUID,
+        kind: AnnotationDisposition.ConfirmedKind?,
+        category: String? = nil,
+        note: String? = nil
+    ) {
         records[annotationID] = AnnotationDisposition(
             annotationID: annotationID,
             state: .confirmed,
             confirmedKind: kind,
+            confirmedCategory: category,
             note: note?.nilIfEmpty,
             reviewedAt: .now,
             reviewedBy: defaultReviewerName

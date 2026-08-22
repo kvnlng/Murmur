@@ -194,8 +194,16 @@ the producer never overwrites the analyst's work. The file is
       "annotationID": "B8A4E2C8-…",
       "state": "confirmed",
       "confirmedKind": "vt",
+      "confirmedCategory": "VT",
       "note": "Sustained run, ~160 BPM",
       "reviewedAt": "2026-06-18T17:21:33Z",
+      "reviewedBy": "kevin"
+    },
+    {
+      "annotationID": "9E3C1B02-…",
+      "state": "confirmed",
+      "confirmedCategory": "AFlutter",
+      "reviewedAt": "2026-06-18T17:21:58Z",
       "reviewedBy": "kevin"
     },
     {
@@ -215,10 +223,29 @@ the producer never overwrites the analyst's work. The file is
 |---|---|---|---|
 | `annotationID` | yes | uuid string | Must match the corresponding `Annotation.id` from the producer file. |
 | `state` | yes | `"confirmed"` \| `"dismissed"` | Three-way conceptually — *unreviewed* is the absence of a record. |
-| `confirmedKind` | no | `"vt"` \| `"vf"` \| `"unclassified"` | Only meaningful when `state == "confirmed"`. `null` is acceptable when the analyst can't tell. |
+| `confirmedKind` | no | `"vt"` \| `"vf"` \| `"unclassified"` | Only meaningful when `state == "confirmed"`. `null` is acceptable when the analyst can't tell. A closed enum from the arrhythmia scan — see `confirmedCategory` for everything else. |
+| `confirmedCategory` | no | string | What the analyst says the finding **is**. Only meaningful when `state == "confirmed"`. Equal to the annotation's own `category` when they agreed with your label; different when they overrode it. |
 | `note` | no | string | Free-form analyst-readable text. Empty / whitespace-only notes get normalized to `null`. |
 | `reviewedAt` | yes | ISO-8601 string | Wall-clock time when the disposition was last changed. |
 | `reviewedBy` | no | string | Default = macOS user name. Free-form. |
+
+### Agreeing, and disagreeing
+
+`confirmedCategory` is the field that makes a review worth reading back.
+Without it, "confirmed" means only that a human looked; with it, a confirmed
+row states a claim in the analyst's own voice, and comparing it to the
+annotation's `category` tells you in one operation whether they agreed with
+you.
+
+It is **free-form on purpose**. The vocabulary belongs to whoever produced the
+annotations — `AFib`, `PVC`, a SNOMED code, your own internal token — so
+Murmur does not constrain it to any list it invented, and never derives
+`confirmedKind` from it. For the reasoning, see
+[What Murmur Asserts]({{ site.baseurl }}/what-murmur-asserts).
+
+Consumers should treat the three fields in precedence order — `note`, then
+`confirmedCategory`, then `confirmedKind` — which is the order Murmur's own
+WFDB annotator export uses when it has to pick one string.
 
 ### Lifecycle
 
@@ -266,6 +293,7 @@ quietly covers less than the cohort.
 | `confidence` | 0…1 as the producer sent it, to 4 dp. Empty when absent. |
 | `state` | `unreviewed`, `confirmed`, or `dismissed`. |
 | `confirmed_kind` | `vt` / `vf` / `unclassified`, when the analyst set one. |
+| `confirmed_category` | What the analyst says the finding is. Compare with `category` to find the rows where they overrode your label. |
 | `note` | The analyst's free-form note. |
 | `reviewed_by` / `reviewed_at` | Who reviewed it and when (ISO 8601, UTC). |
 | `flagged` | Whether the record is flagged for the session. |

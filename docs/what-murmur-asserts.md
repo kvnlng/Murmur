@@ -92,6 +92,13 @@ review work. The label-vs-caption split exists for the same reason:
 what an analyst *calls* a finding can evolve without corrupting what
 was *measured*.
 
+An analyst may also confirm a finding **as** something other than what
+it arrived labelled as (`confirmedCategory`). That disagreement is
+recorded beside your label, never over it: both words survive to the
+export, so a consumer can see the claim and the counter-claim. The field
+is free-form, and Murmur never interprets what an analyst types into it —
+the vocabulary is the producer's, not the app's.
+
 ### 6. Export only what a human asserted
 
 WFDB annotation export ships analyst-authored and confirmed findings —

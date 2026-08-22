@@ -43,6 +43,11 @@ enum ReviewTableCSV {
         var confidence: Double?
         var state: String               // "unreviewed" | "confirmed" | "dismissed"
         var confirmedKind: String?
+        /// #331 — what the analyst says the finding IS. Present on every
+        /// confirmed row, equal to `category` when they agreed with the
+        /// producer's label and different when they overrode it, so a consumer
+        /// can find the disagreements with one comparison.
+        var confirmedCategory: String?
         var note: String?
         var reviewedBy: String?
         var reviewedAt: Date?
@@ -54,7 +59,7 @@ enum ReviewTableCSV {
         "record", "record_path", "annotation_id", "kind",
         "start_sample", "end_sample", "start_seconds", "end_seconds",
         "lead", "category", "label", "source", "confidence",
-        "state", "confirmed_kind", "note", "reviewed_by", "reviewed_at",
+        "state", "confirmed_kind", "confirmed_category", "note", "reviewed_by", "reviewed_at",
         "flagged", "header_comments",
     ]
 
@@ -92,6 +97,7 @@ enum ReviewTableCSV {
             row.confidence.map { String(format: "%.4f", $0) } ?? "",
             row.state,
             row.confirmedKind ?? "",
+            row.confirmedCategory ?? "",
             row.note ?? "",
             row.reviewedBy ?? "",
             row.reviewedAt.map(formatISO) ?? "",

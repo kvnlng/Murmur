@@ -94,6 +94,7 @@ enum ReviewTableBuilder {
                     // store never materialises a row per annotation.
                     state: disposition?.state.rawValue ?? "unreviewed",
                     confirmedKind: disposition?.confirmedKind?.rawValue,
+                    confirmedCategory: disposition?.confirmedCategory,
                     note: disposition?.note,
                     reviewedBy: disposition?.reviewedBy,
                     reviewedAt: disposition?.reviewedAt,

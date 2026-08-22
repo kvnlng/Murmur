@@ -73,7 +73,7 @@ enum MarkdownReport {
             for ann in sorted {
                 let time = formatTime(seconds: Double(ann.sampleIndex) / sampleRate)
                 let confidence = ann.confidence.map { String(format: "%.2f", $0) } ?? "—"
-                let disposition = formatDisposition(dispositions[ann.id])
+                let disposition = formatDisposition(dispositions[ann.id], annotation: ann)
                 lines.append("| \(time) | \(escape(ann.category)) | \(confidence) | \(disposition) | \(escape(ann.source)) |")
             }
         }
@@ -133,10 +133,21 @@ enum MarkdownReport {
 
     /// Disposition column. Mirrors the in-app vocabulary so analysts
     /// reading the report recognize the states.
-    static func formatDisposition(_ disposition: AnnotationDisposition?) -> String {
+    static func formatDisposition(
+        _ disposition: AnnotationDisposition?,
+        annotation: Annotation? = nil
+    ) -> String {
         guard let d = disposition else { return "unreviewed" }
         switch d.state {
         case .confirmed:
+            // #331 — an analyst who confirmed the finding AS something else
+            // said the most important thing in the row; lead with it. Agreeing
+            // with the producer's own label reads as plain "confirmed", so the
+            // two cases stay distinguishable.
+            if let annotation, d.overridesCategory(of: annotation),
+               let category = d.confirmedCategory {
+                return "confirmed (as \(category))"
+            }
             if let kind = d.confirmedKind, kind != .unclassified {
                 return "confirmed (\(kind.shortLabel))"
             }
