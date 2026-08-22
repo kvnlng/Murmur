@@ -23,6 +23,11 @@ struct BedsideView: View {
     /// value adopts it so every panel re-renders against the new factor.
     /// nil (previews/tests) means mutations render only after a reload.
     var onRecordingMutated: ((Recording) -> Void)?
+    /// #330 — the cohort review-table export. Supplied by `ContentView` when
+    /// the bedside is showing inside the browsing shell (which has a record
+    /// list to tabulate); nil in the direct-view path, where the menu item is
+    /// correspondingly disabled.
+    var onExportReviewTable: (() -> Void)?
 
     @State private var viewport: RecordingViewport
     /// Shared amplitude/timebase calibration (X40). Gain is shared across
@@ -222,11 +227,13 @@ struct BedsideView: View {
     init(
         recording: Recording,
         recordingDirectory: URL,
-        onRecordingMutated: ((Recording) -> Void)? = nil
+        onRecordingMutated: ((Recording) -> Void)? = nil,
+        onExportReviewTable: (() -> Void)? = nil
     ) {
         self.recording = recording
         self.recordingDirectory = recordingDirectory
         self.onRecordingMutated = onRecordingMutated
+        self.onExportReviewTable = onExportReviewTable
         // Viewport + focus mode key off the first *ECG* channel — trend
         // channels (1/60 Hz vitals, GMM states) live in their own strip and
         // shouldn't drive viewport math.
@@ -457,6 +464,9 @@ struct BedsideView: View {
             exportSnapshot: { exportSnapshotPNG() },
             exportWFDBAnnotations: { exportWFDBAnnotations() },
             wfdbExportAvailable: amberFindingCount > 0,
+            // #330 — supplied by ContentView, which owns the record list.
+            exportReviewTable: { onExportReviewTable?() },
+            reviewTableAvailable: onExportReviewTable != nil,
             exportWFDBHelp: exportWFDBHelp,
             showProducers: { showProducersPanel = true },
             toggleReviewQueue: {

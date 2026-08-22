@@ -100,6 +100,15 @@ public struct BedsideCommands {
     public var exportReport: () -> Void
     public var exportSnapshot: () -> Void
     public var exportWFDBAnnotations: () -> Void
+    /// #330 — the cohort review table. Unlike its neighbours this one is NOT
+    /// scoped to the open recording: it covers every record in the navigator,
+    /// so the closure is supplied by `ContentView` (which owns the record list)
+    /// and merely travels through here to reach the single-site toolbar.
+    public var exportReviewTable: () -> Void
+    /// False when the navigator holds no records — nothing to tabulate.
+    /// Shown DISABLED rather than hidden (X32): the capability exists, this
+    /// window just has nothing to apply it to.
+    public var reviewTableAvailable: Bool
     /// False when no finding has been confirmed — there is nothing to write.
     /// Shown DISABLED (X32), matching the toolbar menu's own gating.
     public var wfdbExportAvailable: Bool
@@ -235,6 +244,8 @@ public struct BedsideCommands {
         exportSnapshot: @escaping () -> Void = {},
         exportWFDBAnnotations: @escaping () -> Void = {},
         wfdbExportAvailable: Bool = false,
+        exportReviewTable: @escaping () -> Void = {},
+        reviewTableAvailable: Bool = false,
         exportWFDBHelp: String = "Write your confirmed findings as a WFDB annotation file beside the recording, to hand to a peer",
         showProducers: @escaping () -> Void = {},
         toggleReviewQueue: @escaping () -> Void = {},
@@ -277,6 +288,8 @@ public struct BedsideCommands {
         self.exportSnapshot = exportSnapshot
         self.exportWFDBAnnotations = exportWFDBAnnotations
         self.wfdbExportAvailable = wfdbExportAvailable
+        self.exportReviewTable = exportReviewTable
+        self.reviewTableAvailable = reviewTableAvailable
         self.exportWFDBHelp = exportWFDBHelp
         self.showProducers = showProducers
         self.toggleReviewQueue = toggleReviewQueue

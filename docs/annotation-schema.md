@@ -230,3 +230,48 @@ the producer never overwrites the analyst's work. The file is
 
 The `DispositionStoreTests` suite covers round-trip persistence,
 state transitions, tally counts, and whitespace-note normalization.
+
+## Review table export
+
+Every other export is scoped to one record. The **review table** is the other
+direction: one CSV row per annotation across *every* record in the open folder
+or session, carrying the analyst's disposition — the file you feed back to
+whatever produced the annotations.
+
+Export ▸ **Export review table…** writes `<folder-or-session>-review.csv`.
+
+**Unreviewed rows are included.** This is a review table, not the amber-only
+[WFDB annotation export](#analyst-dispositions): the consumer needs the
+denominator, because what was looked at and left alone is as much a result as
+what was confirmed.
+
+Records you never opened have no imported bundle, so they contribute no rows.
+They are counted, and the completion message names them — an export never
+quietly covers less than the cohort.
+
+### Columns
+
+| Column | Meaning |
+|---|---|
+| `record` | The recording's device / record name. |
+| `record_path` | Navigator id — the `.hea` path relative to the opened folder. |
+| `annotation_id` | `Annotation.id`; joins back to your producer file. |
+| `kind` | `point` or `range`. |
+| `start_sample` / `end_sample` | Sample indices. `end_sample` is empty for points. |
+| `start_seconds` / `end_seconds` | The same positions in seconds, at the record's own rate, to 3 dp. |
+| `lead` | Channel label the finding applies to, if any. |
+| `category` | The producer's semantic category, verbatim. |
+| `label` | The producer's display token, if it sent one. |
+| `source` | Producer id. |
+| `confidence` | 0…1 as the producer sent it, to 4 dp. Empty when absent. |
+| `state` | `unreviewed`, `confirmed`, or `dismissed`. |
+| `confirmed_kind` | `vt` / `vf` / `unclassified`, when the analyst set one. |
+| `note` | The analyst's free-form note. |
+| `reviewed_by` / `reviewed_at` | Who reviewed it and when (ISO 8601, UTC). |
+| `flagged` | Whether the record is flagged for the session. |
+| `header_comments` | The record's `.hea` comment lines, joined with ` \| `. |
+
+UTF-8, no BOM, `\n` line endings, RFC 4180 quoting. Rows sort by record path,
+then start sample, then annotation id, so the same review exports
+byte-identically every time. The header row is always present, even when the
+table is empty.
