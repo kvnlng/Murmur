@@ -468,9 +468,14 @@ final class MurmurUITests: XCTestCase {
     @MainActor
     func testConfirmFindingViaMenuExposesResetButton() throws {
         // Guards: dispositionStore.confirm path + the Menu wrapping of the
-        // confirm action (Confirm as VT / Confirm as VF / Confirm (unsure)).
-        // SwiftUI Menu on macOS opens a popup; selecting an item fires
-        // the underlying onConfirm closure.
+        // confirm action. SwiftUI Menu on macOS opens a popup; selecting an
+        // item fires the underlying onConfirm closure.
+        //
+        // #331 made the menu's other items record-driven ("Confirm as <the
+        // record's own categories>"), so their strings vary by fixture. This
+        // test deliberately reaches for the ONE item that does not: "Confirm
+        // (unsure)" is a fixed string precisely so a menu-plumbing test has
+        // something stable to click.
         let app = XCUIApplication()
         app.launchArguments += ["--ui-test-sample"]
         app.launch()
@@ -494,8 +499,7 @@ final class MurmurUITests: XCTestCase {
         // Open the Menu on the first finding's confirm control.
         confirmButtons.element(boundBy: 0).click()
 
-        // Pick the "Confirm (unsure)" option — keeps the test resilient
-        // to the menu's exact ordering of VT/VF items.
+        // Pick the "Confirm (unsure)" option — the fixture-independent item.
         let menuItem = app.menuItems["Confirm (unsure)"]
         XCTAssertTrue(menuItem.waitForExistence(timeout: 3),
                       "Confirm menu should open and expose its items")

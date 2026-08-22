@@ -252,6 +252,12 @@ struct FindingsPanel: View {
     @State private var renameTarget: Annotation?
     @State private var renameText: String = ""
 
+    /// #331 — the finding being confirmed AS a category the analyst types.
+    /// Same dialog shape as rename above, and for the same reason: the row is
+    /// a click-to-jump button, so an inline field would fight it.
+    @State private var confirmAsTarget: Annotation?
+    @State private var confirmAsText: String = ""
+
     @State private var sort: FindingSort = .structural
     @State private var expandedGroups: Set<String> = []
     @State private var showNormals: Bool = false
@@ -356,6 +362,37 @@ struct FindingsPanel: View {
             // The label-vs-caption split, stated where the analyst acts on it.
             Text("Renames this finding in the queue and exports. "
                  + "The measured citation is unchanged.")
+        }
+        // #331 — "confirm as", the disagree-with-the-label gesture. Distinct
+        // from rename above: rename changes what MURMUR calls the finding in
+        // its own queue, this records what the ANALYST says the finding is,
+        // in their voice, into the disposition sidecar. Free-form because the
+        // vocabulary belongs to whoever produced the annotations.
+        .alert(
+            "Confirm Finding As",
+            isPresented: Binding(
+                get: { confirmAsTarget != nil },
+                set: { presented in
+                    if !presented {
+                        confirmAsTarget = nil
+                        onRenameFieldActive?(false)
+                    }
+                }
+            )
+        ) {
+            TextField("Category", text: $confirmAsText)
+                .accessibilityIdentifier("finding-confirm-as-field")
+            Button("Confirm") {
+                let trimmed = confirmAsText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let target = confirmAsTarget, !trimmed.isEmpty {
+                    confirm(target, as: trimmed)
+                }
+            }
+            .accessibilityIdentifier("finding-confirm-as-save")
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Records what you say this finding is. "
+                 + "Leave it as-is to agree with the label it arrived with.")
         }
     }
 
@@ -1083,6 +1120,19 @@ struct FindingsPanel: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
+                    if let override = confirmedOverrideLabel(for: entry.annotation) {
+                        // #331 — the analyst overrode the producer's label.
+                        // Rendered in their voice next to the producer's, so
+                        // the row shows the disagreement rather than hiding it
+                        // behind a generic "confirmed".
+                        Text(override)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .accessibilityIdentifier(
+                                "finding-override-\(entry.annotation.id.uuidString)"
+                            )
+                    }
                     Spacer(minLength: 4)
                     if let departureLabel = entry.departureLabel {
                         // Neutral ink per the ratified 2026-07-05 B-RUO
@@ -1237,20 +1287,71 @@ struct FindingsPanel: View {
 
     // MARK: - Disposition buttons (inline on expanded exemplars)
 
+    /// Every OTHER category present on this record, sorted, for the "confirm
+    /// as another finding here" submenu. Drawn from the record itself rather
+    /// than any list Murmur keeps: the categories an analyst is most likely to
+    /// reach for are the ones the producer already used on this recording, and
+    /// a curated list would be Murmur asserting a vocabulary it does not own.
+    private func otherCategories(besides category: String) -> [String] {
+        Array(Set(annotations.map(\.category)))
+            .filter { $0 != category }
+            .sorted()
+    }
+
+    /// Confirms a finding AS a category. `kind: nil` throughout — the closed
+    /// VT/VF enum is not a classification of an arbitrary producer's finding,
+    /// and inferring one from the category string would be Murmur reading a
+    /// vocabulary it does not own.
+    private func confirm(_ annotation: Annotation, as category: String) {
+        dispositionStore.confirm(annotation.id, kind: nil, category: category)
+        recentlyActed.insert(annotation.id)
+    }
+
+    /// Chip text when the analyst confirmed the finding as something OTHER
+    /// than what it arrived labelled as — nil when they agreed, so agreement
+    /// stays silent and only the disagreement draws the eye.
+    private func confirmedOverrideLabel(for annotation: Annotation) -> String? {
+        guard let record = dispositionStore.record(for: annotation.id),
+              record.state == .confirmed,
+              record.overridesCategory(of: annotation),
+              let category = record.confirmedCategory else { return nil }
+        return "→ \(category)"
+    }
+
     private func dispositionButtons(for annotation: Annotation) -> some View {
         HStack(spacing: 3) {
-            // Confirm uses a Menu so the analyst can narrow the call
-            // to VT / VF / unsure. Matches the pre-redesign contract
-            // the disposition XCUI tests exercise.
+            // Confirm uses a Menu so the analyst can say what the finding IS,
+            // not merely that they looked at it.
+            //
+            // #331 replaced the hard-coded "Confirm as VT / VF" pair here. Those
+            // two were a holdover from when this queue only ever held arrhythmia-
+            // scan output; on a record whose producer emits AFib, PVC, or a SNOMED
+            // code they were the wrong two words, and an analyst could say nothing
+            // but bare "confirmed". The items below are driven by the record's own
+            // vocabulary instead. The VT/VF narrowing still exists where it means
+            // something — the candidate rail's own confirm control, which writes
+            // `RegionDisposition.confirmedKind` and is untouched by this.
+            //
+            // "Confirm (unsure)" is load-bearing verbatim: MurmurUITests reaches
+            // this menu by identifier and clicks that exact string.
             Menu {
-                Button("Confirm as VT") {
-                    dispositionStore.confirm(annotation.id, kind: .vt)
-                    recentlyActed.insert(annotation.id)
+                Button("Confirm as \(annotation.category)") {
+                    confirm(annotation, as: annotation.category)
                 }
-                Button("Confirm as VF") {
-                    dispositionStore.confirm(annotation.id, kind: .vf)
-                    recentlyActed.insert(annotation.id)
+                let others = otherCategories(besides: annotation.category)
+                if !others.isEmpty {
+                    Menu("Confirm as another finding here") {
+                        ForEach(others, id: \.self) { category in
+                            Button(category) { confirm(annotation, as: category) }
+                        }
+                    }
                 }
+                Button("Confirm as…") {
+                    confirmAsText = annotation.category
+                    confirmAsTarget = annotation
+                    onRenameFieldActive?(true)
+                }
+                Divider()
                 Button("Confirm (unsure)") {
                     dispositionStore.confirm(annotation.id, kind: nil)
                     recentlyActed.insert(annotation.id)

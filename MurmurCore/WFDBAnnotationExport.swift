@@ -84,11 +84,12 @@ enum WFDBAnnotationExport {
         // author range findings carry `analystAuthoredSource` and need no
         // disposition). A confirmed disposition's note wins as the text.
         for annotation in annotations {
-            let confirmedNote = annotationDispositions[annotation.id]?.state == .confirmed
-                ? annotationDispositions[annotation.id]?.note ?? annotation.displayLabel
+            let disposition = annotationDispositions[annotation.id]
+            let confirmedText = disposition?.state == .confirmed
+                ? exportLabel(for: annotation, disposition: disposition)
                 : nil
             let authored = annotation.source == Annotation.analystAuthoredSource
-            guard let text = confirmedNote ?? (authored ? annotation.displayLabel : nil) else { continue }
+            guard let text = confirmedText ?? (authored ? annotation.displayLabel : nil) else { continue }
             findings.append(Finding(
                 startSample: annotation.sampleIndex,
                 endSample: annotation.endSampleIndex,
@@ -98,6 +99,35 @@ enum WFDBAnnotationExport {
 
         findings.append(contentsOf: authoredExtra)
         return findings.sorted { $0.startSample < $1.startSample }
+    }
+
+    /// The text a confirmed annotation carries into the annotator file.
+    ///
+    /// Precedence, most-specific first (#331):
+    ///   1. the analyst's own `note` — they typed a sentence about THIS finding
+    ///   2. `confirmedCategory` — they said what the finding IS, possibly
+    ///      disagreeing with the producer's label; that disagreement is the
+    ///      single most important thing to carry downstream
+    ///   3. `confirmedKind` — the VT/VF narrowing, when it says something
+    ///      ("unclassified" does not)
+    ///   4. the annotation's own `displayLabel` — nobody added anything, so
+    ///      the producer's word stands
+    ///
+    /// Note beats category deliberately: prose is strictly more specific than
+    /// a one-word class, and an analyst who typed a note meant it to be read.
+    static func exportLabel(
+        for annotation: Annotation,
+        disposition: AnnotationDisposition?
+    ) -> String {
+        if let note = disposition?.note { return note }
+        if let category = disposition?.confirmedCategory { return category }
+        // `exportLabel` hangs off the Optional (below), which is also what
+        // keeps "kind absent" and "kind unclassified" landing on the same
+        // neutral wording. Both are excluded here so precedence falls through
+        // to the producer's own label instead.
+        let kind = disposition?.confirmedKind
+        if kind != nil, kind != .unclassified { return kind.exportLabel }
+        return annotation.displayLabel
     }
 
     // MARK: - Finding → annotation mapping
