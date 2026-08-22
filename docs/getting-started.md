@@ -96,10 +96,25 @@ hour → window.
   card reads per-beat PR, QRS, QT, and QTc (selectable correction
   formula) against the patient's own normal template, with calibrated
   uncertainty stated on every QT.
-- **Lead chips** — one chip per lead above the stage. Click to focus a
-  lead; ⌘-click to overlay it on the primary for comparison. Overlaid
-  reads carry a "Measured on …" attribution so a number is never
-  ambiguous about its source lead.
+- **Lead chips** — one chip per lead above the stage. Click a chip to add
+  or remove that lead from the overlay; ⌥-click to show one lead alone.
+  The first lead in selection order is the primary: marks, the docked
+  inspector, and the calibration readout all follow it, and overlaid reads
+  carry a "Measured on …" attribution so a number is never ambiguous about
+  its source lead.
+- **Lead presets** — the chip bar's presets menu applies a named set of
+  leads in one click: `Limb`, `Precordial`, `Bipolar limb`, `All leads`,
+  plus anything you save. Presets are stored by lead **name**, not by
+  channel, so a set you build on one record applies to every record that
+  carries those leads.
+
+  Each row says how much of itself the open record can satisfy —
+  `Precordial — 3 of 6` — before you click, and a preset whose leads are
+  none of this record's is disabled rather than silently doing nothing.
+  Matching ignores case, but nothing else: Murmur does not map one lead
+  spelling to another, because WFDB sources do not agree on a closed set
+  of lead names and an alias table would be an equivalence the record
+  never stated.
 
 If the record carries low-rate trend channels — anything below 5 Hz:
 HR, SpO₂, etCO₂, tidal volume, state probabilities, alarm flags — they
