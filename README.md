@@ -88,6 +88,9 @@ Quick links:
   extension frameworks, the `FindingProducer` contract, layering.
 - [Annotation JSON schema](docs/annotation-schema.md) — what
   producers emit as `<recordName>.annotations.json`.
+- [What Murmur asserts](docs/what-murmur-asserts.md) — the boundary
+  between the record, the producer, the analyst, and the app; what
+  producers own, and why the viewer never interprets their vocabulary.
 - [Citation](docs/citation.md) — how to cite Murmur Studio and
   scan-produced findings in research.
 - [Roadmap](ROADMAP.md) — current state and what's next.
