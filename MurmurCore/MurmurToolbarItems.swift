@@ -170,6 +170,11 @@ struct MurmurToolbarItems: CustomizableToolbarContent {
                 Button("Export WFDB annotations…") { live?.exportWFDBAnnotations() }
                     .disabled(live?.wfdbExportAvailable != true)
                     .accessibilityIdentifier("export-wfdb-item")
+                // #330 — cohort-wide, unlike the three above. Last in the menu
+                // because it is the one item that leaves this record's scope.
+                Button("Export review table…") { live?.exportReviewTable() }
+                    .disabled(live?.reviewTableAvailable != true)
+                    .accessibilityIdentifier("export-review-table-item")
             } label: {
                 Label("Export", systemImage: ToolbarGlyph.exportReport)
             }

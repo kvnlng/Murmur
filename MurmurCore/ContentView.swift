@@ -804,7 +804,10 @@ public struct ContentView: View {
                     onRecordingMutated: { updated in
                         importStates[key] = .imported(directory: directory, recording: updated)
                         CurrentRecordingContext.shared.set(recording: updated, directory: directory)
-                    }
+                    },
+                    // #330 — only the browsing shell has a record list, so
+                    // only it supplies the cohort export.
+                    onExportReviewTable: { exportReviewTable() }
                 )
                     .id(recording.id)
             case .failed(let message):
@@ -905,6 +908,52 @@ public struct ContentView: View {
             return
         }
         openFolder(url)
+    }
+
+    /// #330 — writes one CSV row per annotation across every record the
+    /// navigator is showing, with the analyst's disposition attached.
+    ///
+    /// Records the analyst never opened have no bundle, so they contribute
+    /// nothing and are COUNTED — the completion banner names them. Importing
+    /// them here to make the export "complete" would turn one menu click into
+    /// an unbounded job on a large corpus.
+    private func exportReviewTable() {
+        guard case .browsing(let source, let records) = state else { return }
+
+        let sources: [ReviewTableBuilder.Source] = records.map { entry in
+            guard case .imported(let directory, let recording)? = importStates[entry.id] else {
+                return ReviewTableBuilder.Source(recordPath: entry.id, imported: nil)
+            }
+            return ReviewTableBuilder.Source(
+                recordPath: entry.id,
+                imported: .init(
+                    recording: recording,
+                    dispositions: ReviewTableBuilder.dispositions(inBundle: directory),
+                    headerComments: recording.headerComments
+                )
+            )
+        }
+
+        let result = ReviewTableBuilder.build(
+            sources: sources,
+            flaggedIDs: SessionFlagStore.shared.flaggedIDs
+        )
+
+        let panel = NSSavePanel()
+        panel.title = "Export review table"
+        panel.allowedContentTypes = [.commaSeparatedText]
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = ReviewTableBuilder.suggestedFilename(
+            sourceDisplayName: source.displayName
+        )
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            try result.csv.write(to: url, atomically: true, encoding: .utf8)
+            errorMessage = result.summary
+        } catch {
+            errorMessage = "Could not write the review table: \(error.localizedDescription)"
+        }
     }
 
     private func scanFolder(_ folderURL: URL) throws -> [WFDBRecordEntry] {
