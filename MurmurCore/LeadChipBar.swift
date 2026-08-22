@@ -35,9 +35,23 @@ struct LeadChipBar: View {
     /// its final size, values absent. Only the launch shell sets this.
     var idle: Bool = false
 
+    /// #332 — the analyst's saved lead sets. Shared so a preset saved here is
+    /// in the menu on the next record without a reload, which is the whole
+    /// point of a preset.
+    @State private var presetStore = LeadPresetStore.shared
+    @State private var isSavingPreset = false
+    @State private var newPresetName = ""
+    @State private var isManagingPresets = false
+    /// Set only for the case the chips CANNOT show: a preset whose leads are
+    /// none of this record's, where applying it would change nothing on screen
+    /// and read as a broken menu item.
+    @State private var unresolvedPresetName: String?
+
     var body: some View {
         HStack(spacing: 10) {
             modeToggle
+            Divider().frame(maxHeight: 18)
+            presetsMenu
             Divider().frame(maxHeight: 18)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
@@ -60,6 +74,111 @@ struct LeadChipBar: View {
         .background(.thinMaterial)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("lead-chip-bar")
+        .alert("Save Lead Preset", isPresented: $isSavingPreset) {
+            TextField("Name", text: $newPresetName)
+                .accessibilityIdentifier("lead-preset-name-field")
+            Button("Save") {
+                presetStore.add(name: newPresetName, leads: stagedLeadNames)
+            }
+            .accessibilityIdentifier("lead-preset-save-confirm")
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Saves \(stagedLeadNames.joined(separator: " · ")) by lead NAME, "
+                 + "so it applies to any record carrying those leads.")
+        }
+        .alert(
+            "Preset Not In This Record",
+            isPresented: Binding(
+                get: { unresolvedPresetName != nil },
+                set: { if !$0 { unresolvedPresetName = nil } }
+            )
+        ) {
+            Button("OK") { unresolvedPresetName = nil }
+        } message: {
+            Text("None of \(unresolvedPresetName ?? "")'s leads are in this record, "
+                 + "so the stage is unchanged.")
+        }
+        .sheet(isPresented: $isManagingPresets) {
+            LeadPresetManagerSheet(store: presetStore) { isManagingPresets = false }
+        }
+    }
+
+    // MARK: - Presets (#332)
+
+    /// The leads currently on the stage, by NAME and in selection order —
+    /// what a saved preset stores, and what the save dialog quotes back.
+    private var stagedLeadNames: [String] {
+        guard let selection = layoutMode.leadSelection else { return [] }
+        let namesByID = Dictionary(
+            channels.map { ($0.id, $0.name) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        return selection.ordered.compactMap { namesByID[$0] }
+    }
+
+    /// Menu of built-ins and saved sets.
+    ///
+    /// Each row says up front how much of itself this record can satisfy —
+    /// "Precordial — 3 of 6" — rather than staging a partial set and leaving
+    /// the analyst to notice. A preset the record cannot satisfy at all is
+    /// disabled, so the menu never offers an action that would do nothing.
+    private var presetsMenu: some View {
+        Menu {
+            ForEach(presetStore.allPresets) { preset in
+                let resolution = idle ? nil : preset.resolve(in: channels)
+                Button(presetRowTitle(preset, resolution: resolution)) {
+                    apply(preset)
+                }
+                .disabled(idle || resolution == nil)
+                .accessibilityIdentifier("lead-preset-\(preset.id.uuidString)")
+            }
+            Divider()
+            Button("Save current selection as preset…") {
+                newPresetName = ""
+                isSavingPreset = true
+            }
+            .disabled(stagedLeadNames.isEmpty)
+            .accessibilityIdentifier("lead-preset-save")
+            Button("Manage presets…") { isManagingPresets = true }
+                .disabled(presetStore.userPresets.isEmpty)
+                .accessibilityIdentifier("lead-preset-manage")
+        } label: {
+            Label("Presets", systemImage: "square.stack.3d.up")
+                .labelStyle(.iconOnly)
+                .font(.body)
+                .frame(width: 26, height: 22)
+                .background(
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(Color.secondary.opacity(0.06))
+                )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .disabled(idle)
+        .help("Apply or save a named set of leads")
+        .accessibilityLabel("Lead presets")
+        .accessibilityIdentifier("lead-presets-menu")
+    }
+
+    private func presetRowTitle(
+        _ preset: LeadPreset, resolution: LeadPreset.Resolution?
+    ) -> String {
+        // `All leads` names no leads, so "n of m" would be meaningless for it.
+        guard !preset.isEveryLead, !idle else { return preset.name }
+        guard let resolution else { return "\(preset.name) — none in this record" }
+        guard resolution.missing.isEmpty else {
+            return "\(preset.name) — \(resolution.selection.count) of \(preset.leads.count)"
+        }
+        return preset.name
+    }
+
+    private func apply(_ preset: LeadPreset) {
+        guard let resolution = preset.resolve(in: channels) else {
+            unresolvedPresetName = preset.name
+            return
+        }
+        layoutMode = .focus(resolution.selection)
     }
 
     private var ladderSteps: [ZoomLadderStep] {

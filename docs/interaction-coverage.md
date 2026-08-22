@@ -19,7 +19,7 @@ covering the highest-risk flows before each public submission.
 - 🟡 Manual gate via the `RELEASE.md` smoke pass
 - ⬜ Uncovered — no automated test, not in smoke pass
 
-**Current score:** 31 ✅ automated · 0 🟡 manual-only · 0 ⬜ uncovered out of 31 total.
+**Current score:** 33 ✅ automated · 0 🟡 manual-only · 0 ⬜ uncovered out of 33 total.
 That's **100% automated**.
 
 Several entries below are covered by *bypass* tests that exercise the
@@ -73,6 +73,8 @@ surviving routes and coverage:
 | Interaction | Test | Notes |
 | --- | --- | --- |
 | Click lead chip → focus mode shifts to that lead | ✅ `MurmurUITests/testClickingLeadChipShiftsFocus` | |
+| Apply a named lead preset (built-in or saved) | ✅ `MurmurTests/LeadPresetResolutionTests` (7 cases) | #332. Unit-level: the interaction is name → `LeadSelection` resolution against the open record, and what is worth proving is which leads a stored NAME stages on a record that may not carry it. The menu itself is manual-smoke (`lead-presets-menu`) |
+| Save, rename and delete a lead preset | ✅ `MurmurTests/LeadPresetStoreTests` (8 cases) | #332. Persistence round-trips through an injected `UserDefaults` suite; built-ins are never stored, and a name shadowing a built-in is suffixed rather than rejected |
 | Toggle Focus / Strips layout mode | ✅ `MurmurUITests/testLayoutModeToggleShowsAllChannels` | |
 
 ## Toolbar
