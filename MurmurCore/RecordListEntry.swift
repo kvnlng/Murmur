@@ -31,6 +31,14 @@ struct RecordListEntry: Identifiable, Equatable {
     /// One line of record-specific detail.
     let subtitle: String
 
+    /// Everything the navigator's search field matches against (#328).
+    ///
+    /// Wider than what the row displays: the subtitle truncates to one line,
+    /// but a 45,000-record corpus is only navigable if you can search the
+    /// values that got truncated away — a `Dx` code list, say. Holds the
+    /// title, every metadata key and value, and every raw comment line.
+    let searchText: String
+
     /// A scanned WFDB record.
     init(_ record: WFDBRecordEntry) {
         id = record.filename
@@ -49,12 +57,36 @@ struct RecordListEntry: Identifiable, Equatable {
         // redesign's info bar carries both for the OPEN record, and repeating
         // them on all twenty rows is the same height-for-a-constant trade X56
         // rejected. Duration stays because it varies on every corpus.
-        if let note = record.header.comments
-            .map({ $0.trimmingCharacters(in: .whitespaces) })
-            .first(where: { !$0.isEmpty }) {
-            parts.append(note)
+        //
+        // #328: PhysioNet's modern corpora put structured `Key: value` metadata
+        // in those comments (`Age`, `Sex`, `Dx`…). When a record has any, show
+        // ALL of it rather than only the first line — on the arrhythmia corpus
+        // the first comment is `Age: 85` for every row, which discriminates
+        // nothing, exactly the failure X56 rejected. Records without key/value
+        // comments (MIT-BIH) keep the original first-comment behaviour.
+        // Sentinel-valued fields (`Rx: Unknown` and friends) are dropped from
+        // the SUBTITLE only — they are identical on every row of a corpus, and
+        // `searchText` below still carries them. See `carriesInformation`.
+        let metadata = record.header.metadata
+        let informative = metadata.filter(\.carriesInformation)
+        if informative.isEmpty {
+            if let note = record.header.comments
+                .map({ $0.trimmingCharacters(in: .whitespaces) })
+                .first(where: { !$0.isEmpty }) {
+                parts.append(note)
+            }
+        } else {
+            parts.append(contentsOf: informative.map(\.display))
         }
         subtitle = parts.joined(separator: " · ")
+
+        var searchable: [String] = [record.header.recordName]
+        for field in metadata {
+            searchable.append(field.key)
+            searchable.append(field.value)
+        }
+        searchable.append(contentsOf: record.header.comments)
+        searchText = searchable.joined(separator: " ")
     }
 
     /// A record inside an opened `.mur` session. Built from the recording
@@ -76,6 +108,9 @@ struct RecordListEntry: Identifiable, Equatable {
             parts.append(recording.sourceFileName)
         }
         subtitle = parts.joined(separator: " · ")
+        // A session record has no `.hea` to mine, so its searchable text is
+        // just what the row already shows.
+        searchText = "\(title) \(subtitle)"
     }
 
     /// `h`, not `hr` — the redesign's info bar and navigator both read

@@ -1444,8 +1444,11 @@ private struct RecordSidebar: View {
     private var filtered: [RecordListEntry] {
         let query = searchText.trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty else { return records }
+        // #328 — `searchText` subsumes title and subtitle and adds the header
+        // metadata the one-line subtitle truncates away, so a `Dx` code the row
+        // can't show is still findable.
         return records.filter {
-            $0.title.localizedCaseInsensitiveContains(query)
+            $0.searchText.localizedCaseInsensitiveContains(query)
                 || $0.subtitle.localizedCaseInsensitiveContains(query)
         }
     }

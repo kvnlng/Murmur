@@ -34,6 +34,19 @@ struct WFDBHeader: Equatable, Sendable {
     /// medications here.
     let comments: [String]
 
+    /// The subset of `comments` shaped `Key: value`, in header order (#328).
+    ///
+    /// PhysioNet's modern 12-lead corpora carry structured metadata this way —
+    /// `#Age: 85`, `#Sex: Male`, `#Dx: 164889003,59118001` — a convention
+    /// shared by every CinC 2020/2021 source. Values are transcribed VERBATIM:
+    /// a `Dx` code stays a code, because translating it would make the app the
+    /// author of a claim the record never made.
+    ///
+    /// Comments that don't match stay out of this list and remain in
+    /// `comments`, which is unchanged and still rendered verbatim elsewhere —
+    /// MIT-BIH's `69 M 1085 1629 x1` has no colon and is unaffected.
+    var metadata: [HeaderField] { comments.compactMap(HeaderField.init(comment:)) }
+
     /// Effective sample rate for `signal`. Multi-frequency records (e.g. a
     /// 250 Hz ECG channel alongside a 1/60 Hz vital-sign channel) encode the
     /// ratio via the per-signal samples-per-frame (`spf`) suffix on the
@@ -46,6 +59,64 @@ struct WFDBHeader: Equatable, Sendable {
     func sampleCount(for signal: WFDBSignal) -> Int64 {
         sampleCount * Int64(signal.samplesPerFrame)
     }
+}
+
+/// One `Key: value` line from a `.hea` comment block (#328).
+struct HeaderField: Equatable, Sendable {
+    let key: String
+    let value: String
+
+    /// Parses a comment line (already stripped of its `#`). Returns nil when
+    /// the line isn't a key/value pair.
+    ///
+    /// The key must start with a letter and hold only letters, digits,
+    /// underscores and spaces, capped at 32 characters — enough for `Age`,
+    /// `Sex`, `Dx`, `Rx`, `Hx`, `Sx` and PTB-XL's longer keys, while rejecting
+    /// prose that merely happens to contain a colon. A line containing `://`
+    /// is refused outright so a bare URL is never split at its scheme.
+    init?(comment line: String) {
+        guard !line.contains("://") else { return nil }
+        guard let colon = line.firstIndex(of: ":") else { return nil }
+
+        let rawKey = line[line.startIndex..<colon].trimmingCharacters(in: .whitespaces)
+        guard !rawKey.isEmpty, rawKey.count <= 32 else { return nil }
+        guard let first = rawKey.first, first.isLetter else { return nil }
+        let keyIsClean = rawKey.allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" || $0 == " " }
+        guard keyIsClean else { return nil }
+
+        let rawValue = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+        self.key = rawKey
+        self.value = rawValue
+    }
+
+    init(key: String, value: String) {
+        self.key = key
+        self.value = value
+    }
+
+    /// `Key: value`, the form the navigator subtitle renders.
+    var display: String { value.isEmpty ? key : "\(key): \(value)" }
+
+    /// Whether this field says anything about THIS record.
+    ///
+    /// PhysioNet corpora fill absent metadata with a sentinel rather than
+    /// omitting the line — every record in the arrhythmia database carries
+    /// `Rx: Unknown`, `Hx: Unknown`, `Sx: Unknown`. In a one-line subtitle
+    /// repeated down 45,000 rows those are ~40 characters that discriminate
+    /// nothing, which is the trade X56 already rejected for signal count and
+    /// sample rate.
+    ///
+    /// This is a DISPLAY-DENSITY decision for the subtitle alone. Nothing is
+    /// discarded: `comments` and `metadata` are untouched and still render
+    /// verbatim in the context drawer, and the navigator's search text keeps
+    /// every field, so `Rx` remains findable. Suppressing a field that states
+    /// the absence of information asserts nothing about the record.
+    var carriesInformation: Bool {
+        let v = value.trimmingCharacters(in: .whitespaces).lowercased()
+        return !v.isEmpty && !Self.noInformationSentinels.contains(v)
+    }
+
+    private static let noInformationSentinels: Set<String> = ["unknown", "n/a", "na", "none", "-"]
 }
 
 struct WFDBSignal: Equatable, Sendable {
