@@ -265,7 +265,10 @@ them wouldn't move the needle.
 - Producer outputs are authoritative; the viewer never re-derives them.
   Analyst-side annotations (disposition + notes) live in their own
   sidecars (`dispositions.json`, `notes.md`) so re-running a producer
-  never destroys analyst work.
+  never destroys analyst work. This is one clause of a wider boundary —
+  Murmur transmits assertions rather than authoring them; see
+  [What Murmur asserts]({{ site.baseurl }}/what-murmur-asserts) for the
+  full set of rules and where each one lives in the source.
 - ECG is the only domain. The CSV plotter and standalone vent pipeline
   were both removed during the 2026-06-14 pivot, though low-rate vent
   features can ride alongside the ECG in a multi-frequency WFDB.

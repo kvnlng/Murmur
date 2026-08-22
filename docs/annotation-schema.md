@@ -11,6 +11,13 @@ Murmur Studio can render its findings. The viewer reads
 `<recordName>.annotations.json` next to the WFDB `.hea` and resolves
 every finding to a sample index at import time.
 
+Your file is authoritative: the viewer renders what you send, never
+re-derives it, and never rewrites it. You own your categories, your
+display names, your confidence calibration, and your provenance — see
+[What Murmur asserts]({{ site.baseurl }}/what-murmur-asserts) for the
+boundary that guarantees it, and for where clinical vocabulary decoding
+belongs.
+
 **Machine-readable schema:**
 [**annotations.schema.json**]({{ site.baseurl }}/annotations.schema.json) —
 a JSON Schema (Draft 2020-12) document. Run your producer's output
