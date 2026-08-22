@@ -31,6 +31,16 @@ enum WFDBDecodeError: LocalizedError {
     case truncatedFile(expectedBytes: Int, actualBytes: Int)
     case mixedFormatsInFile(URL)
     case mixedSamplesPerFrameInFile(URL)
+    case mixedByteOffsetsInFile(URL)
+    // Preamble disagreements (#327) — raised only when the preamble is a
+    // recognized MATLAB Level 4 header. See WFDBPreamble.swift for the
+    // published definitions each of these is derived from.
+    case preambleLengthMismatch(declaredOffset: Int, matHeaderBytes: Int, nameLength: Int)
+    case preambleByteOrder(matOrder: String, format: Int)
+    case preamblePrecision(matPrecision: String, format: Int)
+    case preambleMatrixKind(matKind: String)
+    case preambleShapeTransposed(rows: Int, cols: Int, signals: Int, samples: Int)
+    case preambleShapeMismatch(rows: Int, cols: Int, signals: Int, samples: Int)
 
     var errorDescription: String? {
         switch self {
@@ -42,6 +52,23 @@ enum WFDBDecodeError: LocalizedError {
             return "Signals sharing \(url.lastPathComponent) must use the same storage format."
         case .mixedSamplesPerFrameInFile(let url):
             return "Signals sharing \(url.lastPathComponent) must use the same samples-per-frame (spf)."
+        case .mixedByteOffsetsInFile(let url):
+            return "Signals sharing \(url.lastPathComponent) must declare the same byte offset."
+        case .preambleLengthMismatch(let declared, let matBytes, let namlen):
+            return "Header declares a \(declared)-byte preamble but the MAT header is "
+                 + "\(matBytes) bytes (20 + namlen \(namlen))."
+        case .preambleByteOrder(let order, let format):
+            return "MAT data is \(order)-ordered; WFDB format \(format) requires little-endian."
+        case .preamblePrecision(let precision, let format):
+            return "MAT precision is \(precision); WFDB format \(format) requires int16."
+        case .preambleMatrixKind(let kind):
+            return "MAT matrix is \(kind); WFDB needs a full real numeric matrix."
+        case .preambleShapeTransposed(let rows, let cols, let signals, let samples):
+            return "MAT matrix is \(rows)×\(cols) (samples×signals); WFDB format 16 requires "
+                 + "signals×samples (\(signals)×\(samples))."
+        case .preambleShapeMismatch(let rows, let cols, let signals, let samples):
+            return "MAT matrix \(rows)×\(cols) does not match header "
+                 + "(\(signals) signals × \(samples) samples)."
         }
     }
 }
@@ -89,6 +116,12 @@ enum WFDBSampleDecoder {
                 throw WFDBDecodeError.mixedSamplesPerFrameInFile(fileURL)
             }
             let spf = spfs.first ?? 1
+            // The preamble is a property of the FILE, so every signal sharing
+            // it must declare the same offset (#327).
+            let offsets = Set(signalsInFile.map(\.byteOffset))
+            guard offsets.count == 1 else {
+                throw WFDBDecodeError.mixedByteOffsetsInFile(fileURL)
+            }
 
             let needsScope = fileURL.startAccessingSecurityScopedResource()
             defer { if needsScope { fileURL.stopAccessingSecurityScopedResource() } }
@@ -122,6 +155,30 @@ enum WFDBSampleDecoder {
         return output
     }
 
+    // MARK: - Preamble geometry
+
+    /// Where a signal file's samples actually start, and how many bytes follow
+    /// (#327).
+    ///
+    /// The offset comes from the `.hea`'s `+N` suffix and is honored
+    /// unconditionally — `header(5)` defines it as the preamble's length and
+    /// says nothing about its contents, so it is authoritative and is never
+    /// inferred from the bytes. Every length check in the decoders is measured
+    /// against `available` rather than the raw file size, so a file that is
+    /// long enough only by counting its preamble still reports as truncated.
+    private static func sampleRegion(
+        in data: Data,
+        signals: [WFDBSignal]
+    ) throws -> (byteOffset: Int, available: Int) {
+        let byteOffset = signals.first?.byteOffset ?? 0
+        guard byteOffset >= 0, byteOffset <= data.count else {
+            throw WFDBDecodeError.truncatedFile(
+                expectedBytes: byteOffset, actualBytes: data.count
+            )
+        }
+        return (byteOffset, data.count - byteOffset)
+    }
+
     // MARK: - Format 16
 
     /// Pure-data variant used by tests — no file I/O. Every signal in `signals`
@@ -152,15 +209,29 @@ enum WFDBSampleDecoder {
 
         let frameSize = signalCount * 2
 
+        let (byteOffset, available) = try sampleRegion(in: data, signals: signals)
+
         let sampleCount: Int
         if declaredSampleCount > 0 {
             let expectedBytes = Int(declaredSampleCount) * frameSize
-            guard data.count >= expectedBytes else {
-                throw WFDBDecodeError.truncatedFile(expectedBytes: expectedBytes, actualBytes: data.count)
+            guard available >= expectedBytes else {
+                throw WFDBDecodeError.truncatedFile(expectedBytes: expectedBytes, actualBytes: available)
             }
             sampleCount = Int(declaredSampleCount)
         } else {
-            sampleCount = data.count / frameSize
+            sampleCount = available / frameSize
+        }
+
+        // Additional check, only when the preamble is a recognized MATLAB
+        // Level 4 header — it then makes claims we can compare with the `.hea`.
+        if byteOffset > 0 {
+            try WFDBPreamble.validateIfRecognized(
+                in: data,
+                declaredOffset: byteOffset,
+                wfdbFormat: 16,
+                signalCount: signalCount,
+                sampleCount: sampleCount
+            )
         }
 
         var output = [[Float]](
@@ -169,12 +240,16 @@ enum WFDBSampleDecoder {
         )
 
         data.withUnsafeBytes { rawBuffer in
-            guard let base = rawBuffer.baseAddress else { return }
-            let int16Base = base.assumingMemoryBound(to: Int16.self)
             for sampleIdx in 0..<sampleCount {
                 for signalIdx in 0..<signalCount {
                     let frameOffset = sampleIdx * signalCount + signalIdx
-                    let adcValue = Int(Int16(littleEndian: int16Base[frameOffset]))
+                    // loadUnaligned, not a bound Int16 pointer: an odd byte
+                    // offset would make the bound-pointer form undefined.
+                    let raw = rawBuffer.loadUnaligned(
+                        fromByteOffset: byteOffset + frameOffset * 2,
+                        as: Int16.self
+                    )
+                    let adcValue = Int(Int16(littleEndian: raw))
                     let signal = signals[signalIdx]
                     output[signalIdx][sampleIdx] = Float(adcValue - signal.baseline) / Float(signal.gain)
                 }
@@ -194,19 +269,31 @@ enum WFDBSampleDecoder {
         let signalCount = signals.count
         guard signalCount > 0 else { return [] }
 
+        let (byteOffset, available) = try sampleRegion(in: data, signals: signals)
+
         // Total samples in the interleaved flat sequence = signalCount × sampleCount.
         let sampleCount: Int
         if declaredSampleCount > 0 {
             sampleCount = Int(declaredSampleCount)
         } else {
             // Each group of 3 bytes holds 2 12-bit samples.
-            sampleCount = (data.count / 3 * 2) / signalCount
+            sampleCount = (available / 3 * 2) / signalCount
         }
 
         let totalFlat     = signalCount * sampleCount
         let requiredBytes = (totalFlat + 1) / 2 * 3    // ceil(totalFlat / 2) × 3
-        guard data.count >= requiredBytes else {
-            throw WFDBDecodeError.truncatedFile(expectedBytes: requiredBytes, actualBytes: data.count)
+        guard available >= requiredBytes else {
+            throw WFDBDecodeError.truncatedFile(expectedBytes: requiredBytes, actualBytes: available)
+        }
+
+        if byteOffset > 0 {
+            try WFDBPreamble.validateIfRecognized(
+                in: data,
+                declaredOffset: byteOffset,
+                wfdbFormat: 212,
+                signalCount: signalCount,
+                sampleCount: sampleCount
+            )
         }
 
         // Unpack the entire flat sequence of 12-bit two's-complement integers.
@@ -214,7 +301,7 @@ enum WFDBSampleDecoder {
         data.withUnsafeBytes { rawBuffer in
             guard let bytes = rawBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
             var flatIdx = 0
-            var byteIdx = 0
+            var byteIdx = byteOffset
             while flatIdx + 1 <= totalFlat - 1 {
                 let b0 = UInt16(bytes[byteIdx])
                 let b1 = UInt16(bytes[byteIdx + 1])

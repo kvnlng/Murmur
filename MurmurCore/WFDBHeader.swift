@@ -63,6 +63,12 @@ struct WFDBSignal: Equatable, Sendable {
     /// means 250 samples of this signal per frame, so a 1-Hz frame rate base
     /// yields an effective 250-Hz signal rate.
     var samplesPerFrame: Int = 1
+    /// Bytes to skip at the head of the signal file before sample 0 — the
+    /// format field's `+N` suffix. Per `header(5)` this is "the offset in
+    /// bytes from the beginning of the signal file to sample 0 (i.e. the
+    /// length of the preamble)"; the spec says nothing about what those bytes
+    /// contain, so the declared value is authoritative and never inferred.
+    var byteOffset: Int = 0
 }
 
 enum WFDBHeaderError: LocalizedError {
@@ -188,12 +194,15 @@ enum WFDBHeaderParser {
 
         let filename = parts[0]
 
-        // Format field may carry a samples-per-frame suffix and a skew suffix:
-        //   "16"           — single-frequency, spf = 1
+        // Format field may carry a samples-per-frame suffix, a skew suffix,
+        // and a byte offset:
+        //   "16"           — single-frequency, spf = 1, no preamble
         //   "16x250"       — 250 samples of this signal per frame
         //   "16x4:10"      — spf = 4 with 10-sample skew (skew is ignored;
         //                    Murmur doesn't use it today)
-        let (formatStr, spf) = splitFormatField(parts[1])
+        //   "16+24"        — samples start 24 bytes into the file (#327)
+        let fmtField = splitFormatField(parts[1])
+        let formatStr = fmtField.formatStr
         guard let format = Int(formatStr), (format == 16 || format == 212) else {
             let fmt = Int(formatStr) ?? -1
             throw WFDBHeaderError.unsupportedFormat(fmt, signal: filename)
@@ -231,25 +240,40 @@ enum WFDBHeaderParser {
             adcResolution: adcResolution,
             adcZero: adcZero,
             label: label,
-            samplesPerFrame: spf
+            samplesPerFrame: fmtField.spf,
+            byteOffset: fmtField.byteOffset
         )
     }
 
-    /// Splits a WFDB format field into its numeric format and `samples per
-    /// frame` (spf). Form: `<format>[x<spf>[:<skew>]][+<offset>]`. We honor
-    /// `spf` (defaults to 1) and discard `skew` / `offset` — neither is
-    /// meaningful for the file shapes Murmur accepts today.
-    private static func splitFormatField(_ field: String) -> (formatStr: String, spf: Int) {
-        // Drop any `+offset` first.
-        let withoutOffset = field.components(separatedBy: "+")[0]
+    /// Splits a WFDB format field into its numeric format, `samples per frame`
+    /// (spf), and byte offset. Form: `<format>[x<spf>[:<skew>]][+<offset>]`.
+    ///
+    /// We honor `spf` (defaults to 1) and `offset` (defaults to 0) and discard
+    /// `skew`, which Murmur doesn't use today. The offset is the length of the
+    /// signal file's preamble — every PhysioNet/CinC 2020-2021 record declares
+    /// `16+24` because its samples sit behind a MATLAB Level 4 header (#327).
+    private struct FormatField {
+        let formatStr: String
+        let spf: Int
+        let byteOffset: Int
+    }
+
+    private static func splitFormatField(_ field: String) -> FormatField {
+        // Split off `+offset` first; a malformed or negative offset reads as 0
+        // rather than throwing — the rest of the signal line is still usable.
+        let plusParts = field.components(separatedBy: "+")
+        let withoutOffset = plusParts[0]
+        let byteOffset = plusParts.count > 1 ? max(0, Int(plusParts[1]) ?? 0) : 0
         // Then split on `x` to separate format from spf-and-skew.
         let xParts = withoutOffset.components(separatedBy: "x")
         let formatStr = xParts[0]
-        guard xParts.count > 1 else { return (formatStr, 1) }
+        guard xParts.count > 1 else {
+            return FormatField(formatStr: formatStr, spf: 1, byteOffset: byteOffset)
+        }
         // spf may itself be followed by `:skew` — drop the skew piece.
         let spfStr = xParts[1].components(separatedBy: ":")[0]
         let spf = Int(spfStr) ?? 1
-        return (formatStr, max(1, spf))
+        return FormatField(formatStr: formatStr, spf: max(1, spf), byteOffset: byteOffset)
     }
 
     /// Parses the gain field which takes forms like:
