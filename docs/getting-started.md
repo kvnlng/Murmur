@@ -46,6 +46,33 @@ the `.hea`, its sibling `.dat`, and any annotation files. WFDB
 multi-frequency records (per-signal `.dat` files with `format[xspf]`
 suffixes) feed straight in; no separate ingest step.
 
+### Corpora with a `RECORDS` index
+
+Large PhysioNet corpora are not one flat folder of `.hea` files. WFDB's
+convention is a `RECORDS` index at the root listing record names or
+subdirectories, each of those carrying its own `RECORDS` — PhysioNet's
+[ECG Arrhythmia Database](https://physionet.org/content/ecg-arrhythmia/)
+is 45,152 records across 452 leaf folders that way.
+
+**Pick the corpus root.** Murmur reads the index and lists the whole
+corpus, with each row's identity its path relative to the folder you
+picked. A folder with no `RECORDS` is scanned exactly as before, so a
+MIT-BIH directory behaves identically.
+
+Two things worth knowing:
+
+- The index is the corpus author's own statement of what the corpus
+  contains, so it is read rather than second-guessed — a `.hea` sitting
+  in the tree that `RECORDS` does not list was excluded on purpose, and
+  Murmur honours that.
+- A scan of that size takes seconds and reports its progress in the
+  window while it runs. If the index names a record whose `.hea` is
+  missing, or a path that leaves the folder you granted, the count is
+  reported when the corpus opens — the list is never quietly short.
+
+Records import lazily, one click at a time, so opening a 45,000-record
+corpus costs one scan, not 45,000 imports.
+
 ## Reading the bedside view
 
 The stage reads top to bottom in the order you navigate: whole record →
