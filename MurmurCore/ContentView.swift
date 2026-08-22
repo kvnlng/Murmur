@@ -36,6 +36,10 @@ public struct ContentView: View {
     @State private var isImporterPresented = false
     @State private var errorMessage: String?
     @State private var currentImportTask: Task<Void, Never>?
+    /// #329 — the in-flight corpus scan. Cancelled when another folder is
+    /// picked, so a slow 45k-record walk cannot land on top of the folder the
+    /// analyst actually wants.
+    @State private var currentScanTask: Task<Void, Never>?
     @State private var recentsStore = RecentFoldersStore.shared
     /// Bridge for the File → Open Session… menu command (Scene-level, can't
     /// reach this view's state directly). Finder double-clicks arrive via
@@ -871,30 +875,70 @@ public struct ContentView: View {
     /// recents list. Records the folder in `recentsStore` on success so
     /// every successful open gets a one-click re-entry next launch.
     private func openFolder(_ folderURL: URL) {
-        do {
-            let records = try scanFolder(folderURL)
-            guard !records.isEmpty else {
-                errorMessage = "No WFDB records (.hea files) found in \(folderURL.lastPathComponent)."
-                return
+        // #329 — the scan is no longer instant. A corpus with a `RECORDS`
+        // index means parsing every header it names (45,152 for PhysioNet's
+        // ecg-arrhythmia), which is seconds of work: doing it inline froze the
+        // window with no explanation. It now runs off the main actor behind
+        // the launch shell's status line.
+        currentScanTask?.cancel()
+        CorpusScanContext.shared.begin(folderName: folderURL.lastPathComponent)
+
+        currentScanTask = Task { @MainActor in
+            defer { CorpusScanContext.shared.clear() }
+            let outcome: Result<WFDBCorpusScanner.Result, Error>
+            do {
+                outcome = .success(try await scanFolder(folderURL))
+            } catch {
+                outcome = .failure(error)
             }
-            currentImportTask?.cancel()
-            importStates = [:]
-            // X63-B: a flag says "this record belongs in my session", and a
-            // session is scoped to the folder being worked. A different folder
-            // is a different working set.
-            SessionFlagStore.shared.reset()
-            CarriedSessionStore.shared.reset()
-            sessionStates = [:]
-            sessionProvenances = [:]
-            setAppState(.browsing(source: .folder(folderURL), records: records.map(RecordListEntry.init)))
-            recentsStore.record(folder: folderURL)
-            let firstFilename = records.first?.filename
-            selection = firstFilename
-            if let firstFilename {
-                startImport(filename: firstFilename, source: folderURL)
+            // A newer pick already superseded this one — say nothing and
+            // change nothing, or the stale corpus wins the race.
+            guard !Task.isCancelled else { return }
+
+            switch outcome {
+            case .failure(let error):
+                errorMessage = error.localizedDescription
+            case .success(let scan):
+                guard !scan.entries.isEmpty else {
+                    errorMessage = "No WFDB records found: \(folderURL.lastPathComponent) "
+                        + "has neither .hea files nor a RECORDS index."
+                    return
+                }
+                adopt(scan: scan, from: folderURL)
             }
-        } catch {
-            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Installs a completed scan as the browsing state. Split out of
+    /// `openFolder` so the state reset and the async plumbing read separately.
+    private func adopt(scan: WFDBCorpusScanner.Result, from folderURL: URL) {
+        // Cancelled HERE, not before the scan: a scan that fails or finds
+        // nothing leaves the analyst exactly where they were, still importing
+        // the record they were looking at.
+        currentImportTask?.cancel()
+        importStates = [:]
+        // X63-B: a flag says "this record belongs in my session", and a
+        // session is scoped to the folder being worked. A different folder
+        // is a different working set.
+        SessionFlagStore.shared.reset()
+        CarriedSessionStore.shared.reset()
+        sessionStates = [:]
+        sessionProvenances = [:]
+        setAppState(.browsing(
+            source: .folder(folderURL),
+            records: scan.entries.map(RecordListEntry.init)
+        ))
+        recentsStore.record(folder: folderURL)
+        // Never silently short: an index entry with no readable `.hea`, or a
+        // path the scan refused to follow, is reported even though the open
+        // succeeded. The list is shown either way — a shortfall is a note
+        // about the corpus, not a reason to withhold the 45,000 records that
+        // did resolve.
+        errorMessage = scan.shortfallSummary
+        let firstFilename = scan.entries.first?.filename
+        selection = firstFilename
+        if let firstFilename {
+            startImport(filename: firstFilename, source: folderURL)
         }
     }
 
@@ -956,21 +1000,17 @@ public struct ContentView: View {
         }
     }
 
-    private func scanFolder(_ folderURL: URL) throws -> [WFDBRecordEntry] {
-        let needsScope = folderURL.startAccessingSecurityScopedResource()
-        defer { if needsScope { folderURL.stopAccessingSecurityScopedResource() } }
-        let files = try FileManager.default.contentsOfDirectory(
-            at: folderURL,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        )
-        let heaURLs = files
-            .filter { $0.pathExtension.lowercased() == "hea" }
-            .sorted { $0.lastPathComponent < $1.lastPathComponent }
-        return heaURLs.compactMap { url -> WFDBRecordEntry? in
-            guard let header = try? WFDBHeaderParser.parse(url: url) else { return nil }
-            return WFDBRecordEntry(filename: url.lastPathComponent, header: header)
-        }
+    /// Walks the picked folder off the main actor. The security scope is
+    /// taken and released INSIDE the detached task, so it covers the whole
+    /// walk rather than only the moment the task was created.
+    private func scanFolder(_ folderURL: URL) async throws -> WFDBCorpusScanner.Result {
+        try await Task.detached(priority: .userInitiated) {
+            let needsScope = folderURL.startAccessingSecurityScopedResource()
+            defer { if needsScope { folderURL.stopAccessingSecurityScopedResource() } }
+            return try WFDBCorpusScanner.scan(root: folderURL) { found in
+                Task { @MainActor in CorpusScanContext.shared.update(recordsFound: found) }
+            }
+        }.value
     }
 
     /// Called when the sidebar selection changes.
@@ -1684,9 +1724,20 @@ private struct RecordRow: View {
 // MARK: - Data model
 
 /// One WFDB record found in a picked folder.
-struct WFDBRecordEntry: Identifiable, Equatable {
+struct WFDBRecordEntry: Identifiable, Equatable, Sendable {
     var id: String { filename }
-    let filename: String     // e.g. "100.hea"
+    /// Path to the `.hea`, RELATIVE TO THE PICKED ROOT — "100.hea" in a flat
+    /// database directory, "WFDBRecords/01/010/JS00001.hea" in a corpus with a
+    /// `RECORDS` index (#329).
+    ///
+    /// It is simultaneously the navigator's `id`, the key `SessionFlagStore`
+    /// and `importStates` use, and the string handed to
+    /// `RecordingStore.importWFDB(folderURL:heaFilename:)` — which appends it
+    /// to the root, so a path with slashes needs nothing from the importer.
+    /// Those three uses are why it stayed one value instead of gaining a
+    /// separate display field: a second identifier for the same record is how
+    /// a flag ends up on the wrong row.
+    let filename: String
     let header: WFDBHeader
 
     var durationSeconds: Double {

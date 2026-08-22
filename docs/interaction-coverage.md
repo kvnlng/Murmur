@@ -19,7 +19,7 @@ covering the highest-risk flows before each public submission.
 - 🟡 Manual gate via the `RELEASE.md` smoke pass
 - ⬜ Uncovered — no automated test, not in smoke pass
 
-**Current score:** 29 ✅ automated · 0 🟡 manual-only · 0 ⬜ uncovered out of 29 total.
+**Current score:** 31 ✅ automated · 0 🟡 manual-only · 0 ⬜ uncovered out of 31 total.
 That's **100% automated**.
 
 Several entries below are covered by *bypass* tests that exercise the
@@ -49,6 +49,8 @@ surviving routes and coverage:
 | Synthetic fixture loads, bedside renders | ✅ `MurmurUITests/testSyntheticFixtureRendersBedsideView` | Via `--ui-test-sample` (DEBUG hook — the user-facing sample button was removed deliberately); asserts `empty-state-prompt` gone once loaded |
 | Open Record Folder → fileImporter opens, folder selection loads | ✅ `MurmurUIBypassTests/testLaunchArgOpenFolderLoadsRecording` | Bypasses `NSOpenPanel` via `--ui-test-open-folder`; the inline line, ⌘O, and the toolbar `⋯` item all converge on `openFolder(_:)` |
 | File ▸ Open Recent → folder re-opens | ✅ `MurmurUITests/testOpeningARecentFolderReopensRecording` | `--ui-test-seed-recent` seeds the store; the menu item runs the full bookmark-resolve → scanFolder → import → bedside flow. The menu is the only recents surface since #242 |
+| Open a corpus root with a `RECORDS` index (nested folders) | ✅ `MurmurTests/WFDBCorpusScannerTests` (11 fixture cases) + `WFDBCorpusScannerRealDataTests` against ecg-arrhythmia 1.0.0 | #329. Unit-level, not XCUI: the interaction is `openFolder(_:)` behind `NSOpenPanel`, already bypassed above, and the thing worth proving is which 45,152 rows the index resolves to |
+| Corpus scan progress line replaces the "No record open" prompt while a scan runs | ✅ `MurmurTests/CorpusScanContextTests` | #329. The sentence is composed in `CorpusScanContext.summary` precisely so it is testable rather than assembled inline in the view; the `corpus-scan-status` element itself is manual-smoke |
 | Where do I get data? | ✅ `MurmurUIBypassTests/testHelpGettingStartedTargetsDocsGettingStarted` | Help ▸ Getting Started opens the docs page whose Requirements carry the MIT-BIH link — the welcome card's PhysioNet link deliberately has no in-window replacement |
 
 ## Canvas / waveform interaction

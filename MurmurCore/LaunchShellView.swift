@@ -34,6 +34,12 @@ struct LaunchShellView: View {
     /// 12a lets change state between empty and loaded.
     @State private var importProgress = ImportProgressContext.shared
 
+    /// #329 — a corpus scan can run for seconds before the navigator has
+    /// anything to show. While one is in flight it takes over the empty-state
+    /// line; the rest of the time this is inactive and the shell is the 12a
+    /// launch look, unchanged.
+    @State private var corpusScan = CorpusScanContext.shared
+
     /// A stable primary-lead id for the idle chip bar's constant binding —
     /// no channel carries it, so nothing renders selected.
     private static let idlePrimaryLead = UUID()
@@ -454,6 +460,26 @@ struct LaunchShellView: View {
     /// tests keep asserting the same contract against the new chrome.
     private var openLine: some View {
         HStack(spacing: 6) {
+            if let scanning = corpusScan.summary {
+                // Same row, same font, same one-line height as the prompt it
+                // replaces — 12a's frame does not move because a folder is
+                // being read.
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityHidden(true)
+                Text(scanning)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("corpus-scan-status")
+            } else {
+                openPrompt
+            }
+        }
+        .font(.callout)
+    }
+
+    @ViewBuilder
+    private var openPrompt: some View {
+        Group {
             Text("No record open")
                 .foregroundStyle(.secondary)
                 .accessibilityIdentifier("empty-state-prompt")
@@ -465,7 +491,6 @@ struct LaunchShellView: View {
             Text("⌘O")
                 .foregroundStyle(.tertiary)
         }
-        .font(.callout)
     }
 }
 
