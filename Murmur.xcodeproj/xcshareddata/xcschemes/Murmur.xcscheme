@@ -91,6 +91,12 @@
             ReferencedContainer = "container:Murmur.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
+      <CommandLineArguments>
+         <CommandLineArgument
+            argument = "--ui-test-grant-studio"
+            isEnabled = "YES">
+         </CommandLineArgument>
+      </CommandLineArguments>
       <StoreKitConfigurationFileReference
          identifier = "../../Murmur/Murmur/Murmur.storekit">
       </StoreKitConfigurationFileReference>
