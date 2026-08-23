@@ -1129,6 +1129,11 @@ struct FindingsPanel: View {
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.primary)
                             .lineLimit(1)
+                            // Inside the row Button's label, so XCUI sees this
+                            // only as part of the row's label — assert on
+                            // `finding-row-<category>`'s label containing
+                            // "→ …", as MurmurUIDispositionTests does. The id
+                            // stays for VoiceOver and any future container.
                             .accessibilityIdentifier(
                                 "finding-override-\(entry.annotation.id.uuidString)"
                             )

@@ -35,6 +35,12 @@ public struct ContentView: View {
     }
     @State private var isImporterPresented = false
     @State private var errorMessage: String?
+    /// #329 — a note about a folder that DID open: index entries with no
+    /// readable `.hea`, paths the scan declined. Kept apart from
+    /// `errorMessage` because it is not an error and must not wear that
+    /// alert's title — "Couldn't open record folder" over "Opened 45,150
+    /// records" is a dialog that contradicts itself.
+    @State private var scanNotice: String?
     @State private var currentImportTask: Task<Void, Never>?
     /// #329 — the in-flight corpus scan. Cancelled when another folder is
     /// picked, so a slow 45k-record walk cannot land on top of the folder the
@@ -147,6 +153,17 @@ public struct ContentView: View {
             Button("OK") { errorMessage = nil }
         } message: {
             Text(errorMessage ?? "")
+        }
+        .alert(
+            "Record folder opened",
+            isPresented: Binding(
+                get: { scanNotice != nil },
+                set: { if !$0 { scanNotice = nil } }
+            )
+        ) {
+            Button("OK") { scanNotice = nil }
+        } message: {
+            Text(scanNotice ?? "")
         }
         .task {
             #if DEBUG
@@ -937,8 +954,8 @@ public struct ContentView: View {
         // path the scan refused to follow, is reported even though the open
         // succeeded. The list is shown either way — a shortfall is a note
         // about the corpus, not a reason to withhold the 45,000 records that
-        // did resolve.
-        errorMessage = scan.shortfallSummary
+        // did resolve. A NOTE, so it gets its own dialog, not the error's.
+        scanNotice = scan.shortfallSummary
         let firstFilename = scan.entries.first?.filename
         selection = firstFilename
         if let firstFilename {
@@ -1253,6 +1270,10 @@ public struct ContentView: View {
             seedRecentForTesting()
             return
         }
+        if args.contains(where: { $0.hasPrefix("--ui-test-open-corpus") }) {
+            openSyntheticCorpusForTesting()
+            return
+        }
         if args.contains(where: { $0.hasPrefix("--ui-test-open-folder") }) {
             openSyntheticFolderForTesting()
             return
@@ -1392,6 +1413,38 @@ public struct ContentView: View {
             }
         }
         openFolder(workDir)
+    }
+
+    /// `--ui-test-open-corpus` stages the #329 shape — a root `RECORDS` naming
+    /// two subdirectories, one carrying its own index and one flat — and opens
+    /// it, so a test can assert the navigator's ids are root-relative paths.
+    /// `=missing` adds a root index entry with no `.hea` behind it, so the
+    /// opened-with-notes dialog has something to say.
+    private func openSyntheticCorpusForTesting() {
+        let missing = UITestSupport.value(forFlag: "ui-test-open-corpus") == "missing"
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory
+            .appendingPathComponent("murmur-ui-test-corpus", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let indexed = root.appendingPathComponent("a", isDirectory: true)
+        let flat = root.appendingPathComponent("b", isDirectory: true)
+        let index = WFDBCorpusScanner.indexFileName
+        do {
+            try fm.createDirectory(at: indexed, withIntermediateDirectories: true)
+            try fm.createDirectory(at: flat, withIntermediateDirectories: true)
+            _ = try SyntheticRecording.makeMultiFrequencyRecord(into: indexed, recordName: "r1")
+            _ = try SyntheticRecording.makeMultiFrequencyRecord(into: indexed, recordName: "r2")
+            _ = try SyntheticRecording.makeMultiFrequencyRecord(into: flat, recordName: "r3")
+            try "r1\nr2\n".write(
+                to: indexed.appendingPathComponent(index), atomically: true, encoding: .utf8
+            )
+            try ("a/\nb/\n" + (missing ? "ghost\n" : "")).write(
+                to: root.appendingPathComponent(index), atomically: true, encoding: .utf8
+            )
+        } catch {
+            return
+        }
+        openFolder(root)
     }
 
     /// When `--ui-test-attach-findings` is set, writes a synthetic

@@ -19,7 +19,7 @@ covering the highest-risk flows before each public submission.
 - 🟡 Manual gate via the `RELEASE.md` smoke pass
 - ⬜ Uncovered — no automated test, not in smoke pass
 
-**Current score:** 33 ✅ automated · 0 🟡 manual-only · 0 ⬜ uncovered out of 33 total.
+**Current score:** 36 ✅ automated · 0 🟡 manual-only · 0 ⬜ uncovered out of 36 total.
 That's **100% automated**.
 
 Several entries below are covered by *bypass* tests that exercise the
@@ -49,8 +49,9 @@ surviving routes and coverage:
 | Synthetic fixture loads, bedside renders | ✅ `MurmurUITests/testSyntheticFixtureRendersBedsideView` | Via `--ui-test-sample` (DEBUG hook — the user-facing sample button was removed deliberately); asserts `empty-state-prompt` gone once loaded |
 | Open Record Folder → fileImporter opens, folder selection loads | ✅ `MurmurUIBypassTests/testLaunchArgOpenFolderLoadsRecording` | Bypasses `NSOpenPanel` via `--ui-test-open-folder`; the inline line, ⌘O, and the toolbar `⋯` item all converge on `openFolder(_:)` |
 | File ▸ Open Recent → folder re-opens | ✅ `MurmurUITests/testOpeningARecentFolderReopensRecording` | `--ui-test-seed-recent` seeds the store; the menu item runs the full bookmark-resolve → scanFolder → import → bedside flow. The menu is the only recents surface since #242 |
-| Open a corpus root with a `RECORDS` index (nested folders) | ✅ `MurmurTests/WFDBCorpusScannerTests` (11 fixture cases) + `WFDBCorpusScannerRealDataTests` against ecg-arrhythmia 1.0.0 | #329. Unit-level, not XCUI: the interaction is `openFolder(_:)` behind `NSOpenPanel`, already bypassed above, and the thing worth proving is which 45,152 rows the index resolves to |
-| Corpus scan progress line replaces the "No record open" prompt while a scan runs | ✅ `MurmurTests/CorpusScanContextTests` | #329. The sentence is composed in `CorpusScanContext.summary` precisely so it is testable rather than assembled inline in the view; the `corpus-scan-status` element itself is manual-smoke |
+| Open a corpus root with a `RECORDS` index → navigator ids are root-relative paths | ✅ `MurmurUIBypassTests/testLaunchArgOpenCorpusListsRootRelativeRows` | #329 / #346. Bypasses `NSOpenPanel` via `--ui-test-open-corpus`; which rows a real 45,152-record index resolves to is `WFDBCorpusScannerRealDataTests` |
+| Opening a corpus with an index entry that has no `.hea` → the entry is named in an "opened" dialog, not an error | ✅ `MurmurUIBypassTests/testLaunchArgOpenCorpusNamesSkippedIndexEntries` | #346 also split the notice out of the error alert, whose title contradicted a successful open |
+| Corpus scan progress line replaces the "No record open" prompt while a scan runs | ✅ `MurmurTests/CorpusScanContextTests` | #329. The sentence is composed in `CorpusScanContext.summary` precisely so it is testable; the `corpus-scan-status` element is manual-smoke — a fixture small enough for XCUI finishes scanning before XCUI can look, and #346 declined to add a sleep to production code for a test |
 | Where do I get data? | ✅ `MurmurUIBypassTests/testHelpGettingStartedTargetsDocsGettingStarted` | Help ▸ Getting Started opens the docs page whose Requirements carry the MIT-BIH link — the welcome card's PhysioNet link deliberately has no in-window replacement |
 
 ## Canvas / waveform interaction
@@ -93,6 +94,8 @@ surviving routes and coverage:
 | Filter by category via summary chip | ✅ `MurmurUITests/testClickingSummaryChipFiltersFindings` | Filter math also covered by `FindingFilterTests` |
 | Confirm a finding (with edit-mode latch) | ✅ `MurmurUITests/testConfirmFindingViaMenuExposesResetButton` | Disposition state also covered by `DispositionStoreTests` |
 | Dismiss a finding (with edit-mode latch) | ✅ `MurmurUITests/testDismissingFindingExposesResetButton` | |
+| Confirm a finding **as its own category** → confirmed, no override chip | ✅ `MurmurUIDispositionTests/testConfirmAsOwnCategoryIsSilentAgreement` | #331. Agreement is silent by design |
+| Confirm a finding **as another category** (free-form) → `→ <category>` chip beside the producer's label | ✅ `MurmurUIDispositionTests/testConfirmAsAnotherCategoryShowsTheOverride` | #331. The chip carries the analyst's word verbatim; `ConfirmedCategoryTests` cover what it does to every export |
 | Reset a finding to unreviewed (with edit-mode latch) | ✅ `MurmurUITests/testResetReturnsFindingToUnreviewed` | |
 | Edit a finding's note in context panel | ✅ `MurmurUITests/testContextNotesEditorAppearsInEditMode` | Editor mounts only in edit-mode; the actual text round-trip is exercised in `RecordContextPanel`'s save path (debounced write to `<bundle>/notes.md`) |
 
