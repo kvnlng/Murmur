@@ -6,7 +6,7 @@ nav_exclude: true
 
 # Privacy Policy for Murmur Studio
 
-*Last updated: June 19, 2026*
+*Last updated: August 23, 2026*
 
 Murmur Studio is a macOS application for analyst review of physiological
 waveform recordings (WFDB-format files) stored on your own computer.
