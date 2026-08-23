@@ -49,4 +49,4 @@ If this policy changes, the "Last updated" date above will be revised.
 
 ## Contact
 
-Questions: [long.kevin@gmail.com](mailto:long.kevin@gmail.com)
+Questions: [support@murmurstudio.net](mailto:support@murmurstudio.net)
