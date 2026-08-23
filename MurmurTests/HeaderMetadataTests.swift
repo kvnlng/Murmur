@@ -85,18 +85,6 @@ struct HeaderFieldParsingTests {
         #expect(HeaderField(key: "Age", value: "85").display == "Age: 85")
         #expect(HeaderField(key: "Hx", value: "").display == "Hx")
     }
-
-    @Test("Sentinel values are recognized as carrying no information")
-    func sentinelDetection() {
-        #expect(HeaderField(key: "Age", value: "85").carriesInformation)
-        #expect(HeaderField(key: "Dx", value: "164889003").carriesInformation)
-        #expect(!HeaderField(key: "Rx", value: "Unknown").carriesInformation)
-        #expect(!HeaderField(key: "Rx", value: "unknown").carriesInformation)
-        #expect(!HeaderField(key: "Hx", value: "N/A").carriesInformation)
-        #expect(!HeaderField(key: "Sx", value: "").carriesInformation)
-        // A value that merely CONTAINS a sentinel word still informs.
-        #expect(HeaderField(key: "Hx", value: "unknown origin syncope").carriesInformation)
-    }
 }
 
 // MARK: - Navigator row
@@ -104,15 +92,32 @@ struct HeaderFieldParsingTests {
 @Suite("Header metadata (#328) — navigator subtitle and search")
 struct RecordListEntryMetadataTests {
 
-    private func entry(comments: [String], samples: Int = 5000) throws -> RecordListEntry {
+    private func record(
+        _ name: String = "JS00001", comments: [String], samples: Int = 5000
+    ) throws -> WFDBRecordEntry {
         let lines = comments.map { "#\($0)" }.joined(separator: "\n")
         let header = try WFDBHeaderParser.parse(text: """
-        JS00001 1 500 \(samples)
-        JS00001.mat 16+24 1000/mV 16 0 0 0 0 I
+        \(name) 1 500 \(samples)
+        \(name).mat 16+24 1000/mV 16 0 0 0 0 I
         \(lines)
         """)
-        return RecordListEntry(WFDBRecordEntry(filename: "JS00001.hea", header: header))
+        return WFDBRecordEntry(filename: "\(name).hea", header: header)
     }
+
+    /// One row built in isolation — nothing suppressed, as a single record.
+    private func entry(comments: [String], samples: Int = 5000) throws -> RecordListEntry {
+        RecordListEntry(try record(comments: comments, samples: samples))
+    }
+
+    /// Rows built the way `ContentView.adopt(scan:)` builds them: the folder's
+    /// constant keys computed once, then applied to every row.
+    private func folder(_ records: [WFDBRecordEntry]) -> [RecordListEntry] {
+        let constant = RecordListEntry.constantMetadataKeys(in: records)
+        return records.map { RecordListEntry($0, suppressing: constant) }
+    }
+
+    /// The three lines every ecg-arrhythmia record carries, verbatim.
+    private let corpusConstants = ["Rx: Unknown", "Hx: Unknown", "Sx: Unknown"]
 
     @Test("A record with metadata shows every informative field, not just the first")
     func subtitleShowsAllFields() throws {
@@ -120,28 +125,94 @@ struct RecordListEntryMetadataTests {
         #expect(row.subtitle == "10 s · Age: 85 · Sex: Male · Dx: 164889003,59118001")
     }
 
-    @Test("Sentinel-valued fields are dropped from the subtitle — the real corpus shape")
-    func subtitleDropsNoInformationSentinels() throws {
-        // Every record in PhysioNet ecg-arrhythmia carries these three.
-        let row = try entry(comments: [
-            "Age: 85", "Sex: Male", "Dx: 164889003",
-            "Rx: Unknown", "Hx: Unknown", "Sx: Unknown",
+    // MARK: X56 for metadata — the folder decides, never the value
+
+    @Test("A key identical on every record is dropped from the subtitle — the real corpus shape")
+    func constantKeysAreDropped() throws {
+        let rows = folder([
+            try record("JS00001", comments: ["Age: 85", "Sex: Male", "Dx: 164889003"] + corpusConstants),
+            try record("JS00002", comments: ["Age: 42", "Sex: Female", "Dx: 426783006"] + corpusConstants),
+            try record("JS00003", comments: ["Age: 67", "Sex: Male", "Dx: 427084000"] + corpusConstants),
         ])
-        #expect(row.subtitle == "10 s · Age: 85 · Sex: Male · Dx: 164889003")
+        #expect(rows[0].subtitle == "10 s · Age: 85 · Sex: Male · Dx: 164889003")
+        #expect(rows[1].subtitle == "10 s · Age: 42 · Sex: Female · Dx: 426783006")
     }
 
-    @Test("A dropped sentinel field is still searchable")
-    func sentinelFieldsRemainSearchable() throws {
-        let row = try entry(comments: ["Age: 85", "Rx: Unknown"])
-        #expect(!row.subtitle.contains("Rx"))
-        #expect(row.searchText.contains("Rx"))
-        #expect(row.searchText.contains("Unknown"))
+    @Test("The rule needs no word list: an arbitrary constant is dropped just the same")
+    func anyConstantIsDropped() throws {
+        // Nothing about "Site" or "ZG-7" is on any list. It is dropped because
+        // it is the same on every row, which is the only reason that exists.
+        let rows = folder([
+            try record("a", comments: ["Age: 85", "Site: ZG-7"]),
+            try record("b", comments: ["Age: 42", "Site: ZG-7"]),
+        ])
+        #expect(rows.allSatisfy { !$0.subtitle.contains("Site") })
+        #expect(rows.allSatisfy { $0.subtitle.contains("Age") })
     }
 
-    @Test("A record whose metadata is ALL sentinels falls back to the first comment")
-    func allSentinelsFallsBackToComment() throws {
-        let row = try entry(comments: ["Rx: Unknown", "Hx: Unknown"])
-        #expect(row.subtitle == "10 s · Rx: Unknown")
+    @Test("`Sex: Unknown` among Male/Female is SHOWN — the word list hid it and was wrong")
+    func unknownIsShownWhenItDiscriminates() throws {
+        // 22 of ecg-arrhythmia's 45,152 records say this. On those rows it is
+        // the discriminating fact, not the absence of one.
+        let rows = folder([
+            try record("a", comments: ["Sex: Male"] + corpusConstants),
+            try record("b", comments: ["Sex: Unknown"] + corpusConstants),
+            try record("c", comments: ["Sex: Female"] + corpusConstants),
+        ])
+        #expect(rows[1].subtitle == "10 s · Sex: Unknown")
+        #expect(!rows[1].subtitle.contains("Rx"))
+    }
+
+    @Test("A value that differs on ONE record keeps the key on EVERY record")
+    func oneDifferenceKeepsTheKeyEverywhere() throws {
+        let rows = folder([
+            try record("a", comments: ["Rx: Unknown"]),
+            try record("b", comments: ["Rx: Unknown"]),
+            try record("c", comments: ["Rx: Metoprolol"]),
+        ])
+        #expect(rows.allSatisfy { $0.subtitle.contains("Rx") })
+    }
+
+    @Test("A key present on only SOME records is kept — presence discriminates")
+    func partialPresenceIsKept() throws {
+        let rows = folder([
+            try record("a", comments: ["Age: 85", "Hx: Unknown"]),
+            try record("b", comments: ["Age: 42"]),
+        ])
+        #expect(rows[0].subtitle.contains("Hx: Unknown"))
+        #expect(RecordListEntry.constantMetadataKeys(in: [
+            try record("a", comments: ["Age: 85", "Hx: Unknown"]),
+            try record("b", comments: ["Age: 42"]),
+        ]).isEmpty)
+    }
+
+    @Test("A single-record folder suppresses nothing")
+    func singleRecordSuppressesNothing() throws {
+        // Every key is trivially constant across one record; suppressing them
+        // all would blank the subtitle for the one row there is.
+        let one = try record(comments: ["Age: 85"] + corpusConstants)
+        #expect(RecordListEntry.constantMetadataKeys(in: [one]).isEmpty)
+        #expect(folder([one])[0].subtitle.contains("Rx: Unknown"))
+    }
+
+    @Test("A suppressed field is still searchable")
+    func suppressedFieldsRemainSearchable() throws {
+        let rows = folder([
+            try record("a", comments: ["Age: 85", "Rx: Unknown"]),
+            try record("b", comments: ["Age: 42", "Rx: Unknown"]),
+        ])
+        #expect(!rows[0].subtitle.contains("Rx"))
+        #expect(rows[0].searchText.contains("Rx"))
+        #expect(rows[0].searchText.contains("Unknown"))
+    }
+
+    @Test("When every field is constant, the first comment is shown rather than nothing")
+    func allConstantFallsBackToComment() throws {
+        let rows = folder([
+            try record("a", comments: ["Rx: Unknown", "Hx: Unknown"]),
+            try record("b", comments: ["Rx: Unknown", "Hx: Unknown"]),
+        ])
+        #expect(rows[0].subtitle == "10 s · Rx: Unknown")
     }
 
     @Test("A comment-only record keeps the original first-comment subtitle")
@@ -169,5 +240,45 @@ struct RecordListEntryMetadataTests {
     func searchTextCarriesRawComments() throws {
         let row = try entry(comments: ["69 M 1085 1629 x1"])
         #expect(row.searchText.contains("1085"))
+    }
+}
+
+// MARK: - Against the real corpus
+
+@Suite("Header metadata (#328) — against the real corpus")
+struct HeaderMetadataRealDataTests {
+    /// Same convention as `WFDBCorpusScannerRealDataTests`: a condition trait,
+    /// so a machine without the drive declines the test instead of failing it.
+    private static let root = URL(
+        fileURLWithPath: "/Volumes/PRO-G40/Data/PhysioNet/arrhythmia"
+    )
+
+    private static var hasCorpus: Bool {
+        FileManager.default.fileExists(
+            atPath: root.appendingPathComponent(WFDBCorpusScanner.indexFileName).path
+        )
+    }
+
+    @Test("ecg-arrhythmia's constants are exactly Rx, Hx, Sx — and `Sex: Unknown` is shown where it occurs",
+          .enabled(if: HeaderMetadataRealDataTests.hasCorpus,
+                   "ecg-arrhythmia not available on this machine"))
+    func constantsOnTheRealCorpus() throws {
+        let scan = try WFDBCorpusScanner.scan(root: Self.root)
+        let constant = RecordListEntry.constantMetadataKeys(in: scan.entries)
+
+        // Measured on disk: these three are `Unknown` on all 45,152 records;
+        // Age, Sex and Dx vary. The rule finds exactly that with no word list.
+        #expect(constant == ["Rx", "Hx", "Sx"])
+
+        let rows = scan.entries.map { RecordListEntry($0, suppressing: constant) }
+        let first = try #require(rows.first)
+        #expect(!first.subtitle.contains("Rx"))
+        #expect(first.subtitle.hasPrefix("10 s · Age: "))
+
+        // 22 records say `Sex: Unknown`. The word list hid it on every one of
+        // them; on those rows it is the discriminating fact, so it shows.
+        let unknownSex = rows.filter { $0.subtitle.contains("Sex: Unknown") }
+        #expect(unknownSex.count == 22)
+        #expect(unknownSex.contains { $0.id == "WFDBRecords/34/346/JS34080.hea" })
     }
 }

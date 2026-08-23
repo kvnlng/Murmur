@@ -924,9 +924,13 @@ public struct ContentView: View {
         CarriedSessionStore.shared.reset()
         sessionStates = [:]
         sessionProvenances = [:]
+        // Which metadata keys the subtitle may omit is a property of THIS
+        // folder — X56's constant rule — so it is computed once over the
+        // scan, never per row and never from a value.
+        let constantKeys = RecordListEntry.constantMetadataKeys(in: scan.entries)
         setAppState(.browsing(
             source: .folder(folderURL),
-            records: scan.entries.map(RecordListEntry.init)
+            records: scan.entries.map { RecordListEntry($0, suppressing: constantKeys) }
         ))
         recentsStore.record(folder: folderURL)
         // Never silently short: an index entry with no readable `.hea`, or a

@@ -95,28 +95,16 @@ struct HeaderField: Equatable, Sendable {
     }
 
     /// `Key: value`, the form the navigator subtitle renders.
+    ///
+    /// There is deliberately no "does this value carry information" test
+    /// here. #328 first shipped one — a word list (`Unknown`, `N/A`, …) that
+    /// hid a field from the subtitle — and it was the app interpreting a
+    /// value, which the boundary doc says it does not do. It was also wrong:
+    /// `Sex: Unknown` on 22 of 45,152 records is the discriminating fact on
+    /// those rows, and the list hid it. Which fields to show is decided by
+    /// the CORPUS (`RecordListEntry.constantMetadataKeys`), never by the
+    /// value.
     var display: String { value.isEmpty ? key : "\(key): \(value)" }
-
-    /// Whether this field says anything about THIS record.
-    ///
-    /// PhysioNet corpora fill absent metadata with a sentinel rather than
-    /// omitting the line — every record in the arrhythmia database carries
-    /// `Rx: Unknown`, `Hx: Unknown`, `Sx: Unknown`. In a one-line subtitle
-    /// repeated down 45,000 rows those are ~40 characters that discriminate
-    /// nothing, which is the trade X56 already rejected for signal count and
-    /// sample rate.
-    ///
-    /// This is a DISPLAY-DENSITY decision for the subtitle alone. Nothing is
-    /// discarded: `comments` and `metadata` are untouched and still render
-    /// verbatim in the context drawer, and the navigator's search text keeps
-    /// every field, so `Rx` remains findable. Suppressing a field that states
-    /// the absence of information asserts nothing about the record.
-    var carriesInformation: Bool {
-        let v = value.trimmingCharacters(in: .whitespaces).lowercased()
-        return !v.isEmpty && !Self.noInformationSentinels.contains(v)
-    }
-
-    private static let noInformationSentinels: Set<String> = ["unknown", "n/a", "na", "none", "-"]
 }
 
 struct WFDBSignal: Equatable, Sendable {
