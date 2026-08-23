@@ -371,7 +371,7 @@ final class MurmurUIBypassTests: XCTestCase {
     @MainActor
     func testHelpContactSupportTargetsMailto() throws {
         assertHelpItemTargets("Contact Support…",
-                              "mailto:long.kevin@gmail.com?subject=Murmur%20Studio%20Support")
+                              "mailto:support@murmurstudio.net?subject=Murmur%20Studio%20Support")
     }
 
     // testPhysioNetLinkTargetsMITBIH was deleted with the welcome card
