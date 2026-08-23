@@ -18,7 +18,22 @@ public final class LeadPresetStore {
     /// Shared so the focus-stage menu and anything else that offers presets
     /// read one live list within a run — the same reason `RecentFoldersStore`
     /// is shared.
-    @MainActor public static let shared = LeadPresetStore()
+    @MainActor public static let shared = LeadPresetStore(defaults: launchDefaults)
+
+    /// `.standard`, except under `--ui-test-preset-suite=<name>` in DEBUG
+    /// builds, where the shared store gets a fresh named suite — so an XCUI
+    /// test can save a preset without writing into the analyst's real
+    /// preferences, and starts empty every launch.
+    private static var launchDefaults: UserDefaults {
+        #if DEBUG
+        if let suite = UITestSupport.value(forFlag: "ui-test-preset-suite"),
+           let defaults = UserDefaults(suiteName: suite) {
+            defaults.removePersistentDomain(forName: suite)
+            return defaults
+        }
+        #endif
+        return .standard
+    }
 
     /// Analyst-saved presets, newest last. Built-ins are NOT in here.
     public private(set) var userPresets: [LeadPreset] = []
