@@ -73,8 +73,8 @@ surviving routes and coverage:
 | Interaction | Test | Notes |
 | --- | --- | --- |
 | Click lead chip → focus mode shifts to that lead | ✅ `MurmurUITests/testClickingLeadChipShiftsFocus` | |
-| Apply a named lead preset (built-in or saved) | ✅ `MurmurTests/LeadPresetResolutionTests` (7 cases) | #332. Unit-level: the interaction is name → `LeadSelection` resolution against the open record, and what is worth proving is which leads a stored NAME stages on a record that may not carry it. The menu itself is manual-smoke (`lead-presets-menu`) |
-| Save, rename and delete a lead preset | ✅ `MurmurTests/LeadPresetStoreTests` (8 cases) | #332. Persistence round-trips through an injected `UserDefaults` suite; built-ins are never stored, and a name shadowing a built-in is suffixed rather than rejected |
+| Apply a named lead preset (built-in or saved) | ✅ `MurmurUILeadPresetTests.testApplyingLimbPresetStagesSixLeadsWithPrimaryI` + `MurmurTests/LeadPresetResolutionTests` (7 cases) | #332. The XCUI test opens `lead-presets-menu`, applies the built-in Limb row on the sample record and asserts the six limb legends appear, V1/V2 do not, and chip I announces itself primary. The unit cases cover what a stored NAME resolves to on a record that may not carry every lead |
+| Save, rename and delete a lead preset | ✅ `MurmurUILeadPresetTests.testSavingTheStagedLeadsAddsAPresetRow` + `MurmurTests/LeadPresetStoreTests` (8 cases) | #332. The XCUI test stages I + V1, saves them as "Reduced" through the alert and finds the row in the menu in the same run; `--ui-test-preset-suite` gives the shared store a throwaway `UserDefaults` suite so nothing lands in the analyst's preferences. Rename/delete round-trip at unit level |
 | Toggle Focus / Strips layout mode | ✅ `MurmurUITests/testLayoutModeToggleShowsAllChannels` | |
 
 ## Toolbar
