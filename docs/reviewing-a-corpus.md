@@ -209,9 +209,9 @@ none of this record's is disabled rather than silently doing nothing.
 **An exercise.** Find a record labelled left bundle branch block
 (`164909002`), apply `Limb`, then drop to `I · II` and look again. What you
 are asking is how much of the evidence for that label survives the lead
-subset — which is the same question the
-[2021 Challenge](https://physionet.org/content/challenge-2021/) asked with
-its 12/6/4/3/2-lead tracks, and a question you can only answer by looking.
+subset — the question every reduced-lead device, from a telemetry patch to
+a wearable, is quietly asking of the same label, and one you can only
+answer by looking.
 
 ---
 
