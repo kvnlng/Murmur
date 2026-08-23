@@ -38,6 +38,59 @@ final class MurmurUIBypassTests: XCTestCase {
                       "openFolder(_:) → scanFolder → import → bedside should complete end-to-end")
     }
 
+    /// #329: a folder with a `RECORDS` index opens from its ROOT, and every
+    /// navigator row's id is the record's path relative to that root — which is
+    /// also the key the flag store and the importer use, so a flag cannot land
+    /// on the wrong row. `a/` carries its own index, `b/` is flat; both shapes
+    /// appear in published corpora, sometimes in the same tree.
+    @MainActor
+    func testLaunchArgOpenCorpusListsRootRelativeRows() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-open-corpus"]
+        app.launch()
+
+        for id in ["record-row-a/r1.hea", "record-row-a/r2.hea", "record-row-b/r3.hea"] {
+            let row = app.descendants(matching: .any).matching(identifier: id).firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 15),
+                          "\(id) should be listed — ids are root-relative paths (#329)")
+        }
+        XCTAssertFalse(
+            app.descendants(matching: .any).matching(identifier: "empty-state-prompt").firstMatch.exists,
+            "The launch prompt should be gone once the corpus is open"
+        )
+    }
+
+    /// #329: an index entry with nothing behind it is NAMED, in a dialog that
+    /// says the folder opened — not in the error alert, whose title would
+    /// contradict the 3 rows sitting in the navigator behind it.
+    @MainActor
+    func testLaunchArgOpenCorpusNamesSkippedIndexEntries() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["--ui-test-open-corpus=missing"]
+        app.launch()
+
+        let row = app.descendants(matching: .any)
+            .matching(identifier: "record-row-a/r1.hea").firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 15),
+                      "The records that DID resolve must still open")
+
+        let container: XCUIElement = {
+            if app.dialogs.firstMatch.waitForExistence(timeout: 5) { return app.dialogs.firstMatch }
+            if app.sheets.firstMatch.waitForExistence(timeout: 2) { return app.sheets.firstMatch }
+            return app.windows.firstMatch
+        }()
+        let notice = container.staticTexts.matching(
+            NSPredicate(format: "value CONTAINS %@ OR label CONTAINS %@",
+                        "1 index entry had no readable .hea (ghost.hea)",
+                        "1 index entry had no readable .hea (ghost.hea)")
+        ).firstMatch
+        XCTAssertTrue(notice.waitForExistence(timeout: 5),
+                      "The skipped entry should be named, not counted")
+        XCTAssertTrue(container.staticTexts["Record folder opened"].exists,
+                      "A shortfall on a successful open is a note, not an error")
+        XCTAssertFalse(container.staticTexts["Couldn't open record folder"].exists)
+    }
+
     /// X63-B: the flag an analyst uses to pick records for Save Session lives
     /// on the sidebar row, so the sidebar has to be reachable for the feature
     /// to exist at all. Nothing asserted the record list before this — the
