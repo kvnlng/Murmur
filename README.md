@@ -91,6 +91,9 @@ Quick links:
 - [What Murmur asserts](docs/what-murmur-asserts.md) — the boundary
   between the record, the producer, the analyst, and the app; what
   producers own, and why the viewer never interprets their vocabulary.
+- [Reviewing a PhysioNet corpus](docs/reviewing-a-corpus.md) — a worked
+  end-to-end pass over a 45,000-record dataset: open it, search it by
+  header metadata, bring a model in as a producer, adjudicate, export.
 - [Citation](docs/citation.md) — how to cite Murmur Studio and
   scan-produced findings in research.
 - [Roadmap](ROADMAP.md) — current state and what's next.
