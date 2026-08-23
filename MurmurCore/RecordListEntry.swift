@@ -39,8 +39,43 @@ struct RecordListEntry: Identifiable, Equatable {
     /// title, every metadata key and value, and every raw comment line.
     let searchText: String
 
+    /// Metadata keys that discriminate nothing in this folder: present on
+    /// EVERY record, with the SAME value on every record.
+    ///
+    /// This is X56's rule, applied to metadata. X56 dropped "N sig • H Hz"
+    /// from the subtitle because it was identical on all 48 MIT-BIH records;
+    /// `Rx: Unknown · Hx: Unknown · Sx: Unknown` is identical on all 45,152
+    /// records of ecg-arrhythmia and costs ~40 of a row's ~95 characters for
+    /// the same nothing. #328 first solved that with a word list of
+    /// "uninformative" values; this replaces it, because the word list was
+    /// the app interpreting a value (see `HeaderField.display`), and because
+    /// a constant is a fact about the FOLDER that only the folder can tell you.
+    ///
+    /// "Present on every record" is load-bearing. A key that only some records
+    /// carry discriminates by its presence, whatever its value, so it stays.
+    /// With fewer than two records nothing is constant in any useful sense —
+    /// every key would qualify and the subtitle would go blank — so nothing is
+    /// suppressed.
+    static func constantMetadataKeys(in entries: [WFDBRecordEntry]) -> Set<String> {
+        guard entries.count >= 2 else { return [] }
+        let valuesByKey: [[String: [String]]] = entries.map { entry in
+            Dictionary(grouping: entry.header.metadata, by: \.key)
+                .mapValues { $0.map(\.value) }
+        }
+        var constant = Set<String>()
+        for (key, values) in valuesByKey[0] {
+            let everywhere = valuesByKey.allSatisfy { $0[key] == values }
+            if everywhere { constant.insert(key) }
+        }
+        return constant
+    }
+
     /// A scanned WFDB record.
-    init(_ record: WFDBRecordEntry) {
+    ///
+    /// `suppressing` is the folder's `constantMetadataKeys`; the caller
+    /// computes it once over the scan and passes it to every row. Defaults to
+    /// nothing suppressed so a row can be built in isolation.
+    init(_ record: WFDBRecordEntry, suppressing constantKeys: Set<String> = []) {
         id = record.filename
         title = record.header.recordName
         var parts: [String] = []
@@ -64,11 +99,11 @@ struct RecordListEntry: Identifiable, Equatable {
         // the first comment is `Age: 85` for every row, which discriminates
         // nothing, exactly the failure X56 rejected. Records without key/value
         // comments (MIT-BIH) keep the original first-comment behaviour.
-        // Sentinel-valued fields (`Rx: Unknown` and friends) are dropped from
-        // the SUBTITLE only — they are identical on every row of a corpus, and
-        // `searchText` below still carries them. See `carriesInformation`.
+        // Fields constant across the whole folder are dropped from the
+        // SUBTITLE only (`constantMetadataKeys`); `searchText` below still
+        // carries them, so `Rx` stays findable even when it is never shown.
         let metadata = record.header.metadata
-        let informative = metadata.filter(\.carriesInformation)
+        let informative = metadata.filter { !constantKeys.contains($0.key) }
         if informative.isEmpty {
             if let note = record.header.comments
                 .map({ $0.trimmingCharacters(in: .whitespaces) })
