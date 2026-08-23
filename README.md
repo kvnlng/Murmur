@@ -94,6 +94,9 @@ Quick links:
 - [Reviewing a PhysioNet corpus](docs/reviewing-a-corpus.md) — a worked
   end-to-end pass over a 45,000-record dataset: open it, search it by
   header metadata, bring a model in as a producer, adjudicate, export.
+- [Reviewing a Holter database](docs/reviewing-a-holter-database.md) —
+  the same loop on MIT-BIH: two channels, free-text comments, the
+  reference beats already there as a producer, and where the fit is poor.
 - [Citation](docs/citation.md) — how to cite Murmur Studio and
   scan-produced findings in research.
 - [Roadmap](ROADMAP.md) — current state and what's next.
