@@ -62,7 +62,7 @@ struct MurmurApp: App {
         static let gettingStarted  = URL(string: "https://kvnlng.github.io/Murmur/getting-started.html")!
         static let annotationSchema = URL(string: "https://kvnlng.github.io/Murmur/annotation-schema.html")!
         static let privacy         = URL(string: "https://kvnlng.github.io/Murmur/privacy.html")!
-        static let support         = URL(string: "mailto:long.kevin@gmail.com?subject=Murmur%20Studio%20Support")!
+        static let support         = URL(string: "mailto:support@murmurstudio.net?subject=Murmur%20Studio%20Support")!
     }
 
     init() {
