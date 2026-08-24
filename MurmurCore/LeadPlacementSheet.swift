@@ -69,12 +69,32 @@ struct LeadPlacementSheetModel: Equatable {
         return .record
     }
 
-    /// What the field starts as: the declaration that CURRENTLY applies to
-    /// this name on this record (override first, then folder baseline), or
-    /// empty. Never a suggestion — plan ruling 3.
-    func initialText(in map: LeadPlacementMapContext) -> String {
-        map.declaration(forRecordedName: recordedName, recordID: recordID)?
-            .declaration.placement ?? ""
+    /// What the field holds FOR `scope` — on open, and again every time the
+    /// picker moves. Per-scope, because the field and the scope together are
+    /// one assertion: carrying a record override's wording across to folder
+    /// scope and saving it would silently overwrite the baseline with the
+    /// record's exception (and the reverse would bury a fresh override under
+    /// the baseline's wording).
+    ///
+    /// - `.folder` → the folder baseline's text, or empty. Only the baseline:
+    ///   an override's wording is never offered as the folder's.
+    /// - `.record` → this record's override if it has one, otherwise the
+    ///   folder baseline's text, because that is the declaration currently in
+    ///   force HERE and amending it into an exception is the documented way a
+    ///   per-record override gets made. The provenance line says "not declared
+    ///   at this scope yet" while that text sits there, so nothing is claimed
+    ///   that isn't true.
+    ///
+    /// Never a suggestion in either branch — plan ruling 3.
+    func text(in map: LeadPlacementMapContext, scope: Scope) -> String {
+        switch scope {
+        case .folder:
+            return map.declaration(forRecordedName: recordedName, recordID: nil)?
+                .declaration.placement ?? ""
+        case .record:
+            return map.declaration(forRecordedName: recordedName, recordID: recordID)?
+                .declaration.placement ?? ""
+        }
     }
 
     /// The declaration standing at `scope` right now, if any — what the
@@ -209,8 +229,19 @@ struct LeadPlacementSheet: View {
         .padding(16)
         .frame(width: 400)
         .onAppear {
-            scope = model.initialScope(in: map)
-            placement = model.initialText(in: map)
+            let opening = model.initialScope(in: map)
+            scope = opening
+            placement = model.text(in: map, scope: opening)
+        }
+        // The field is per-scope, so moving the picker RE-DERIVES it (the
+        // provenance line and the Delete button already recompute off `scope`
+        // through `existing`). Without this the field kept the previous
+        // scope's wording and Declare wrote it into the newly chosen scope —
+        // a record's exception silently overwriting the folder baseline. Any
+        // uncommitted typing is discarded by the switch, which is the honest
+        // outcome: the text was an edit to a DIFFERENT declaration.
+        .onChange(of: scope) { _, newScope in
+            placement = model.text(in: map, scope: newScope)
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("lead-placement-sheet")

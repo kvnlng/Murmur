@@ -128,7 +128,8 @@ struct LeadPlacementMapTests {
         let map = LeadPlacementMapContext()
         let model = sheetModel()
 
-        #expect(model.initialText(in: map).isEmpty)
+        #expect(model.text(in: map, scope: .folder).isEmpty)
+        #expect(model.text(in: map, scope: .record).isEmpty)
         #expect(model.initialScope(in: map) == .folder)
         #expect(model.existingDeclaration(in: map, scope: .folder) == nil)
         #expect(model.existingDeclaration(in: map, scope: .record) == nil)
@@ -143,7 +144,7 @@ struct LeadPlacementMapTests {
 
         // Opened from a record that has no override of its own: the FOLDER
         // text is what's in view, on folder scope.
-        #expect(model.initialText(in: map) == "II")
+        #expect(model.text(in: map, scope: model.initialScope(in: map)) == "II")
         #expect(model.initialScope(in: map) == .folder)
         #expect(model.existingDeclaration(in: map, scope: .folder)?.placement == "II")
         // The folder baseline is not reported as this record's own — Delete
@@ -153,7 +154,8 @@ struct LeadPlacementMapTests {
         // Plan ruling 3: an undeclared name pre-fills NOTHING, however
         // conventional a reading of it might be.
         let v5 = LeadPlacementSheetModel(recordedName: "V5", recordID: model.recordID)
-        #expect(v5.initialText(in: map).isEmpty)
+        #expect(v5.text(in: map, scope: .folder).isEmpty)
+        #expect(v5.text(in: map, scope: .record).isEmpty)
     }
 
     @Test("Sheet opens on record scope, showing the override, when one exists")
@@ -166,9 +168,48 @@ struct LeadPlacementMapTests {
                     recordID: model.recordID, reviewer: "kevin", at: fixedDate)
 
         #expect(model.initialScope(in: map) == .record)
-        #expect(model.initialText(in: map) == "front patch")
+        #expect(model.text(in: map, scope: model.initialScope(in: map)) == "front patch")
         #expect(model.existingDeclaration(in: map, scope: .record)?.placement == "front patch")
         #expect(model.existingDeclaration(in: map, scope: .folder)?.placement == "II")
+    }
+
+    /// The contract the sheet's `.onChange(of: scope)` re-derivation rests on:
+    /// the field is PER SCOPE. Without it the picker moved while the field
+    /// kept the previous scope's wording, and Declare wrote a record's
+    /// exception over the folder baseline (or the reverse). The view calls
+    /// exactly this helper, on open and on every picker move.
+    @Test("The field is re-derived per scope — the two scopes never share text")
+    func sheetTextIsPerScope() {
+        let map = LeadPlacementMapContext()
+        let model = sheetModel()
+        map.declare(recordedName: "MLII", placement: "II", recordID: nil,
+                    reviewer: "kevin", at: fixedDate)
+        map.declare(recordedName: "MLII", placement: "front patch",
+                    recordID: model.recordID, reviewer: "kevin", at: fixedDate)
+
+        #expect(model.text(in: map, scope: .record) == "front patch")
+        #expect(model.text(in: map, scope: .folder) == "II")
+
+        // With no override of this record's own, record scope offers the
+        // declaration in force here — the baseline — which is what makes
+        // "amend the folder wording, save as this record only" work. Folder
+        // scope is never fed an override's wording, which is the direction
+        // that could silently overwrite a baseline.
+        let fresh = LeadPlacementMapContext()
+        fresh.declare(recordedName: "MLII", placement: "II", recordID: nil,
+                      reviewer: "kevin", at: fixedDate)
+        #expect(model.text(in: fresh, scope: .record) == "II")
+        #expect(model.text(in: fresh, scope: .folder) == "II")
+
+        // An override with no baseline behind it: folder scope is empty, not
+        // the override's text.
+        let overrideOnly = LeadPlacementMapContext()
+        overrideOnly.declare(recordedName: "MLII", placement: "front patch",
+                             recordID: model.recordID, reviewer: "kevin", at: fixedDate)
+        #expect(overrideOnly.declaration(forRecordedName: "MLII", recordID: model.recordID)?
+            .isOverride == true)
+        #expect(model.text(in: overrideOnly, scope: .record) == "front patch")
+        #expect(model.text(in: overrideOnly, scope: .folder).isEmpty)
     }
 
     @Test("Save routes to the chosen scope — record scope writes an override")
