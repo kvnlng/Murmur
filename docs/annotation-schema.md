@@ -329,11 +329,18 @@ on), or, same as every other column, a record the analyst never
 imported (see [above](#review-table-export)). Empty is not an error
 state here any more than it is anywhere else in this table.
 
-The same choice and wording surface inside Murmur Studio itself, in the
-metrics header's "analysis lead: …" disclosure line, and in the
-per-record Markdown report's **Analysis lead** metadata field — one
-vocabulary, so a value read here matches what the analyst saw on
-screen.
+The resolved *channel* is the same one Murmur Studio's own metrics
+header names in its "analysis lead: …" disclosure line — but the
+*wording of the reason* is not. The header states a reviewer plus the
+date they designated, and collapses a scored default to "strongest R
+peaks"; the export vocabulary above (`analyst override — <reviewer>`,
+`r-peak score N.NN`) is deliberately terser and keeps the number, since
+it targets a spreadsheet cell rather than a sentence a person reads on
+screen. The per-record Markdown report's **Analysis lead** metadata
+field renders from this same export vocabulary, so it always agrees
+with the review table's `analysis_lead_reason` column for the same
+record — that is the pairing that shares one wording, not the export
+and the on-screen header.
 
 The resolution and its provenance are stored per record in
 `<bundle>/analysis_lead.json`, alongside the other analyst-layer

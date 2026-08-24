@@ -55,7 +55,15 @@ enum MarkdownReport {
         }
         lines.append("- **Channels**: \(recording.channels.count)")
         if let analysisLead {
-            lines.append("- **Analysis lead**: \(AnalysisLeadHeaderLine.label(for: analysisLead))")
+            // The EXPORT vocabulary (`exportReason`), not the in-app header
+            // disclosure's (`AnalysisLeadHeaderLine`) — the two are worded
+            // differently on purpose (the header states a reviewer + date;
+            // the export states a score), and this report shares its
+            // wording with the review-table CSV, not the on-screen line.
+            lines.append(
+                "- **Analysis lead**: \(analysisLead.channel.name) — "
+                + analysisLead.provenance.exportReason
+            )
         }
         lines.append("")
 

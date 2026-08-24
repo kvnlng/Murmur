@@ -5055,7 +5055,7 @@ struct MarkdownReportTests {
 
     // MARK: - #357: analysis lead line
 
-    @Test("A resolved analysis lead renders one metadata line, in the header's own words")
+    @Test("A resolved analysis lead renders one metadata line, in the export's own words")
     func analysisLeadLineRendersWhenResolved() {
         let rec = recording(channels: [channel()])
         let resolution = AnalysisLeadResolution(
@@ -5069,9 +5069,62 @@ struct MarkdownReportTests {
             analysisLead: resolution,
             now: now
         )
-        // Same wording as `AnalysisLeadHeaderLine.label(for:)` — one
-        // vocabulary between the in-app disclosure and the report.
+        // `firstInFile` is the one case where the header and export
+        // vocabularies happen to coincide — see the two tests below for
+        // the cases where they don't.
         #expect(report.contains("- **Analysis lead**: II — first in file"))
+    }
+
+    /// #357 review finding: the report shares the EXPORT vocabulary
+    /// (`AnalysisLeadProvenance.exportReason`, also used by the review
+    /// table's `analysis_lead_reason` column), not the in-app header
+    /// disclosure's (`AnalysisLeadHeaderLine`). The two are worded
+    /// differently on purpose — the header states a reviewer and a date,
+    /// the export states a reviewer with no date; the header collapses a
+    /// score to "strongest R peaks", the export keeps the number. This
+    /// only shows up on `.designated` / `.rPeakScore` — `firstInFile`
+    /// above coincidentally reads the same both ways, which is how the
+    /// wrong vocabulary slipped in undetected.
+    @Test("A designated lead renders the export's override wording, not the header's date-stamped one")
+    func analysisLeadLineUsesExportWordingForDesignation() {
+        let rec = recording(channels: [channel()])
+        let resolution = AnalysisLeadResolution(
+            channel: channel(),
+            provenance: .designated(reviewer: "kevin", date: Date(timeIntervalSince1970: 0)),
+            staleDesignation: nil
+        )
+        let report = MarkdownReport.generate(
+            recording: rec,
+            annotations: [],
+            dispositions: [:],
+            tally: .init(confirmed: 0, dismissed: 0, unreviewed: 0),
+            analysisLead: resolution,
+            now: now
+        )
+        #expect(report.contains("- **Analysis lead**: II — analyst override — kevin"))
+        // The header's wording ("designated by …") never appears.
+        #expect(!report.contains("designated by"))
+    }
+
+    @Test("A scored default renders the export's numeric score, not the header's collapsed phrase")
+    func analysisLeadLineUsesExportWordingForScore() {
+        let rec = recording(channels: [channel()])
+        let resolution = AnalysisLeadResolution(
+            channel: channel(),
+            provenance: .rPeakScore(score: 0.9137, perLead: ["II": 0.9137]),
+            staleDesignation: nil
+        )
+        let report = MarkdownReport.generate(
+            recording: rec,
+            annotations: [],
+            dispositions: [:],
+            tally: .init(confirmed: 0, dismissed: 0, unreviewed: 0),
+            analysisLead: resolution,
+            now: now
+        )
+        #expect(report.contains("- **Analysis lead**: II — r-peak score 0.91"))
+        // The header's collapsed wording never appears.
+        #expect(!report.contains("strongest R peaks"))
     }
 
     @Test("No analysis lead resolution omits the metadata line entirely")
