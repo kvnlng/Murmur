@@ -60,6 +60,17 @@ enum ReviewTableCSV {
         /// repeats the same value.
         var analysisLead: String?
         var analysisLeadReason: String?
+        /// #358 — the analyst's free-text placement declaration for the
+        /// analysis-lead channel's recorded name, verbatim (plan ruling 6).
+        /// Nil (empty column) when nothing has been declared — same "empty
+        /// = undeclared, never omitted" rule `analysisLead` follows.
+        /// Record-level, like the pair above.
+        var declaredPlacement: String?
+        /// #358 — who declared `declaredPlacement` and when, e.g.
+        /// `"kevin, 2026-08-24"`, or `"record override — kevin, 2026-08-24"`
+        /// when the declaration is a per-record override rather than the
+        /// folder-wide baseline. Nil exactly when `declaredPlacement` is nil.
+        var declaredPlacementBy: String?
     }
 
     static let columns = [
@@ -68,6 +79,7 @@ enum ReviewTableCSV {
         "lead", "category", "label", "source", "confidence",
         "state", "confirmed_kind", "confirmed_category", "note", "reviewed_by", "reviewed_at",
         "flagged", "header_comments", "analysis_lead", "analysis_lead_reason",
+        "declared_placement", "declared_placement_by",
     ]
 
     /// Header line plus one line per row, sorted by record path, then start
@@ -112,8 +124,22 @@ enum ReviewTableCSV {
             row.headerComments.joined(separator: " | "),
             row.analysisLead ?? "",
             row.analysisLeadReason ?? "",
+            row.declaredPlacement ?? "",
+            row.declaredPlacementBy ?? "",
         ]
         return fields.map(escape).joined(separator: ",")
+    }
+
+    /// `declared_placement_by`: `"<reviewer>, <date>"`, or, for a per-record
+    /// override, `"record override — <reviewer>, <date>"`. Shares
+    /// `AnalysisLeadHeaderLine`'s date formatter (yyyy-MM-dd, UTC, POSIX)
+    /// rather than building a second one, so the same declaration renders
+    /// the same date on every surface that discloses it.
+    static func declaredPlacementByField(
+        for declaration: LeadPlacementDeclaration, isOverride: Bool
+    ) -> String {
+        let prefix = isOverride ? "record override — " : ""
+        return "\(prefix)\(declaration.reviewer), \(AnalysisLeadHeaderLine.dateString(declaration.declaredAt))"
     }
 
     /// RFC 4180: a field containing a comma, a double quote, CR or LF is

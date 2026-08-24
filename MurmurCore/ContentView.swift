@@ -1030,7 +1030,15 @@ public struct ContentView: View {
 
         let result = ReviewTableBuilder.build(
             sources: sources,
-            flaggedIDs: SessionFlagStore.shared.flaggedIDs
+            flaggedIDs: SessionFlagStore.shared.flaggedIDs,
+            // #358 — the builder stays pure (jurisdiction rule); this is the
+            // one place that reads `LeadPlacementMapContext.shared`, exactly
+            // as `#357`'s analysis lead is resolved inside the builder from
+            // caller-supplied bundle directories rather than a singleton.
+            declaredPlacementLookup: { recordedName, recordID in
+                LeadPlacementMapContext.shared.declaration(
+                    forRecordedName: recordedName, recordID: recordID)
+            }
         )
 
         let panel = NSSavePanel()

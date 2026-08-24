@@ -36,6 +36,12 @@ enum MarkdownReport {
         // rather than a fabricated one — a trend-only recording has no
         // analysis lead to report.
         analysisLead: AnalysisLeadResolution? = nil,
+        // #358 — the analyst's declaration of what the analysis lead's
+        // recorded name physically means, when one exists. The caller
+        // resolves it (it needs `LeadPlacementMapContext`, which this pure
+        // function never touches — jurisdiction rule); `nil` (the default)
+        // renders the line byte-identical to #357's.
+        declaredPlacement: (declaration: LeadPlacementDeclaration, isOverride: Bool)? = nil,
         now: Date
     ) -> String {
         var lines: [String] = []
@@ -60,8 +66,17 @@ enum MarkdownReport {
             // differently on purpose (the header states a reviewer + date;
             // the export states a score), and this report shares its
             // wording with the review-table CSV, not the on-screen line.
+            //
+            // #358: the declared-placement parenthetical, when present,
+            // follows the NAME — the same composition
+            // `AnalysisLeadHeaderLine.label(for:declaration:)` uses — but
+            // the reason after the em dash keeps the export's own wording.
+            let placementSuffix = declaredPlacement.map {
+                " " + LeadPlacementDisclosure.parenthetical(
+                    for: $0.declaration, isOverride: $0.isOverride)
+            } ?? ""
             lines.append(
-                "- **Analysis lead**: \(analysisLead.channel.name) — "
+                "- **Analysis lead**: \(analysisLead.channel.name)\(placementSuffix) — "
                 + analysisLead.provenance.exportReason
             )
         }

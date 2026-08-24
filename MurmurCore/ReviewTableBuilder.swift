@@ -64,7 +64,18 @@ enum ReviewTableBuilder {
         }
     }
 
-    static func build(sources: [Source], flaggedIDs: Set<String>) -> Result {
+    static func build(
+        sources: [Source],
+        flaggedIDs: Set<String>,
+        // #358 — resolves what the analysis lead's recorded name has been
+        // declared to mean, keeping this builder pure: it never reads
+        // `LeadPlacementMapContext.shared` itself (jurisdiction rule), the
+        // same discipline `LeadPlacementDisclosure` and
+        // `AnalysisLeadHeaderLine` keep. `nil` (the default) leaves both
+        // declared-placement columns empty for every row — byte-identical
+        // to pre-#358 output.
+        declaredPlacementLookup: ((_ recordedName: String, _ recordID: String?) -> (LeadPlacementDeclaration, Bool)?)? = nil
+    ) -> Result {
         var rows: [ReviewTableCSV.Row] = []
         var included = 0
         var skipped = 0
@@ -82,6 +93,17 @@ enum ReviewTableBuilder {
             // (e.g. a trend-only record); both columns stay empty for every
             // row, the same rendering never-imported rows already get.
             let lead = recording.analysisLead(inBundle: imported.bundleDirectory)
+            // #358 — resolved once per record, beside `lead` above: a
+            // declaration is stated about the analysis lead's recorded
+            // name, so there is nothing to look up without one. `recordID`
+            // is `source.recordPath` — the navigator's id space
+            // (`WFDBRecordEntry.filename`), the same space
+            // `LeadPlacementMapContext.recordOverrides` is keyed by.
+            let declaredPlacement: (declaration: LeadPlacementDeclaration, isOverride: Bool)? =
+                lead.flatMap { declaredPlacementLookup?($0.channel.name, source.recordPath) }
+            let declaredPlacementByField = declaredPlacement.map {
+                ReviewTableCSV.declaredPlacementByField(for: $0.declaration, isOverride: $0.isOverride)
+            }
 
             for annotation in recording.annotations {
                 let disposition = imported.dispositions[annotation.id]
@@ -110,7 +132,9 @@ enum ReviewTableBuilder {
                     flagged: flagged,
                     headerComments: imported.headerComments,
                     analysisLead: lead?.channel.name,
-                    analysisLeadReason: lead?.provenance.exportReason
+                    analysisLeadReason: lead?.provenance.exportReason,
+                    declaredPlacement: declaredPlacement?.declaration.placement,
+                    declaredPlacementBy: declaredPlacementByField
                 ))
             }
         }

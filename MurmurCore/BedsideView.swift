@@ -1395,6 +1395,17 @@ struct BedsideView: View {
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
+        // #358 — the report stays pure (jurisdiction rule); this is the one
+        // place that reads `LeadPlacementMapContext.shared`. `recordID` is
+        // `recording.sourceFileName` — the `.hea` filename this record was
+        // imported from — since a single-record view has no reach into the
+        // navigator's root-relative id; a per-record override keyed under
+        // that longer id (a nested corpus) won't match here and the export
+        // falls back to the folder-wide baseline, if any.
+        let declaredPlacement = analysisLead.flatMap {
+            LeadPlacementMapContext.shared.declaration(
+                forRecordedName: $0.channel.name, recordID: recording.sourceFileName)
+        }
         let body = MarkdownReport.generate(
             recording: recording,
             annotations: allAnnotations,
@@ -1404,6 +1415,7 @@ struct BedsideView: View {
             // at the call site — the report renders what it is given.
             notes: anchoredNotes.filter { $0.includeInReport == true },
             analysisLead: analysisLead,
+            declaredPlacement: declaredPlacement,
             now: Date()
         )
         do {
