@@ -111,6 +111,12 @@ the records whose note says the PVCs are. Murmur is matching strings, not
 reading a drug list — it would find `Inderal` in a comment that said
 *"no Inderal"* too.
 
+The cohort review export's `declared_placement` and `declared_placement_by`
+columns (§8) are the analyst's own assertions about what a channel name
+physically means here — never the producer's. An empty pair of columns is
+the honest default: MIT-BIH's headers never say what `MLII` was, and Murmur
+doesn't guess.
+
 ---
 
 ## 5. Look at fewer leads
@@ -142,6 +148,30 @@ built-ins should be seeded from what the open record carries rather than a
 fixed four. This page does not work around it. Saving your own preset works
 as the corpus guide describes — `MLII` alone as `Rhythm strip`, say — and
 applies by name to every record here.
+
+There is a second, more direct way to close that gap on this data: tell
+Murmur what `MLII` physically *is*. Right-click the `MLII` channel and
+choose **Declare placement…**, type `II`, and save it folder-wide. The
+sheet writes nothing but that assertion — it does not touch the channel's
+recorded name, and no calculation reads it. What changes is disclosure and
+preset matching: the header line and any QT citation on that channel now
+carry a `(declared: II, by <you>, <date>)` parenthetical alongside the name
+`MLII`, and the presets menu on record 100 now reads `Limb — 1 of 6`
+instead of *none in this record*, because `LeadPreset.resolve` matches a
+preset's lead names against declared placements as well as recorded ones.
+Nothing is inferred or backfilled onto records you haven't declared — this
+is the analyst's own statement, attributed and dated, not a rule the app
+derived from `MLII` being conventional.
+
+The sheet also offers a **this record only** scope, for the rare record
+whose wiring genuinely differs from the rest of the folder. One honest
+limitation of that scope: a per-record override is keyed by the record's
+path in the currently open folder or session. Save a `.mur` session,
+reopen it later, and the record is re-keyed by its stored UUID — so an
+override declared while folder-browsing does not travel across that
+round-trip and the record quietly falls back to the folder-wide baseline
+(or to nothing, if there wasn't one). The folder-wide baseline itself is
+unaffected; it is only the per-record exception that doesn't survive.
 
 ---
 
