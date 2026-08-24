@@ -259,7 +259,9 @@ struct ConfirmedCategoryExportTests {
                 imported: .init(
                     recording: recording,
                     dispositions: [ann.id: disposition(id: ann.id, category: "AFlutter")],
-                    headerComments: []
+                    headerComments: [],
+                    bundleDirectory: FileManager.default.temporaryDirectory
+                        .appendingPathComponent(UUID().uuidString, isDirectory: true)
                 )
             )],
             flaggedIDs: []

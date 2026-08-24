@@ -275,11 +275,19 @@ struct BeatCalipers: View {
         // endorsement provenance once one has (X112c).
         let basis = t.adjudicationBasis ?? "unadjudicated — annotator-coded"
         var text = "Patient normal (\(basis)): \(t.sampleCount) beats"
-        // X25: disclose the lead the intervals were measured in. Convention is
-        // to measure where the T offset is clearest (II / V5 commonly), so
-        // which lead was used is reproducibility-relevant.
+        // X25: disclose the lead the intervals were measured in. #357 §1.5:
+        // that lead is the ANALYSIS lead (designated, scored, or first in
+        // file). `sourceLead` is its NAME; the "not a conventional QT lead"
+        // clause is appended HERE, at render time, because this card states
+        // QT and QTc — convention measures QT where the T offset is clearest
+        // (II / V5 commonly), so a departure is reproducibility-relevant and
+        // is stated rather than corrected. This stays a QT-specific clause
+        // about the TEMPLATE's population: the analysis lead's provenance
+        // (designated / scored / first in file) is a different claim, stated
+        // once in the metrics header by `AnalysisLeadHeaderLine` (#357 §1.6)
+        // rather than repeated on every card that quotes a number.
         if let lead = t.sourceLead, !lead.isEmpty {
-            text += " · lead \(lead)"
+            text += " · lead \(QTLeadDisclosure.citedLeadName(for: lead))"
         }
         if let start = t.spanStartSample, let end = t.spanEndSample, sampleRate > 0 {
             text += " · \(clockString(start, sampleRate: sampleRate))–\(clockString(end, sampleRate: sampleRate))"

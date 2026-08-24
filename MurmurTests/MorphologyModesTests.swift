@@ -113,3 +113,27 @@ struct EndorsedProvenanceFooterTests {
         #expect(text.contains("Patient normal (unadjudicated — annotator-coded): 312 beats"))
     }
 }
+
+// #357: `MorphologyCacheKey` is the app-target static that builds the
+// morphology panel's derived-cache `parametersKey`. It's exercised directly
+// (no `@testable import Murmur` — MurmurTests never does that) via the same
+// symlink mechanism as `ArrhythmiaScanCacheKey` and `QRSProminenceLeadScorer`:
+// the file is a dependency-free standalone type, symlinked from Murmur/ into
+// MurmurTests/ so the file-system-synchronized group compiles it into this
+// module too.
+@Suite("Morphology cache key carries the analysis lead (#357)")
+struct MorphologyCacheKeyTests {
+    @Test("Two keys differing only by lead name are different — designating invalidates the cache")
+    func keyCarriesLead() {
+        let a = MorphologyCacheKey.make(analysisLeadName: "MLII")
+        let b = MorphologyCacheKey.make(analysisLeadName: "V5")
+        #expect(a != b)
+    }
+
+    @Test("The same lead name produces identical keys")
+    func keyStableAcrossRuns() {
+        let a = MorphologyCacheKey.make(analysisLeadName: "MLII")
+        let b = MorphologyCacheKey.make(analysisLeadName: "MLII")
+        #expect(a == b)
+    }
+}

@@ -9,10 +9,10 @@
 //
 //  Population: ALL annotator-coded beats (`Recording.annotatedBeats`), not
 //  only "N" — the second conduction is exactly the population the annotator
-//  coded away. Lead: the QT display lead (first conventional lead, II before
-//  V5; first-channel fallback), matching what the analyst sees in the beat
-//  inspector. Per-cluster QRS widths come from the same frozen delineator
-//  the markings pipeline uses — no new measurement algorithm.
+//  coded away. Lead: the analysis lead (#357), full stop — calculations run
+//  on the designated lead, no per-feature name gate. Per-cluster QRS widths
+//  come from the same frozen delineator the markings pipeline uses — no new
+//  measurement algorithm.
 //
 
 import Foundation
@@ -28,6 +28,9 @@ struct MorphologyOrchestrator: View {
     private struct Key: Hashable {
         let recordingID: UUID?
         let owned: Bool
+        /// #357: a designation re-clusters on the newly designated lead —
+        /// the cache key carries the lead's name, so this recomputes.
+        let analysisLeadRevision: Int
     }
 
     var body: some View {
@@ -35,7 +38,8 @@ struct MorphologyOrchestrator: View {
             .frame(width: 0, height: 0)
             .allowsHitTesting(false)
             .task(id: Key(recordingID: recordingContext.recording?.id,
-                          owned: store.hasStudio)) {
+                          owned: store.hasStudio,
+                          analysisLeadRevision: recordingContext.analysisLeadRevision)) {
                 await recompute()
             }
     }
@@ -44,7 +48,7 @@ struct MorphologyOrchestrator: View {
         guard store.hasStudio,
               let recording = recordingContext.recording,
               let directory = recordingContext.directory,
-              let ecgChannel = recording.primaryECGChannel
+              let resolution = recording.analysisLead(inBundle: directory)
         else {
             await MainActor.run { morphologyContext.clear() }
             return
@@ -53,14 +57,21 @@ struct MorphologyOrchestrator: View {
         let signpost = ComputeSignpost.begin("Morphology")
         defer { ComputeSignpost.end(signpost, workSize: measuredBeatCount) }
 
+        // #357: calculations run on the designated lead, full stop — no
+        // name-gated preference (was: conventional QT lead first, II before
+        // V5). One source, no name consultation.
+        let leadName = resolution.channel.name
+
         // Bundle cache: the summary is a pure function of the record's beats
-        // and samples — no analyst dials feed it (endorsements act downstream,
-        // in the markings pipeline), so the parameters key is empty and the
-        // app-version stamp carries all invalidation.
+        // and samples — no analyst dial feeds it (endorsements act downstream,
+        // in the markings pipeline) — but the resolved lead can change (a
+        // new analysis-lead designation), so the key carries that lead's
+        // name; the app-version stamp carries the rest of invalidation.
+        let parametersKey = MorphologyCacheKey.make(analysisLeadName: leadName)
         if let hit = await Task.detached(priority: .userInitiated, operation: {
             BundleDerivedCache.load(
                 MorphologyCachePayload.self, producer: "morphology",
-                parametersKey: "", from: directory)
+                parametersKey: parametersKey, from: directory)
         }).value {
             measuredBeatCount = hit.beatCount
             guard !Task.isCancelled else { return }
@@ -77,18 +88,13 @@ struct MorphologyOrchestrator: View {
 
         let beats = recording.annotatedBeats()
         measuredBeatCount = beats.count
-        // Same lead-selection order as the markings pipeline: conventional
-        // QT lead when present, first channel otherwise.
-        let conventional = recording.conventionalQTLeads(inDirectory: directory)
-        let lead = conventional.first
-        guard let samples = lead?.samples ?? recording.primaryECGSamples(inDirectory: directory),
+        guard let samples = recording.samples(of: resolution.channel, inDirectory: directory),
               !beats.isEmpty
         else {
             await MainActor.run { morphologyContext.clear() }
             return
         }
-        let leadName = lead?.channel.name ?? ecgChannel.name
-        let sampleRate = ecgChannel.sampleRate
+        let sampleRate = resolution.channel.sampleRate
         let recordName = recording.sourceFileName
 
         let summary = await Task.detached(priority: .userInitiated) {
@@ -104,7 +110,7 @@ struct MorphologyOrchestrator: View {
         let cachePayload = MorphologyCachePayload(summary: summary, beatCount: beats.count)
         Task.detached(priority: .utility) {
             BundleDerivedCache.store(
-                cachePayload, producer: "morphology", parametersKey: "", in: directory)
+                cachePayload, producer: "morphology", parametersKey: parametersKey, in: directory)
         }
         await MainActor.run { morphologyContext.set(summary: summary) }
     }

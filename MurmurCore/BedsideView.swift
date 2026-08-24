@@ -69,6 +69,21 @@ struct BedsideView: View {
         let renamed: [UUID: String]
         let filter: FindingFilter
     }
+    /// #357 — the resolved analysis lead: which channel every calculation
+    /// runs on, and why. Read from the bundle sidecar by the `.task(id:)`
+    /// below rather than on each body eval — resolution touches the disk,
+    /// and a render path may not.
+    @State private var analysisLead: AnalysisLeadResolution?
+    /// What a revert would land on — the context menu's item names it.
+    @State private var analysisLeadDefault: AnalysisLeadResolution?
+    /// The sidecar's designation section itself, which is what the menu
+    /// branches on — "is there a standing designation naming this lead" is a
+    /// different question from "does this lead resolve", and only the first
+    /// one decides whether there is anything to revert.
+    @State private var analysisLeadDesignation: AnalysisLeadFile.Designation?
+    /// Observed for `analysisLeadRevision`: a designation written here (or
+    /// anywhere else this session) re-reads the sidecar.
+    @State private var recordingContext = CurrentRecordingContext.shared
     /// X82: the review-queue inspector's open state lives in the coexistence
     /// context — the analyst's intent, arbitrated against the navigator and
     /// the window width so neither panel ever renders partially clipped.
@@ -592,6 +607,14 @@ struct BedsideView: View {
             beatAbsence = absence
             trendLaneEvents = events
             authoredRangeFindings = ranges
+        }
+        // #357: re-resolve the analysis lead when the record changes or a
+        // designation is written. Keyed on the session's revision stamp, so
+        // the header line and the menu's revert label follow the same write
+        // the orchestrators re-run on.
+        .task(id: AnalysisLeadKey(recordingID: recording.id,
+                                  revision: recordingContext.analysisLeadRevision)) {
+            refreshAnalysisLead()
         }
         // X73: publish the viewport so the metrics block can scope to it.
         // Published on every change and DEBOUNCED on the orchestrator side —
@@ -1380,6 +1403,7 @@ struct BedsideView: View {
             // X72: inclusion is the analyst's per-note checkbox, decided here
             // at the call site — the report renders what it is given.
             notes: anchoredNotes.filter { $0.includeInReport == true },
+            analysisLead: analysisLead,
             now: Date()
         )
         do {
@@ -1772,7 +1796,8 @@ struct BedsideView: View {
                             annotations: derived.byChannel[channel.name] ?? [],
                             candidates: candidatesForChannel(channel),
                             sizing: .strip,
-                            noteAuthoring: noteAuthoringHooks
+                            noteAuthoring: noteAuthoringHooks,
+                            analysisLead: analysisLeadHooks(for: channel)
                         )
                     }
                     contextLanes
@@ -2106,7 +2131,8 @@ struct BedsideView: View {
                     candidates: candidatesForChannel(channel),
                     sizing: .focus,
                     overlayChannels: overlayChannels,
-                    noteAuthoring: noteAuthoringHooks
+                    noteAuthoring: noteAuthoringHooks,
+                    analysisLead: analysisLeadHooks(for: channel)
                 )
                 // Tear down + rebuild when the focused lead changes —
                 // WaveformCanvas's MTKView caches the previous channel's
@@ -2193,6 +2219,36 @@ struct BedsideView: View {
         .frame(width: 76, alignment: .leading)
     }
 
+    /// #357 §1.6 — the metrics header's read-only disclosure: which lead
+    /// every calculation in this column ran on, and WHY it is that lead
+    /// (the analyst's designation, the import-time R-peak score, or first in
+    /// file). Distinct from `primaryLeadNote` below, which disambiguates
+    /// which TRACE the numbers came from when leads are overlaid; this line
+    /// states the choice and its provenance, and renders always.
+    ///
+    /// #246's rule applies: two lines are RESERVED whether or not a lead has
+    /// resolved yet, so the column below it cannot shift when the sidecar
+    /// read lands a frame later, or when a designation lengthens the line.
+    /// A statement too long for the reserved space truncates with the whole
+    /// of it in `.help`, exactly as the beat card's status line does.
+    private var analysisLeadNote: some View {
+        // `excludedSummary` stays nil: nothing measures per-lead beat
+        // exclusions today (the delineator runs on the analysis lead alone),
+        // and a qualifier the app cannot substantiate is worse than no
+        // qualifier. The slot is here for whatever eventually measures one.
+        let line = analysisLead.map {
+            AnalysisLeadHeaderLine.text(for: $0, excludedSummary: nil)
+        }
+        return Text(line ?? " ")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .lineLimit(2, reservesSpace: true)
+            .truncationMode(.tail)
+            .help(line ?? "")
+            .accessibilityIdentifier("analysis-lead-disclosure")
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     /// Names the lead every number in this column was measured from.
     ///
     /// Shown ONLY while leads are overlaid. With one lead on the stage there
@@ -2220,6 +2276,7 @@ struct BedsideView: View {
     /// P / QRS / T fiducials for QT vs. conduction studies.
     private var dockedBeatInspector: some View {
         VStack(alignment: .leading, spacing: 6) {
+            analysisLeadNote
             primaryLeadNote
             calibrationControls
             CalibrationReadout(reading: calibrationReading)
@@ -2913,6 +2970,74 @@ struct BedsideView: View {
             onRecordingMutated?(mutated)
         } catch {
             attachError = "The gain interpretation could not be saved to the bundle: \(error.localizedDescription)"
+        }
+    }
+
+    // MARK: - Analysis lead (#357)
+
+    /// What warrants re-reading the sidecar: a different record, or a
+    /// designation written this session.
+    private struct AnalysisLeadKey: Hashable {
+        let recordingID: UUID
+        let revision: Int
+    }
+
+    private func refreshAnalysisLead() {
+        analysisLead = recording.analysisLead(inBundle: recordingDirectory)
+        analysisLeadDefault = recording.analysisLeadDefault(inBundle: recordingDirectory)
+        analysisLeadDesignation = AnalysisLeadFile
+            .read(from: recordingDirectory)?.designation
+    }
+
+    /// Per-lead designation hooks. The entry is decided by
+    /// `AnalysisLeadMenuEntry` from the sidecar's designation section, so an
+    /// undesignated record offers "Use as analysis lead" on EVERY populated
+    /// lead — including the one the stored default already resolves, where
+    /// designating pins the choice explicitly.
+    private func analysisLeadHooks(for channel: Channel) -> AnalysisLeadHooks {
+        AnalysisLeadHooks(
+            entry: AnalysisLeadMenuEntry.resolve(
+                for: channel, designation: analysisLeadDesignation),
+            defaultLabel: analysisLeadDefault.map(AnalysisLeadHeaderLine.label(for:))
+                ?? channel.name,
+            designate: { designateAnalysisLead(channel) },
+            revertToDefault: { revertAnalysisLeadToDefault() }
+        )
+    }
+
+    /// Write the assertion, then bump the session stamp the orchestrators
+    /// re-run on, then re-read here so the menu and the header line change
+    /// in the same turn (the stamp re-fires the task above as well; the
+    /// direct read is what makes the change immediate rather than dependent
+    /// on observation timing). A failed write bumps nothing and changes
+    /// nothing on screen — the disclosure line keeps stating the lead that
+    /// is actually resolving, which is the truthful outcome of a failure.
+    ///
+    /// The sidecar names channels by NAME (X96: names survive re-import,
+    /// channel IDs do not), so on a record with two identically-named leads
+    /// a designation resolves to the FIRST of them — and both panels show
+    /// the revert entry, honestly: the sidecar names the pair, and either
+    /// panel withdraws the same assertion.
+    private func designateAnalysisLead(_ channel: Channel) {
+        do {
+            try AnalysisLeadDesignator.designate(
+                channelNamed: channel.name, inBundle: recordingDirectory)
+            recordingContext.bumpAnalysisLeadRevision()
+            refreshAnalysisLead()
+        } catch {
+            attachError = "This lead could not be designated as the analysis lead: "
+                + error.localizedDescription
+        }
+    }
+
+    private func revertAnalysisLeadToDefault() {
+        do {
+            try AnalysisLeadDesignator.revertToDefault(inBundle: recordingDirectory)
+            recordingContext.bumpAnalysisLeadRevision()
+            refreshAnalysisLead()
+        } catch {
+            attachError = "The analysis-lead designation could not be withdrawn: "
+                + error.localizedDescription
         }
     }
 

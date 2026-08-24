@@ -30,6 +30,12 @@ enum MarkdownReport {
         dispositions: [UUID: AnnotationDisposition],
         tally: DispositionStore.Tally,
         notes: [AnchoredNote] = [],
+        // #357 — which channel every finding's measurements ran on, and
+        // why. The caller resolves it (it needs the bundle directory,
+        // which this pure function never touches); nil renders no line
+        // rather than a fabricated one — a trend-only recording has no
+        // analysis lead to report.
+        analysisLead: AnalysisLeadResolution? = nil,
         now: Date
     ) -> String {
         var lines: [String] = []
@@ -48,6 +54,17 @@ enum MarkdownReport {
             lines.append("- **Sample rate (primary channel)**: \(Int(firstChannel.sampleRate)) Hz")
         }
         lines.append("- **Channels**: \(recording.channels.count)")
+        if let analysisLead {
+            // The EXPORT vocabulary (`exportReason`), not the in-app header
+            // disclosure's (`AnalysisLeadHeaderLine`) — the two are worded
+            // differently on purpose (the header states a reviewer + date;
+            // the export states a score), and this report shares its
+            // wording with the review-table CSV, not the on-screen line.
+            lines.append(
+                "- **Analysis lead**: \(analysisLead.channel.name) — "
+                + analysisLead.provenance.exportReason
+            )
+        }
         lines.append("")
 
         // -- Triage summary

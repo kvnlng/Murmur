@@ -48,6 +48,12 @@ public enum MurSessionPackage {
         // this sidecar exists to fix.
         (VTVFCandidateFile.bundleFileName, "annotations"),
         ("interval_guides.json", "guides"),
+        // #357 — the analysis-lead sidecar. Not purely an analyst artifact
+        // (it can hold only the import-time scored default, no designation
+        // at all), so it gets its own subdir rather than "dispositions" —
+        // the honest name for a file that may be scorer-written, analyst-
+        // written, or both.
+        (AnalysisLeadFile.bundleFileName, "analysis_lead"),
     ]
 
     // MARK: - Write

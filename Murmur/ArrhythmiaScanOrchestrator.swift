@@ -9,9 +9,11 @@
 //   1. Enforces the entitlement gate on the paid side: the scan only runs
 //      when Murmur Studio is owned AND a recording is loaded, so the free
 //      viewer never runs the detectors or shows candidates.
-//   2. Runs `ArrhythmiaScanService` off-main over ALL ECG leads (the
-//      service picks the strongest-QRS lead itself) and publishes the
-//      results to `ArrhythmiaScanContext` as range annotations.
+//   2. Runs `ArrhythmiaScanService` off-main over exactly the analysis
+//      lead (#357 — one designated channel for every calculation,
+//      disclosed once; no per-run strongest-QRS pick over all leads) and
+//      publishes the results to `ArrhythmiaScanContext` as range
+//      annotations.
 //
 //  Unlike VT/VF there is no scan dialog: the detectors are cheap RR-series
 //  arithmetic (no Core ML, no operating-point preview), so the scan runs
@@ -45,6 +47,10 @@ struct ArrhythmiaScanOrchestrator: View {
     private struct Key: Hashable {
         let recordingID: UUID?
         let owned: Bool
+        /// #357: a designation re-runs the scan. The bundle cache key
+        /// carries the lead's name, so the re-run recomputes on the new lead
+        /// rather than re-serving the previous one's candidates.
+        let analysisLeadRevision: Int
         let lowBpm: Double
         let highBpm: Double
         let minDurationSeconds: Double
@@ -58,6 +64,7 @@ struct ArrhythmiaScanOrchestrator: View {
             .task(id: Key(
                 recordingID: recordingContext.recording?.id,
                 owned: store.hasStudio,
+                analysisLeadRevision: recordingContext.analysisLeadRevision,
                 lowBpm: settings.lowBpm,
                 highBpm: settings.highBpm,
                 minDurationSeconds: settings.minDurationSeconds,
@@ -81,17 +88,29 @@ struct ArrhythmiaScanOrchestrator: View {
         // rendering over the next recording.
         guard store.hasStudio,
               let recording = recordingContext.recording,
-              let directory = recordingContext.directory,
-              let ecgChannel = recording.primaryECGChannel,
-              let leads = recording.ecgLeadSamples(inDirectory: directory) else {
+              let directory = recordingContext.directory else {
             await MainActor.run { scanContext.clearCandidates() }
             return
         }
+        // #357: the scan runs on THE ANALYSIS LEAD, not on a per-run
+        // strongest-QRS pick over all leads — one designated channel for
+        // every calculation, disclosed once. Passing a single lead keeps
+        // ArrhythmiaScanService's API unchanged (its internal pick trivially
+        // selects the only lead given), and the A3 quality preflight runs on
+        // the same lead, as before.
+        guard let resolution = recording.analysisLead(inBundle: directory),
+              let leadSamples = recording.samples(of: resolution.channel, inDirectory: directory)
+        else {
+            await MainActor.run { scanContext.clearCandidates() }
+            return
+        }
+        let leads = [leadSamples]
+        let sampleRate = resolution.channel.sampleRate
+        let analysisLeadName = resolution.channel.name
         let signpost = ComputeSignpost.begin("ArrhythmiaScan")
         defer {
             ComputeSignpost.end(signpost, workSize: leads.reduce(0) { $0 + $1.count })
         }
-        let sampleRate = ecgChannel.sampleRate
 
         // Drop the previous candidates BEFORE the compute — on a long record
         // the scan takes real time, and stale spans rendering until it
@@ -101,16 +120,6 @@ struct ArrhythmiaScanOrchestrator: View {
         // analyst may be mid-interaction with (a rescan is often CAUSED by
         // those dials).
         await MainActor.run { scanContext.setCandidates([], parametersCaption: "scanning…") }
-
-        // Lead names in the same order `ecgLeadSamples` built the buffers.
-        // An unreadable channel is dropped from the buffers but not from
-        // this list, so on a count mismatch the attribution is unsafe —
-        // omit the lead rather than guess (candidates then draw on every
-        // channel, which is honest about not knowing).
-        let leadNames = recording.channels
-            .filter { !$0.isTrendChannel && $0.sampleCount > 0 }
-            .map(\.name)
-        let namesAligned = leadNames.count == leads.count
 
         // X91: the analyst's dials, snapshotted for this scan — the same
         // values the caption below echoes, so the citation can never drift
@@ -128,8 +137,10 @@ struct ArrhythmiaScanOrchestrator: View {
         // echoes. Checked BEFORE the placeholder publish above would matter:
         // a hit replaces the placeholder within the same turn of the loop,
         // so the queue never flashes "scanning…" for work that isn't run.
-        let parametersKey = "low=\(rhythmConfig.lowBpm);high=\(rhythmConfig.highBpm);"
-            + "minDur=\(rhythmConfig.minDurationSeconds);minRun=\(rhythmConfig.minRunBeats)"
+        let parametersKey = ArrhythmiaScanCacheKey.make(
+            lowBpm: rhythmConfig.lowBpm, highBpm: rhythmConfig.highBpm,
+            minDurationSeconds: rhythmConfig.minDurationSeconds,
+            minRunBeats: rhythmConfig.minRunBeats, analysisLeadName: analysisLeadName)
         if let hit = await Task.detached(priority: .userInitiated, operation: {
             BundleDerivedCache.load(
                 ArrhythmiaCachePayload.self, producer: "arrhythmia-scan",
@@ -160,18 +171,17 @@ struct ArrhythmiaScanOrchestrator: View {
         // candidates onto the new one until its own scan lands.
         guard !Task.isCancelled else { return }
 
-        let leadName = namesAligned && result.quality.leadUsed < leadNames.count
-            ? leadNames[result.quality.leadUsed]
-            : nil
-
+        // `result.quality.leadUsed` is an index into `leads`, which now
+        // holds exactly the analysis lead — always 0, and always this lead.
+        // Attribution no longer needs the array round-trip.
         let preflightWindows = Self.preflightWindows(from: result.quality)
         let annotations = Self.annotations(
             from: result.candidates, sampleRate: sampleRate,
-            leadName: leadName, preflightWindows: preflightWindows)
+            leadName: analysisLeadName, preflightWindows: preflightWindows)
 
         let caption = Self.caption(
             rhythmConfig: rhythmConfig, pauseConfig: pauseConfig,
-            afibConfig: afibConfig, quality: result.quality, leadName: leadName)
+            afibConfig: afibConfig, quality: result.quality, leadName: analysisLeadName)
 
         let cachePayload = ArrhythmiaCachePayload(
             candidates: annotations, caption: caption, preflightWindows: preflightWindows)

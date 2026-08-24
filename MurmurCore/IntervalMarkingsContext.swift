@@ -271,7 +271,12 @@ public struct MarkingsTemplate: Sendable, Equatable, Codable {
     public let iqrQTcMs: Double?
 
     /// Reproducibility provenance (C3/C4). `sourceLead` is the lead the
-    /// intervals were measured in; `spanStartSample`/`spanEndSample` bound the
+    /// intervals were measured in — the analysis lead's NAME as recorded
+    /// (#357), never prose: §1.5's "not a conventional QT lead (II/V5)"
+    /// disclosure is appended by the QT-bearing surfaces at render time
+    /// (`QTLeadDisclosure`), not baked into this field, so a PR or QRS
+    /// caption can never inherit a QT-specific sentence.
+    /// `spanStartSample`/`spanEndSample` bound the
     /// stretch of recording the template beats were drawn from. All optional
     /// so older `.mur` sessions and snapshot fixtures decode/compile
     /// unchanged. A methods reviewer requires both — cheaper to carry now than

@@ -115,8 +115,68 @@ final class RecordingStore {
                 try? fingerprint.write(to: summary.directory)
                 Self.writeIndexEntry(for: fingerprint, bundleName: summary.directory.lastPathComponent, in: outputDir)
             }
+            // #357: stamp the analysis-lead default, ONCE, while the bundle is
+            // fresh — the same "assertions ride the bundle" moment as the
+            // fingerprint. Never rewritten (a record's analysis lead must not
+            // change under an analyst mid-review; scope decision 2), and reuse
+            // serves the original stamp. No scorer, or a scorer that declines
+            // (unentitled), records firstInFile EXPLICITLY — the absence of
+            // scoring is a stored fact, not an inference.
+            Self.stampAnalysisLeadDefault(for: summary.recording, in: summary.directory)
             return summary
         }.value
+    }
+
+    /// Stamps `analysis_lead.json`'s default choice exactly once. A no-op if
+    /// a default is already recorded — covers a stamp that already landed on
+    /// this import and is defence-in-depth should a reused bundle ever reach
+    /// here. No scorer registered, a scorer that declines (returns nil,
+    /// e.g. unentitled), or one that can't score every ECG channel (a
+    /// sample read failed) all fall through to firstInFile explicitly —
+    /// recording the ABSENCE of scoring as a stored fact, never an
+    /// inference the resolver has to reconstruct later.
+    private nonisolated static func stampAnalysisLeadDefault(
+        for recording: Recording, in directory: URL
+    ) {
+        guard AnalysisLeadFile.read(from: directory)?.defaultChoice == nil else { return }
+        let ecg = recording.channels.filter { !$0.isTrendChannel && $0.sampleCount > 0 }
+        guard let first = ecg.first else { return }
+
+        var choice = AnalysisLeadFile.DefaultChoice(
+            channelName: first.name, reason: .firstInFile,
+            perLeadScores: nil, scoredAt: Date(), scorerVersion: 1
+        )
+
+        if let scorer = AnalysisLeadScoring.shared.currentScorer() {
+            let leads: [(name: String, samples: [Float])] = ecg.compactMap { channel in
+                recording.samples(of: channel, inDirectory: directory).map { (channel.name, $0) }
+            }
+            // Scores every lead at `first.sampleRate` — the same
+            // "leads share `primaryECGChannel.sampleRate`" assumption
+            // `ecgLeadSamples(inDirectory:)` already documents (Recording.swift).
+            if leads.count == ecg.count,
+               let scores = scorer.scoreLeads(leads, sampleRate: first.sampleRate) {
+                // `max(by: <)` returns the LAST of equal maximal elements —
+                // an explicit loop is required so a tie keeps FILE order.
+                var best: Channel?
+                var bestScore = -Double.infinity
+                for channel in ecg {
+                    let score = scores[channel.name] ?? 0
+                    if score > bestScore {
+                        best = channel
+                        bestScore = score
+                    }
+                }
+                if let best {
+                    choice = .init(channelName: best.name, reason: .rPeakScore,
+                                   perLeadScores: scores, scoredAt: Date(), scorerVersion: 1)
+                }
+            }
+        }
+
+        let existing = AnalysisLeadFile.read(from: directory)
+        try? AnalysisLeadFile(defaultChoice: choice,
+                              designation: existing?.designation).write(to: directory)
     }
 
     /// Find a bundle stamped with `fingerprint` whose manifest still loads.

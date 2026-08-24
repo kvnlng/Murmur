@@ -32,6 +32,11 @@ enum ReviewTableBuilder {
             /// `.hea` comment lines, carried so the table can echo the
             /// record's own metadata beside each finding.
             let headerComments: [String]
+            /// The imported bundle directory — where `analysis_lead.json`
+            /// (and every other sidecar) lives. #357: resolved once per
+            /// record via `Recording.analysisLead(inBundle:)`, not
+            /// per-annotation; every row for this record repeats it.
+            let bundleDirectory: URL
         }
     }
 
@@ -73,6 +78,10 @@ enum ReviewTableBuilder {
             let recording = imported.recording
             let flagged = flaggedIDs.contains(source.recordPath)
             let rate = (recording.primaryECGChannel ?? recording.channels.first)?.sampleRate ?? 0
+            // #357 — nil when the record has no populated non-trend channel
+            // (e.g. a trend-only record); both columns stay empty for every
+            // row, the same rendering never-imported rows already get.
+            let lead = recording.analysisLead(inBundle: imported.bundleDirectory)
 
             for annotation in recording.annotations {
                 let disposition = imported.dispositions[annotation.id]
@@ -99,7 +108,9 @@ enum ReviewTableBuilder {
                     reviewedBy: disposition?.reviewedBy,
                     reviewedAt: disposition?.reviewedAt,
                     flagged: flagged,
-                    headerComments: imported.headerComments
+                    headerComments: imported.headerComments,
+                    analysisLead: lead?.channel.name,
+                    analysisLeadReason: lead?.provenance.exportReason
                 ))
             }
         }

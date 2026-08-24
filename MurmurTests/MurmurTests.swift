@@ -5053,6 +5053,93 @@ struct MarkdownReportTests {
         #expect(report.contains("- **Sample rate (primary channel)**: 500 Hz"))
     }
 
+    // MARK: - #357: analysis lead line
+
+    @Test("A resolved analysis lead renders one metadata line, in the export's own words")
+    func analysisLeadLineRendersWhenResolved() {
+        let rec = recording(channels: [channel()])
+        let resolution = AnalysisLeadResolution(
+            channel: channel(), provenance: .firstInFile, staleDesignation: nil
+        )
+        let report = MarkdownReport.generate(
+            recording: rec,
+            annotations: [],
+            dispositions: [:],
+            tally: .init(confirmed: 0, dismissed: 0, unreviewed: 0),
+            analysisLead: resolution,
+            now: now
+        )
+        // `firstInFile` is the one case where the header and export
+        // vocabularies happen to coincide — see the two tests below for
+        // the cases where they don't.
+        #expect(report.contains("- **Analysis lead**: II — first in file"))
+    }
+
+    /// #357 review finding: the report shares the EXPORT vocabulary
+    /// (`AnalysisLeadProvenance.exportReason`, also used by the review
+    /// table's `analysis_lead_reason` column), not the in-app header
+    /// disclosure's (`AnalysisLeadHeaderLine`). The two are worded
+    /// differently on purpose — the header states a reviewer and a date,
+    /// the export states a reviewer with no date; the header collapses a
+    /// score to "strongest R peaks", the export keeps the number. This
+    /// only shows up on `.designated` / `.rPeakScore` — `firstInFile`
+    /// above coincidentally reads the same both ways, which is how the
+    /// wrong vocabulary slipped in undetected.
+    @Test("A designated lead renders the export's override wording, not the header's date-stamped one")
+    func analysisLeadLineUsesExportWordingForDesignation() {
+        let rec = recording(channels: [channel()])
+        let resolution = AnalysisLeadResolution(
+            channel: channel(),
+            provenance: .designated(reviewer: "kevin", date: Date(timeIntervalSince1970: 0)),
+            staleDesignation: nil
+        )
+        let report = MarkdownReport.generate(
+            recording: rec,
+            annotations: [],
+            dispositions: [:],
+            tally: .init(confirmed: 0, dismissed: 0, unreviewed: 0),
+            analysisLead: resolution,
+            now: now
+        )
+        #expect(report.contains("- **Analysis lead**: II — analyst override — kevin"))
+        // The header's wording ("designated by …") never appears.
+        #expect(!report.contains("designated by"))
+    }
+
+    @Test("A scored default renders the export's numeric score, not the header's collapsed phrase")
+    func analysisLeadLineUsesExportWordingForScore() {
+        let rec = recording(channels: [channel()])
+        let resolution = AnalysisLeadResolution(
+            channel: channel(),
+            provenance: .rPeakScore(score: 0.9137, perLead: ["II": 0.9137]),
+            staleDesignation: nil
+        )
+        let report = MarkdownReport.generate(
+            recording: rec,
+            annotations: [],
+            dispositions: [:],
+            tally: .init(confirmed: 0, dismissed: 0, unreviewed: 0),
+            analysisLead: resolution,
+            now: now
+        )
+        #expect(report.contains("- **Analysis lead**: II — r-peak score 0.91"))
+        // The header's collapsed wording never appears.
+        #expect(!report.contains("strongest R peaks"))
+    }
+
+    @Test("No analysis lead resolution omits the metadata line entirely")
+    func analysisLeadLineOmittedWhenNil() {
+        let rec = recording(channels: [channel()])
+        let report = MarkdownReport.generate(
+            recording: rec,
+            annotations: [],
+            dispositions: [:],
+            tally: .init(confirmed: 0, dismissed: 0, unreviewed: 0),
+            now: now
+        )
+        #expect(!report.contains("Analysis lead"))
+    }
+
     @Test("Pipe character in finding metadata is escaped so table rows stay intact")
     func pipeEscapedInCategory() {
         let rec = recording(channels: [channel()])
@@ -5811,6 +5898,53 @@ struct IntervalTrendComputerTests {
             qtcFormulaName: "Fridericia"
         )
         #expect(out.reproCaption.contains("measured in MLII"))
+    }
+
+    @Test("Only the QT metric carries the not-a-conventional-lead clause (#357 §1.5)")
+    func reproCaptionScopesTheQTDisclosureToQT() {
+        // The lead attribution is true for every metric — they all come from
+        // the analysis lead — but "not a conventional QT lead (II/V5)" is a
+        // statement about where convention measures the T OFFSET. A PR or
+        // QRS-width caption must not inherit it.
+        let t = MarkingsTemplate(
+            sampleCount: 214,
+            medianPRMs: 160, iqrPRMs: 10,
+            medianQRSMs: 95, iqrQRSMs: 8,
+            medianQTMs: nil, iqrQTMs: nil,
+            qtcFormulaName: "Fridericia",
+            medianQTcMs: 410, iqrQTcMs: 20,
+            sourceLead: "MLII",
+            spanStartSample: 0, spanEndSample: 90000
+        )
+        func caption(_ metric: IntervalTrendMetric) -> String {
+            IntervalTrendComputer.compute(
+                beats: [beat(rPeak: 500)], template: t, sampleRate: 250,
+                metric: metric, binSeconds: 120, templateBeatCount: nil,
+                qtcFormulaName: "Fridericia"
+            ).reproCaption
+        }
+        let clause = "— not a conventional QT lead (II/V5)"
+        #expect(caption(.qtc).contains("measured in MLII \(clause)"))
+        #expect(caption(.pr).contains("measured in MLII"))
+        #expect(!caption(.pr).contains(clause))
+        #expect(!caption(.qrs).contains(clause))
+        // A conventionally-named lead discloses nothing, on any metric.
+        let conventional = MarkingsTemplate(
+            sampleCount: 214,
+            medianPRMs: 160, iqrPRMs: 10,
+            medianQRSMs: 95, iqrQRSMs: 8,
+            medianQTMs: nil, iqrQTMs: nil,
+            qtcFormulaName: "Fridericia",
+            medianQTcMs: 410, iqrQTcMs: 20,
+            sourceLead: "V5",
+            spanStartSample: 0, spanEndSample: 90000
+        )
+        let out = IntervalTrendComputer.compute(
+            beats: [beat(rPeak: 500)], template: conventional, sampleRate: 250,
+            metric: .qtc, binSeconds: 120, templateBeatCount: nil,
+            qtcFormulaName: "Fridericia")
+        #expect(out.reproCaption.contains("measured in V5"))
+        #expect(!out.reproCaption.contains(clause))
     }
 
     @Test("Repro caption states the template's selection basis and span (X48 §4b)")

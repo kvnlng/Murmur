@@ -32,6 +32,14 @@ struct VTVFScanOrchestrator: View {
     @State private var model: VTVFModel?
     @State private var modelLoadError: String?
 
+    /// #357: deliberately WITHOUT the `analysisLeadRevision` stamp the other
+    /// three orchestrators carry. This task computes nothing that depends on
+    /// a lead — it sets the entitlement-and-recording availability flag and
+    /// loads the model once. The VT/VF scan itself is analyst-initiated and
+    /// resolves the analysis lead when the sheet is presented (see
+    /// `sheetContent`), so it always runs on the standing designation; there
+    /// is no cached derivation here keyed on the lead to invalidate. A stamp
+    /// in this key would assert a dependency that does not exist.
     private struct Key: Hashable {
         let recordingID: UUID?
         let owned: Bool
@@ -120,41 +128,60 @@ struct VTVFScanOrchestrator: View {
 
     @ViewBuilder
     private var sheetContent: some View {
+        // #357: resolve the analysis lead here, where `directory` is in
+        // hand, and hand the channel to the view rather than letting it
+        // pick one internally — one designated channel for every
+        // calculation, disclosed once.
         if let model,
            let recording = recordingContext.recording,
            let directory = recordingContext.directory {
-            VTVFScanView(
-                model: model,
-                recording: recording,
-                directory: directory,
-                viewStartSample: scanContext.currentViewStartSample,
-                viewEndSample: scanContext.currentViewEndSample,
-                onCommit: { annotations, caption in
-                    scanContext.setCandidates(
-                        annotations,
-                        parametersCaption: caption,
-                        provenance: VTVFScanContext.ModelProvenance(
+            if let resolution = recording.analysisLead(inBundle: directory) {
+                VTVFScanView(
+                    model: model,
+                    recording: recording,
+                    directory: directory,
+                    analysisLeadChannel: resolution.channel,
+                    viewStartSample: scanContext.currentViewStartSample,
+                    viewEndSample: scanContext.currentViewEndSample,
+                    onCommit: { annotations, caption in
+                        scanContext.setCandidates(
+                            annotations,
+                            parametersCaption: caption,
+                            provenance: VTVFScanContext.ModelProvenance(
+                                modelIdentifier: model.modelID,
+                                tau: model.thresholdTau
+                            )
+                        )
+                        // Persist alongside the dispositions that will adjudicate
+                        // it, with the operating point that produced it — a later
+                        // model or τ must not silently redefine what was reviewed.
+                        VTVFCandidateStore(bundleDirectory: directory).save(
+                            candidates: annotations,
+                            parametersCaption: caption,
                             modelIdentifier: model.modelID,
+                            modelVersion: nil,
                             tau: model.thresholdTau
                         )
-                    )
-                    // Persist alongside the dispositions that will adjudicate
-                    // it, with the operating point that produced it — a later
-                    // model or τ must not silently redefine what was reviewed.
-                    VTVFCandidateStore(bundleDirectory: directory).save(
-                        candidates: annotations,
-                        parametersCaption: caption,
-                        modelIdentifier: model.modelID,
-                        modelVersion: nil,
-                        tau: model.thresholdTau
-                    )
-                    scanContext.showScanDialog = false
-                },
-                onCancel: { scanContext.showScanDialog = false }
-            )
+                        scanContext.showScanDialog = false
+                    },
+                    onCancel: { scanContext.showScanDialog = false }
+                )
+            } else {
+                // A recording with no populated ECG channel — a data
+                // problem, not a model load in progress. Distinct from
+                // `modelLoadError` below: the model is fine, this
+                // recording just has nothing to scan.
+                VTVFScanUnavailableView(
+                    error: nil,
+                    dataProblem: "This recording has no analyzable ECG lead — "
+                        + "the VT/VF scan needs a populated ECG channel.",
+                    onDismiss: { scanContext.showScanDialog = false }
+                )
+            }
         } else {
             VTVFScanUnavailableView(
                 error: modelLoadError,
+                dataProblem: nil,
                 onDismiss: { scanContext.showScanDialog = false }
             )
         }
@@ -162,9 +189,11 @@ struct VTVFScanOrchestrator: View {
 }
 
 /// Fallback sheet content shown while the model is still compiling on a
-/// cold cache, or if it failed to load.
+/// cold cache, if it failed to load, or if the current recording has no
+/// data the scan could run on.
 struct VTVFScanUnavailableView: View {
     let error: String?
+    let dataProblem: String?
     let onDismiss: () -> Void
 
     var body: some View {
@@ -177,6 +206,16 @@ struct VTVFScanUnavailableView: View {
                     .font(.headline)
                 Text(error)
                     .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            } else if let dataProblem {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.largeTitle)
+                    .foregroundStyle(.secondary)
+                Text("This recording can't be scanned.")
+                    .font(.headline)
+                Text(dataProblem)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             } else {

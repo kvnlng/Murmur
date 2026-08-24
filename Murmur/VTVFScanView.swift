@@ -67,6 +67,10 @@ final class VTVFScanModel {
     let model: VTVFModel
     private let recording: Recording
     private let directory: URL
+    /// #357 — the analysis lead, resolved by the caller (where `directory`
+    /// is in hand) and handed in rather than picked here: one designated
+    /// channel for every calculation, disclosed once.
+    private let analysisLeadChannel: Channel
     private let viewStartSample: Int64
     private let viewEndSample: Int64
     private let nativeRate: Double
@@ -75,14 +79,18 @@ final class VTVFScanModel {
     private var fullSamples: [Float]?
     private var applyTask: Task<Void, Never>?
 
-    init(model: VTVFModel, recording: Recording, directory: URL, viewStartSample: Int64, viewEndSample: Int64) {
+    init(
+        model: VTVFModel, recording: Recording, directory: URL,
+        analysisLeadChannel: Channel, viewStartSample: Int64, viewEndSample: Int64
+    ) {
         self.model = model
         self.recording = recording
         self.directory = directory
+        self.analysisLeadChannel = analysisLeadChannel
         self.viewStartSample = viewStartSample
         self.viewEndSample = viewEndSample
-        self.nativeRate = recording.primaryECGChannel?.sampleRate ?? 250
-        self.leadName = recording.primaryECGChannel?.name
+        self.nativeRate = analysisLeadChannel.sampleRate
+        self.leadName = analysisLeadChannel.name
 
         // X11: seed the dials from the session state so reopening the sheet
         // resumes the analyst's operating point instead of snapping back to
@@ -273,8 +281,9 @@ final class VTVFScanModel {
         if let fullSamples { return fullSamples }
         let recording = self.recording
         let directory = self.directory
+        let channel = self.analysisLeadChannel
         let loaded = await Task.detached(priority: .userInitiated) {
-            recording.primaryECGSamples(inDirectory: directory)
+            recording.samples(of: channel, inDirectory: directory)
         }.value
         fullSamples = loaded
         return loaded
@@ -303,6 +312,7 @@ struct VTVFScanView: View {
     let model: VTVFModel
     let recording: Recording
     let directory: URL
+    let analysisLeadChannel: Channel
     let viewStartSample: Int64
     let viewEndSample: Int64
     let onCommit: ([Annotation], String) -> Void
@@ -314,6 +324,7 @@ struct VTVFScanView: View {
         model: VTVFModel,
         recording: Recording,
         directory: URL,
+        analysisLeadChannel: Channel,
         viewStartSample: Int64,
         viewEndSample: Int64,
         onCommit: @escaping ([Annotation], String) -> Void,
@@ -322,6 +333,7 @@ struct VTVFScanView: View {
         self.model = model
         self.recording = recording
         self.directory = directory
+        self.analysisLeadChannel = analysisLeadChannel
         self.viewStartSample = viewStartSample
         self.viewEndSample = viewEndSample
         self.onCommit = onCommit
@@ -330,6 +342,7 @@ struct VTVFScanView: View {
             model: model,
             recording: recording,
             directory: directory,
+            analysisLeadChannel: analysisLeadChannel,
             viewStartSample: viewStartSample,
             viewEndSample: viewEndSample
         ))
