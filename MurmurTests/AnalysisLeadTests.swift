@@ -281,6 +281,7 @@ struct AnalysisLeadImportTests {
     func reuseKeepsOriginalStamp() async throws {
         AnalysisLeadScoring.shared.register(
             RiggedScorer(scores: ["ECG1": 1.0, "ECG2": 9.0]))
+        defer { AnalysisLeadScoring.shared.clearForTesting() }
 
         let (store, root) = try makeStore()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -293,10 +294,10 @@ struct AnalysisLeadImportTests {
         let first = try await store.importWFDB(folderURL: source, heaFilename: "rec.hea")
         // Re-register a scorer preferring ECG1 and re-import the same,
         // unchanged source — reuse must serve the original stamp untouched.
+        // The top-level defer covers this second registration too.
         AnalysisLeadScoring.shared.register(
             RiggedScorer(scores: ["ECG1": 9.0, "ECG2": 1.0]))
         let second = try await store.importWFDB(folderURL: source, heaFilename: "rec.hea")
-        defer { AnalysisLeadScoring.shared.clearForTesting() }
 
         #expect(second.directory == first.directory)
         #expect(AnalysisLeadFile.read(from: second.directory)?
