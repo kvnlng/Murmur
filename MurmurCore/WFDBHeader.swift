@@ -10,7 +10,7 @@
 //  .hea format:
 //    Line 1 (record line):  <name> <n_signals> <fs>[/<counter_fs>] [<n_samples>] [<time> <date>]
 //    Lines 2…n (signal lines, one per signal):
-//        <filename> <format> [<gain>[(<unit>)][/<baseline>]] [<adc_res>] [<adc_zero>]
+//        <filename> <format> [<gain>[(<baseline>)][/<units>]] [<adc_res>] [<adc_zero>]
 //        [<first_val>] [<checksum>] [<blocksize>] [<description>…]
 //
 
@@ -335,22 +335,40 @@ enum WFDBHeaderParser {
         return FormatField(formatStr: formatStr, spf: max(1, spf), byteOffset: byteOffset)
     }
 
-    /// Parses the gain field which takes forms like:
-    ///   "200", "200(mV)", "200(mV)/0", "1000(mV)/1000"
-    /// Returns `nil` for baseline when the "/" suffix is absent (caller uses adcZero as default).
+    /// Parses the gain field. Per `header(5)` its form is
+    /// `<gain>[(<baseline>)][/<units>]` — e.g. `200(0)/mV`. Murmur once read
+    /// (and wrote) the two optional parts swapped, `<gain>[(<units>)][/<baseline>]`
+    /// (#360), so headers in that flavour exist; a baseline is always an
+    /// integer and a unit string never is, which disambiguates the two forms
+    /// by type with no migration. `200(0)/0` means unit "0" under either
+    /// reading, matching PhysioNet's own tooling.
+    /// Returns `nil` for baseline when none is present (caller uses adcZero as default).
     private static func parseGainField(_ field: String) -> (gain: Double, unit: String, baseline: Int?) {
         var rest = field
 
-        var baseline: Int?
+        var slashPart: String?
         if let slashIdx = rest.firstIndex(of: "/") {
-            baseline = Int(String(rest[rest.index(after: slashIdx)...])) ?? 0
+            slashPart = String(rest[rest.index(after: slashIdx)...])
             rest = String(rest[..<slashIdx])
         }
 
-        var unit = "mV"
+        var parenPart: String?
         if let open = rest.firstIndex(of: "("), let close = rest.firstIndex(of: ")") {
-            unit = String(rest[rest.index(after: open)..<close])
+            parenPart = String(rest[rest.index(after: open)..<close])
             rest = String(rest[..<open])
+        }
+
+        var unit = "mV"
+        var baseline: Int?
+        if let parenPart {
+            if let b = Int(parenPart) { baseline = b } else { unit = parenPart }
+        }
+        if let slashPart {
+            if baseline == nil, let b = Int(slashPart) {
+                baseline = b            // legacy flavour <gain>(<units>)/<baseline>
+            } else {
+                unit = slashPart        // spec flavour <gain>(<baseline>)/<units>
+            }
         }
 
         // WFDB: a gain of 0 (or an unparseable/missing field) means the signal

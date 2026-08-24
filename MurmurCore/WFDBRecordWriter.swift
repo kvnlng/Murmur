@@ -64,7 +64,8 @@ enum WFDBRecordWriter {
         let fs = sampleRateHz == sampleRateHz.rounded()
             ? String(Int(sampleRateHz)) : String(sampleRateHz)
         var hea = "\(recordName) \(channelCount) \(fs) \(sampleCount)\n"
-        let gainField = "\(formatGain(calibration.gain))(\(calibration.unit))/\(calibration.baseline)"
+        // header(5) form: <gain>(<baseline>)/<units> (#360).
+        let gainField = "\(formatGain(calibration.gain))(\(calibration.baseline))/\(calibration.unit)"
         for lead in leadNames {
             // filename format gain adcres adczero firstval checksum blocksize label
             hea += "\(datName) 16 \(gainField) 16 0 0 0 0 \(lead)\n"
