@@ -9,6 +9,7 @@
 
 import Foundation
 @testable import MurmurCore
+import MurmurMetrics
 import Testing
 
 @Suite("Analysis lead — sidecar and resolution")
@@ -302,5 +303,49 @@ struct AnalysisLeadImportTests {
         #expect(second.directory == first.directory)
         #expect(AnalysisLeadFile.read(from: second.directory)?
             .defaultChoice?.channelName == "ECG2")
+    }
+}
+
+// MARK: - QRS-prominence scorer (App target)
+
+/// The scorer struct is testable without the app running because
+/// entitlement is injected. These tests construct `QRSProminenceLeadScorer`
+/// directly and never touch `AnalysisLeadScoring.shared`, so they stay in
+/// their own (non-serialized) suite — only tests that register into the
+/// shared registry belong in `AnalysisLeadImportTests` above.
+@Suite("Analysis lead — QRS prominence scorer")
+struct QRSProminenceLeadScorerTests {
+    /// Deterministic noisy vs clean pair: clean = repeating sharp spike
+    /// train (a crude QRS), noisy = seeded LCG white noise. No
+    /// SystemRandomNumberGenerator — the test must not flake.
+    private func makeLeads() -> [(name: String, samples: [Float])] {
+        let n = 360 * 30
+        var clean = [Float](repeating: 0, count: n)
+        for beat in stride(from: 0, to: n, by: 360) { // 60 bpm at 360 Hz
+            clean[beat] = 1.0
+            if beat + 1 < n { clean[beat + 1] = -0.4 }
+        }
+        var state: UInt64 = 0x5DEECE66D
+        var noisy = [Float](repeating: 0, count: n)
+        for i in 0..<n {
+            state = state &* 6364136223846793005 &+ 1442695040888963407
+            noisy[i] = Float(Int64(bitPattern: state) % 1000) / 1000.0
+        }
+        return [("NOISY", noisy), ("CLEAN", clean)]
+    }
+
+    @Test("Entitled: the clean lead outscores the noisy one")
+    func cleanOutscoresNoisy() {
+        let scorer = QRSProminenceLeadScorer(entitled: { true })
+        let scores = scorer.scoreLeads(makeLeads(), sampleRate: 360)
+        let clean = scores?["CLEAN"] ?? 0
+        let noisy = scores?["NOISY"] ?? 0
+        #expect(clean > noisy)
+    }
+
+    @Test("Unentitled: the scorer declines (firstInFile downstream)")
+    func unentitledDeclines() {
+        let scorer = QRSProminenceLeadScorer(entitled: { false })
+        #expect(scorer.scoreLeads(makeLeads(), sampleRate: 360) == nil)
     }
 }

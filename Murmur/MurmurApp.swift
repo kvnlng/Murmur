@@ -103,6 +103,34 @@ struct MurmurApp: App {
         Task { @MainActor in
             await bootstrapBaselineProducers()
         }
+
+        // #357: the analysis-lead scorer — MurmurMetrics' QRS prominence,
+        // gated on the Studio entitlement at SCORE time (import time), so a
+        // free import records firstInFile and a Pro import records the
+        // score. RecordingStore.importWFDB calls the scorer from a
+        // `nonisolated static` helper running on its OWN detached task
+        // (never the main thread), but `PurchaseStore` is `@MainActor` —
+        // there is no existing off-main entitlement read anywhere else in
+        // the app (every other orchestrator reads `store.hasStudio`
+        // on-main, inside a View's `.task`). A one-time snapshot at
+        // registration would go stale the moment Studio is purchased
+        // mid-session, and `MainActor.assumeIsolated` alone would trap
+        // because the closure genuinely isn't running on the main thread.
+        // `DispatchQueue.main.sync` performs the real hop — it blocks the
+        // detached task's worker thread until the main thread runs the
+        // block — and only once actually there does `assumeIsolated`
+        // apply, correctly. Safe from deadlock because this closure is
+        // only ever invoked off the main thread (the import path), never
+        // from the main thread itself.
+        AnalysisLeadScoring.shared.register(
+            QRSProminenceLeadScorer(entitled: {
+                DispatchQueue.main.sync {
+                    MainActor.assumeIsolated {
+                        PurchaseStore.shared.ownedProductIDs.contains(.studio)
+                    }
+                }
+            })
+        )
     }
 
 
