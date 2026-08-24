@@ -5813,6 +5813,53 @@ struct IntervalTrendComputerTests {
         #expect(out.reproCaption.contains("measured in MLII"))
     }
 
+    @Test("Only the QT metric carries the not-a-conventional-lead clause (#357 §1.5)")
+    func reproCaptionScopesTheQTDisclosureToQT() {
+        // The lead attribution is true for every metric — they all come from
+        // the analysis lead — but "not a conventional QT lead (II/V5)" is a
+        // statement about where convention measures the T OFFSET. A PR or
+        // QRS-width caption must not inherit it.
+        let t = MarkingsTemplate(
+            sampleCount: 214,
+            medianPRMs: 160, iqrPRMs: 10,
+            medianQRSMs: 95, iqrQRSMs: 8,
+            medianQTMs: nil, iqrQTMs: nil,
+            qtcFormulaName: "Fridericia",
+            medianQTcMs: 410, iqrQTcMs: 20,
+            sourceLead: "MLII",
+            spanStartSample: 0, spanEndSample: 90000
+        )
+        func caption(_ metric: IntervalTrendMetric) -> String {
+            IntervalTrendComputer.compute(
+                beats: [beat(rPeak: 500)], template: t, sampleRate: 250,
+                metric: metric, binSeconds: 120, templateBeatCount: nil,
+                qtcFormulaName: "Fridericia"
+            ).reproCaption
+        }
+        let clause = "— not a conventional QT lead (II/V5)"
+        #expect(caption(.qtc).contains("measured in MLII \(clause)"))
+        #expect(caption(.pr).contains("measured in MLII"))
+        #expect(!caption(.pr).contains(clause))
+        #expect(!caption(.qrs).contains(clause))
+        // A conventionally-named lead discloses nothing, on any metric.
+        let conventional = MarkingsTemplate(
+            sampleCount: 214,
+            medianPRMs: 160, iqrPRMs: 10,
+            medianQRSMs: 95, iqrQRSMs: 8,
+            medianQTMs: nil, iqrQTMs: nil,
+            qtcFormulaName: "Fridericia",
+            medianQTcMs: 410, iqrQTcMs: 20,
+            sourceLead: "V5",
+            spanStartSample: 0, spanEndSample: 90000
+        )
+        let out = IntervalTrendComputer.compute(
+            beats: [beat(rPeak: 500)], template: conventional, sampleRate: 250,
+            metric: .qtc, binSeconds: 120, templateBeatCount: nil,
+            qtcFormulaName: "Fridericia")
+        #expect(out.reproCaption.contains("measured in V5"))
+        #expect(!out.reproCaption.contains(clause))
+    }
+
     @Test("Repro caption states the template's selection basis and span (X48 §4b)")
     func reproCaptionStatesBasisAndSpan() {
         let t = MarkingsTemplate(

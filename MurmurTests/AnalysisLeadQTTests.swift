@@ -49,9 +49,9 @@ struct AnalysisLeadQTTests {
 
     @Test("The citation's lead slot carries the as-recorded name, plus the clause")
     func citedLeadNameCarriesTheDisclosure() {
-        // The slot the retired "median of II, V5" method note rode in —
-        // one string, so the repro caption, the `.mur` session and the
-        // caliper footer can never disagree about what was measured where.
+        // Built at render time by the QT-bearing surfaces (the QTc repro
+        // caption, the inspector's provenance footer) from the stored lead
+        // NAME — one clause, so those surfaces can never word it differently.
         #expect(QTLeadDisclosure.citedLeadName(for: "V5") == "V5")
         #expect(QTLeadDisclosure.citedLeadName(for: " ii ") == "ii")
         #expect(QTLeadDisclosure.citedLeadName(for: "MLII")

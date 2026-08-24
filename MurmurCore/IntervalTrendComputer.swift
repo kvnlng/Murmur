@@ -622,7 +622,17 @@ public enum IntervalTrendComputer {
         // reviewer requires it, and this caption is copied verbatim into the
         // citation payload. Appended (not prefixed) so the metric stays the
         // leading token the analyst scans for.
-        let leadFragment = sourceLead.map { " · measured in \($0)" } ?? ""
+        //
+        // #357 §1.5: the lead attribution is true for EVERY metric (they all
+        // come from the analysis lead), but "not a conventional QT lead
+        // (II/V5)" is a QT-specific disclosure — convention names II/V5 for
+        // the T offset, not for PR or QRS width. So only the QT-bearing
+        // metric carries the clause, and it comes from `QTLeadDisclosure`
+        // rather than a second spelling of the sentence.
+        let citedLead = sourceLead.map {
+            metric == .qtc ? QTLeadDisclosure.citedLeadName(for: $0) : $0
+        }
+        let leadFragment = citedLead.map { " · measured in \($0)" } ?? ""
         switch metric {
         case .qtc:
             return "QTc · \(qtcFormulaName) · \(binLabel) bins · \(templateFragment)\(leadFragment)\(gateFragment)"

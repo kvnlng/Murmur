@@ -106,10 +106,12 @@ struct IntervalMarkingsOrchestrator: View {
         // it is applied to, never a neighbouring channel's.
         let sampleRate = resolution.channel.sampleRate
         // Reproducibility provenance (C3/C4): the lead the intervals are
-        // measured in, and the sample span the template beats span. §1.5's
-        // disclosure rides the lead slot the retired method note used, so
-        // every citation surface states it without a second channel.
-        let leadName = QTLeadDisclosure.citedLeadName(for: resolution.channel.name)
+        // measured in, and the sample span the template beats span. This
+        // carries the lead's NAME, exactly as recorded — never prose. §1.5's
+        // disclosure is appended by the surfaces that state a QT claim
+        // (the QTc repro caption, the beat inspector's provenance footer),
+        // so a PR caption never inherits a QT-specific sentence.
+        let leadName = resolution.channel.name
         let spanStart = beatSampleIndices.min()
         let spanEnd = beatSampleIndices.max()
         let qtcFormula = await MainActor.run { markingsContext.qtcFormula }

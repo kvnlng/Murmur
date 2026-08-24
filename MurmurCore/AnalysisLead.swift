@@ -180,10 +180,11 @@ public enum QTLeadDisclosure {
     }
 
     /// The same claim in a citation's LEAD slot: the as-recorded name, with
-    /// the disclosure clause appended when it fires. This is the slot the
-    /// retired X108 method note ("median of II, V5") rode in, so the repro
-    /// caption, the `.mur` session and the caliper footer all carry the
-    /// disclosure without a second channel for the sentence.
+    /// the disclosure clause appended when it fires. Called at RENDER time by
+    /// the surfaces that state a QT claim — the QTc repro caption and the
+    /// beat inspector's provenance footer — never stored: `sourceLead` holds
+    /// the lead's name, so a PR or QRS caption states the same lead without
+    /// inheriting a QT-specific sentence.
     public static func citedLeadName(for name: String) -> String {
         clause(forLeadNamed: name) ?? name.trimmingCharacters(in: .whitespaces)
     }

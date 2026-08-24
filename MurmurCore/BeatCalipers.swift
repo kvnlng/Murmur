@@ -277,13 +277,14 @@ struct BeatCalipers: View {
         var text = "Patient normal (\(basis)): \(t.sampleCount) beats"
         // X25: disclose the lead the intervals were measured in. #357 §1.5:
         // that lead is the ANALYSIS lead (designated, scored, or first in
-        // file), and the slot carries §1.5's disclosure clause when its
-        // recorded name doesn't read as II/V5 — convention measures QT where
-        // the T offset is clearest (II / V5 commonly), so a departure is
-        // reproducibility-relevant and is stated rather than corrected.
-        // (Task 7 replaces this line with the full header disclosure.)
+        // file). `sourceLead` is its NAME; the "not a conventional QT lead"
+        // clause is appended HERE, at render time, because this card states
+        // QT and QTc — convention measures QT where the T offset is clearest
+        // (II / V5 commonly), so a departure is reproducibility-relevant and
+        // is stated rather than corrected. (Task 7 replaces this line with
+        // the full header disclosure.)
         if let lead = t.sourceLead, !lead.isEmpty {
-            text += " · lead \(lead)"
+            text += " · lead \(QTLeadDisclosure.citedLeadName(for: lead))"
         }
         if let start = t.spanStartSample, let end = t.spanEndSample, sampleRate > 0 {
             text += " · \(clockString(start, sampleRate: sampleRate))–\(clockString(end, sampleRate: sampleRate))"

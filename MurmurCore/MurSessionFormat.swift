@@ -339,8 +339,13 @@ public struct MurProvenance: Codable, Equatable, Sendable {
         /// (X58). Merged, as the builder merges them; do not attribute this to
         /// a single cause when rendering it.
         public var excludedBeatCount: Int?
-        /// The lead the intervals were measured in. A QT without its lead is
-        /// not comparable (the X58 rec-212 lesson).
+        /// The lead the intervals were measured in — the analysis lead's
+        /// NAME exactly as recorded (#357), never prose. A QT without its
+        /// lead is not comparable (the X58 rec-212 lesson). §1.5's "not a
+        /// conventional QT lead (II/V5)" disclosure is NOT stored here; the
+        /// QT-bearing surfaces append it at render time via
+        /// `QTLeadDisclosure`, so a saved session carries the fact and the
+        /// reader states the caveat.
         public var sourceLead: String?
         public var spanStartSample: Int64?
         public var spanEndSample: Int64?
