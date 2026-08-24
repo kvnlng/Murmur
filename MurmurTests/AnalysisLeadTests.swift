@@ -190,6 +190,225 @@ struct AnalysisLeadTests {
     }
 }
 
+// MARK: - Header disclosure line (§1.6)
+
+/// The spec's §1.6 strings, pinned character for character. The renderer
+/// exists to produce THESE sentences — a wording change here is a spec
+/// change, not a refactor, which is why the expectations are literals and
+/// not compositions of the implementation's own helpers.
+@Suite("Analysis lead — header disclosure line")
+struct AnalysisLeadHeaderLineTests {
+
+    private func channel(_ name: String) -> Channel {
+        Channel(
+            id: UUID(), name: name, unit: "mV", sampleRate: 360,
+            startTimeUnixMS: 0, sampleCount: 3600,
+            storageFileName: "channel_\(name).bin", pyramid: [])
+    }
+
+    private func resolution(_ name: String,
+                            _ provenance: AnalysisLeadProvenance,
+                            stale: String? = nil) -> AnalysisLeadResolution {
+        AnalysisLeadResolution(channel: channel(name), provenance: provenance,
+                               staleDesignation: stale)
+    }
+
+    /// 2026-08-24 00:30 UTC — deliberately an instant whose LOCAL date is
+    /// the 23rd in every zone behind UTC. A renderer that formatted in the
+    /// machine's own time zone would print "2026-08-23" here and fail.
+    private var designationDate: Date {
+        var components = DateComponents()
+        components.year = 2026
+        components.month = 8
+        components.day = 24
+        components.hour = 0
+        components.minute = 30
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar.date(from: components)!
+    }
+
+    @Test("Designated")
+    func designated() {
+        let line = AnalysisLeadHeaderLine.text(
+            for: resolution("V4", .designated(reviewer: "kevin", date: designationDate)),
+            excludedSummary: nil)
+        #expect(line == "analysis lead: V4 — designated by kevin, 2026-08-24")
+    }
+
+    @Test("Scored")
+    func scored() {
+        let scored = resolution("MLII", .rPeakScore(score: 6.1,
+                                                    perLead: ["MLII": 6.1, "V5": 3.2]))
+        #expect(AnalysisLeadHeaderLine.text(for: scored, excludedSummary: nil)
+            == "analysis lead: MLII — strongest R peaks")
+        // A per-lead exclusion summary, when the caller has one, rides in
+        // parentheses after the reason — the choice first, the qualifier after.
+        #expect(AnalysisLeadHeaderLine.text(for: scored,
+                                            excludedSummary: "V5: 18% of beats excluded")
+            == "analysis lead: MLII — strongest R peaks (V5: 18% of beats excluded)")
+    }
+
+    @Test("First in file")
+    func firstInFile() {
+        #expect(AnalysisLeadHeaderLine.text(for: resolution("MLII", .firstInFile),
+                                            excludedSummary: nil)
+            == "analysis lead: MLII — first in file")
+    }
+
+    @Test("Stale designation is reported")
+    func stale() {
+        let fellThrough = resolution("MLII", .rPeakScore(score: 6.1, perLead: [:]),
+                                     stale: "V9")
+        #expect(AnalysisLeadHeaderLine.text(for: fellThrough, excludedSummary: nil)
+            == "designated lead V9 not in this record — using default"
+            + " · analysis lead: MLII — strongest R peaks")
+    }
+
+    @Test("The revert menu item names what a revert lands on")
+    func defaultLabelIsTheReasonPhrase() {
+        // The context menu's "Revert to default (…)" slot — the same
+        // name-and-reason pair the header line states, without the prefix.
+        #expect(AnalysisLeadHeaderLine.label(
+            for: resolution("MLII", .rPeakScore(score: 6.1, perLead: [:])))
+            == "MLII — strongest R peaks")
+        #expect(AnalysisLeadHeaderLine.label(for: resolution("V5", .firstInFile))
+            == "V5 — first in file")
+    }
+}
+
+// MARK: - Designation write path
+
+@Suite("Analysis lead — designating and reverting")
+struct AnalysisLeadDesignatorTests {
+
+    private func makeTempDir() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("analysis-lead-designate-\(UUID().uuidString)",
+                                    isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    private func channel(_ name: String) -> Channel {
+        Channel(
+            id: UUID(), name: name, unit: "mV", sampleRate: 360,
+            startTimeUnixMS: 0, sampleCount: 3600,
+            storageFileName: "channel_\(name).bin", pyramid: [])
+    }
+
+    private func makeRecording() -> Recording {
+        Recording(
+            version: Recording.currentVersion, id: UUID(), device: "test",
+            createdAt: Date(timeIntervalSince1970: 0), sourceFileName: "rec.hea",
+            channels: [channel("MLII"), channel("V5")]
+        )
+    }
+
+    private func scoredDefault() -> AnalysisLeadFile {
+        AnalysisLeadFile(
+            defaultChoice: .init(channelName: "MLII", reason: .rPeakScore,
+                                 perLeadScores: ["MLII": 6.1, "V5": 3.2],
+                                 scoredAt: Date(timeIntervalSince1970: 100),
+                                 scorerVersion: 1),
+            designation: nil)
+    }
+
+    @Test("Designating writes the analyst's assertion and leaves the default alone")
+    func designateWritesDesignation() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let original = scoredDefault()
+        try original.write(to: dir)
+
+        let date = Date(timeIntervalSince1970: 500)
+        try AnalysisLeadDesignator.designate(
+            channelNamed: "V5", inBundle: dir, reviewer: "kevin", at: date)
+
+        let written = AnalysisLeadFile.read(from: dir)
+        #expect(written?.designation
+            == .init(channelName: "V5", reviewer: "kevin", designatedAt: date))
+        // The import-time stamp is never rewritten — scope decision 2.
+        #expect(written?.defaultChoice == original.defaultChoice)
+        #expect(makeRecording().analysisLead(inBundle: dir)?.channel.name == "V5")
+    }
+
+    @Test("Designating a bundle with no sidecar yet writes one with no default")
+    func designateWithoutSidecar() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try AnalysisLeadDesignator.designate(
+            channelNamed: "V5", inBundle: dir, reviewer: "kevin",
+            at: Date(timeIntervalSince1970: 500))
+        let written = AnalysisLeadFile.read(from: dir)
+        #expect(written?.designation?.channelName == "V5")
+        // Absent stays absent: nothing fabricates a default that was never
+        // scored (a bundle cut before the stamp existed keeps saying so).
+        #expect(written?.defaultChoice == nil)
+    }
+
+    @Test("Reverting deletes the designation and keeps the default")
+    func revertClearsDesignationOnly() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let original = scoredDefault()
+        try original.write(to: dir)
+        try AnalysisLeadDesignator.designate(
+            channelNamed: "V5", inBundle: dir, reviewer: "kevin",
+            at: Date(timeIntervalSince1970: 500))
+
+        try AnalysisLeadDesignator.revertToDefault(inBundle: dir)
+
+        let written = AnalysisLeadFile.read(from: dir)
+        #expect(written?.designation == nil)
+        #expect(written?.defaultChoice == original.defaultChoice)
+        #expect(makeRecording().analysisLead(inBundle: dir)?.channel.name == "MLII")
+    }
+
+    @Test("Reverting a bundle that was never designated is a no-op, not a throw")
+    func revertWithoutDesignation() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try scoredDefault().write(to: dir)
+        try AnalysisLeadDesignator.revertToDefault(inBundle: dir)
+        #expect(AnalysisLeadFile.read(from: dir) == scoredDefault())
+    }
+
+    @Test("The default resolution ignores a standing designation")
+    func defaultResolutionIgnoresDesignation() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try scoredDefault().write(to: dir)
+        try AnalysisLeadDesignator.designate(
+            channelNamed: "V5", inBundle: dir, reviewer: "kevin",
+            at: Date(timeIntervalSince1970: 500))
+
+        let recording = makeRecording()
+        #expect(recording.analysisLead(inBundle: dir)?.channel.name == "V5")
+        // What the menu's "Revert to default (…)" names, and where a revert
+        // lands: the stored default, as if the designation were not there.
+        let fallback = recording.analysisLeadDefault(inBundle: dir)
+        #expect(fallback?.channel.name == "MLII")
+        #expect(fallback?.provenance == .rPeakScore(score: 6.1,
+                                                    perLead: ["MLII": 6.1, "V5": 3.2]))
+        #expect(fallback?.staleDesignation == nil)
+    }
+
+    @Test("The revision stamp advances on every write")
+    @MainActor
+    func revisionStampAdvances() {
+        // The orchestrators' `.task(id:)` values carry this number, so a
+        // designation re-runs every calculation exactly as a record swap does.
+        let context = CurrentRecordingContext()
+        // Arithmetic stays OUT of the #expect expression — the macro
+        // miscompares an arithmetic right-hand side against a plain value.
+        let expected = context.analysisLeadRevision + 2
+        context.bumpAnalysisLeadRevision()
+        context.bumpAnalysisLeadRevision()
+        #expect(context.analysisLeadRevision == expected)
+    }
+}
+
 // MARK: - Import-time stamping
 
 /// All tests here register into the process-wide `AnalysisLeadScoring.shared`

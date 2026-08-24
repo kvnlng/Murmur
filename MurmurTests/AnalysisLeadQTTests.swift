@@ -19,17 +19,22 @@ import Testing
 
 @Suite("QT on the analysis lead (#357)")
 struct AnalysisLeadQTTests {
+    // Task 7: these assert through `citedLeadName` — the one production
+    // spelling of the clause. The standalone "measured on …" sentence had no
+    // caller (the §1.6 header line states the analysis lead's PROVENANCE,
+    // not the QT convention), so it is gone; the rule it encoded is
+    // unchanged and pinned here on the surviving entry point.
     @Test("The conventional-name disclosure fires exactly on non-II/V5 names")
     func disclosureNameRule() {
-        #expect(QTLeadDisclosure.annotation(forLeadNamed: "II") == nil)
-        #expect(QTLeadDisclosure.annotation(forLeadNamed: " ii ") == nil)
-        #expect(QTLeadDisclosure.annotation(forLeadNamed: "V5") == nil)
+        #expect(QTLeadDisclosure.citedLeadName(for: "II") == "II")
+        #expect(QTLeadDisclosure.citedLeadName(for: " ii ") == "ii")
+        #expect(QTLeadDisclosure.citedLeadName(for: "V5") == "V5")
         // NO prefix stripping — the ML normaliser is gone. MLII honestly
         // discloses until a #358 declaration quiets the sentence.
-        #expect(QTLeadDisclosure.annotation(forLeadNamed: "MLII")
-            == "measured on MLII — not a conventional QT lead (II/V5)")
-        #expect(QTLeadDisclosure.annotation(forLeadNamed: "V4")
-            == "measured on V4 — not a conventional QT lead (II/V5)")
+        #expect(QTLeadDisclosure.citedLeadName(for: "MLII")
+            == "MLII — not a conventional QT lead (II/V5)")
+        #expect(QTLeadDisclosure.citedLeadName(for: "V4")
+            == "V4 — not a conventional QT lead (II/V5)")
     }
 
     @Test("Equality, never prefix or substring — III is not II, V50 is not V5")
@@ -37,14 +42,14 @@ struct AnalysisLeadQTTests {
         // The X108 normaliser's over-match guard, transferred: the same
         // near-miss names it refused to SELECT must now be disclosed, since
         // the analysis lead is measured on whatever it is.
-        #expect(QTLeadDisclosure.annotation(forLeadNamed: "III")
-            == "measured on III — not a conventional QT lead (II/V5)")
-        #expect(QTLeadDisclosure.annotation(forLeadNamed: "MLIII")
-            == "measured on MLIII — not a conventional QT lead (II/V5)")
-        #expect(QTLeadDisclosure.annotation(forLeadNamed: "V50")
-            == "measured on V50 — not a conventional QT lead (II/V5)")
-        #expect(QTLeadDisclosure.annotation(forLeadNamed: "MCL1")
-            == "measured on MCL1 — not a conventional QT lead (II/V5)")
+        #expect(QTLeadDisclosure.citedLeadName(for: "III")
+            == "III — not a conventional QT lead (II/V5)")
+        #expect(QTLeadDisclosure.citedLeadName(for: "MLIII")
+            == "MLIII — not a conventional QT lead (II/V5)")
+        #expect(QTLeadDisclosure.citedLeadName(for: "V50")
+            == "V50 — not a conventional QT lead (II/V5)")
+        #expect(QTLeadDisclosure.citedLeadName(for: "MCL1")
+            == "MCL1 — not a conventional QT lead (II/V5)")
     }
 
     @Test("The citation's lead slot carries the as-recorded name, plus the clause")
@@ -58,9 +63,6 @@ struct AnalysisLeadQTTests {
             == "MLII — not a conventional QT lead (II/V5)")
         #expect(QTLeadDisclosure.citedLeadName(for: "V4")
             == "V4 — not a conventional QT lead (II/V5)")
-        // The sentence and the slot state ONE claim in two grammars.
-        let sentence = QTLeadDisclosure.annotation(forLeadNamed: "V4")
-        #expect(sentence == "measured on \(QTLeadDisclosure.citedLeadName(for: "V4"))")
     }
 
     @Test("A record with no II/V5 is measured on its analysis lead — and says so")
@@ -88,7 +90,8 @@ struct AnalysisLeadQTTests {
                                       "A populated ECG channel always resolves a lead")
         #expect(recording.channels.contains { $0.name == "MCL1" },
                 "The renamed lead itself must survive with its signal")
-        #expect(QTLeadDisclosure.annotation(forLeadNamed: resolution.channel.name) != nil,
+        #expect(QTLeadDisclosure.citedLeadName(for: resolution.channel.name)
+                != resolution.channel.name,
                 "No lead on this record reads as II/V5 — the QT read must disclose")
         let samples = recording.samples(of: resolution.channel, inDirectory: summary.directory)
         #expect(samples?.isEmpty == false,

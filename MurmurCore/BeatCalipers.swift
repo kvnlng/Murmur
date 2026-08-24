@@ -281,8 +281,11 @@ struct BeatCalipers: View {
         // clause is appended HERE, at render time, because this card states
         // QT and QTc — convention measures QT where the T offset is clearest
         // (II / V5 commonly), so a departure is reproducibility-relevant and
-        // is stated rather than corrected. (Task 7 replaces this line with
-        // the full header disclosure.)
+        // is stated rather than corrected. This stays a QT-specific clause
+        // about the TEMPLATE's population: the analysis lead's provenance
+        // (designated / scored / first in file) is a different claim, stated
+        // once in the metrics header by `AnalysisLeadHeaderLine` (#357 §1.6)
+        // rather than repeated on every card that quotes a number.
         if let lead = t.sourceLead, !lead.isEmpty {
             text += " · lead \(QTLeadDisclosure.citedLeadName(for: lead))"
         }

@@ -32,6 +32,14 @@ struct VTVFScanOrchestrator: View {
     @State private var model: VTVFModel?
     @State private var modelLoadError: String?
 
+    /// #357: deliberately WITHOUT the `analysisLeadRevision` stamp the other
+    /// three orchestrators carry. This task computes nothing that depends on
+    /// a lead — it sets the entitlement-and-recording availability flag and
+    /// loads the model once. The VT/VF scan itself is analyst-initiated and
+    /// resolves the analysis lead when the sheet is presented (see
+    /// `sheetContent`), so it always runs on the standing designation; there
+    /// is no cached derivation here keyed on the lead to invalidate. A stamp
+    /// in this key would assert a dependency that does not exist.
     private struct Key: Hashable {
         let recordingID: UUID?
         let owned: Bool

@@ -47,6 +47,10 @@ struct ArrhythmiaScanOrchestrator: View {
     private struct Key: Hashable {
         let recordingID: UUID?
         let owned: Bool
+        /// #357: a designation re-runs the scan. The bundle cache key
+        /// carries the lead's name, so the re-run recomputes on the new lead
+        /// rather than re-serving the previous one's candidates.
+        let analysisLeadRevision: Int
         let lowBpm: Double
         let highBpm: Double
         let minDurationSeconds: Double
@@ -60,6 +64,7 @@ struct ArrhythmiaScanOrchestrator: View {
             .task(id: Key(
                 recordingID: recordingContext.recording?.id,
                 owned: store.hasStudio,
+                analysisLeadRevision: recordingContext.analysisLeadRevision,
                 lowBpm: settings.lowBpm,
                 highBpm: settings.highBpm,
                 minDurationSeconds: settings.minDurationSeconds,

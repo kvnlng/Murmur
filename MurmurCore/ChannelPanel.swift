@@ -42,6 +42,21 @@ struct NoteAuthoringHooks {
     var interpretGain: (Channel) -> Void
 }
 
+/// #357 — the analysis-lead designation for THIS panel's lead, supplied by
+/// the owner (BedsideView) because the sidecar write and the session's
+/// revision stamp are its business. Threaded exactly like
+/// `NoteAuthoringHooks`; the panel contributes only which lead was clicked.
+struct AnalysisLeadHooks {
+    /// True when this panel's channel is the resolved analysis lead — the
+    /// menu then offers the withdrawal instead of the assertion.
+    var isAnalysisLead: Bool
+    /// What a revert lands on, as "<name> — <reason phrase>", so the item
+    /// says where the analyst is going rather than merely "default".
+    var defaultLabel: String
+    var designate: () -> Void
+    var revertToDefault: () -> Void
+}
+
 struct ChannelPanel: View {
     enum Sizing {
         /// Strips mode — compact stacked layout. Floor is small enough that a
@@ -94,6 +109,9 @@ struct ChannelPanel: View {
     /// X84 — right-click authoring hooks. Nil (e.g. in previews or surfaces
     /// without stores) renders no context menu at all.
     var noteAuthoring: NoteAuthoringHooks?
+    /// #357 — analysis-lead designation for this lead. Nil in previews and
+    /// in surfaces with no bundle to write to.
+    var analysisLead: AnalysisLeadHooks?
 
     @State private var clippedRanges: [ClippedRange] = []
     /// Recording-wide min/max for this channel, populated by the same
@@ -692,13 +710,34 @@ struct ChannelPanel: View {
                     }
                     .disabled(!hooks.canAuthorFindings)
                     .accessibilityIdentifier("bedside-context-interpret-gain")
-                    if !hooks.isEditing {
-                        Divider()
-                        // Same rule as every other authoring surface: say WHY
-                        // the items are disabled rather than leaving a dead
-                        // menu to be puzzled over.
-                        Text("Unlock Editing to add notes or findings")
+                }
+                // #357: designation is a per-lead assertion, so it lives on
+                // the lead's own right-click, beside the other authoring
+                // actions. Deliberately ungated — neither the Editing latch
+                // nor the Studio entitlement applies: naming which lead the
+                // numbers were measured on is a statement ABOUT the record,
+                // not a paid computation, and the free viewer's numbers come
+                // from a lead too.
+                if let designation = analysisLead {
+                    if noteAuthoring != nil { Divider() }
+                    if designation.isAnalysisLead {
+                        Button("Revert to default (\(designation.defaultLabel))") {
+                            designation.revertToDefault()
+                        }
+                        .accessibilityIdentifier("bedside-context-revert-analysis-lead")
+                    } else {
+                        Button("Use as analysis lead") { designation.designate() }
+                            .accessibilityIdentifier("bedside-context-designate-analysis-lead")
                     }
+                }
+                // Same rule as every other authoring surface: say WHY the
+                // items are disabled rather than leaving a dead menu to be
+                // puzzled over. Last in the menu, so it sits under the items
+                // it explains — and after the designation entries, which it
+                // pointedly does NOT govern.
+                if let hooks = noteAuthoring, !hooks.isEditing {
+                    Divider()
+                    Text("Unlock Editing to add notes or findings")
                 }
             }
             // #225: click a beat to PIN its card open. The pan gesture has a

@@ -102,6 +102,25 @@ public final class CurrentRecordingContext {
     }
     public var pendingCarriedNotesBaseline: CarriedNotesBaseline?
 
+    /// #357 — how many analysis-lead designations have been written this
+    /// session. Every orchestrator's `.task(id:)` carries this number
+    /// alongside the recording id, so designating (or reverting) re-runs
+    /// every calculation exactly as opening a different record does. The
+    /// derived caches key on the lead's NAME, so those re-runs recompute
+    /// rather than re-serve the previous lead's numbers.
+    ///
+    /// Monotonic, and deliberately NOT reset on `clear()` or a record swap:
+    /// a stamp that went back to zero could collide with a key the previous
+    /// record already ran under, and a re-run costs less than a stale scan.
+    public private(set) var analysisLeadRevision: Int = 0
+
+    /// Call after a successful designation write (see
+    /// `AnalysisLeadDesignator`). Separate from the write itself because the
+    /// sidecar belongs to the bundle and this stamp belongs to the session.
+    public func bumpAnalysisLeadRevision() {
+        analysisLeadRevision += 1
+    }
+
     public init() {}
 
     /// Publish that `recording` is now current, loaded from `directory`.

@@ -43,6 +43,10 @@ struct IntervalMarkingsOrchestrator: View {
         // X112c: endorsing or withdrawing a morphology baseline rebuilds
         // the template from the endorsed beats.
         let endorsements: [MorphologyEndorsement]
+        // #357: designating a lead re-delineates and re-measures every
+        // interval on it. The bundle cache key carries the lead's name, so
+        // this re-run recomputes rather than re-serving the old lead's beats.
+        let analysisLeadRevision: Int
     }
 
     var body: some View {
@@ -55,7 +59,8 @@ struct IntervalMarkingsOrchestrator: View {
                 qtcFormula: markingsContext.qtcFormula,
                 tOffsetExclusionEnabled: markingsContext.tOffsetExclusionEnabled,
                 tOffsetExclusionScore: markingsContext.tOffsetExclusionScore,
-                endorsements: morphologyContext.endorsements
+                endorsements: morphologyContext.endorsements,
+                analysisLeadRevision: recordingContext.analysisLeadRevision
             )) {
                 await recompute()
             }

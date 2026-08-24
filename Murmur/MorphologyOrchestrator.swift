@@ -28,6 +28,9 @@ struct MorphologyOrchestrator: View {
     private struct Key: Hashable {
         let recordingID: UUID?
         let owned: Bool
+        /// #357: a designation re-clusters on the newly designated lead —
+        /// the cache key carries the lead's name, so this recomputes.
+        let analysisLeadRevision: Int
     }
 
     var body: some View {
@@ -35,7 +38,8 @@ struct MorphologyOrchestrator: View {
             .frame(width: 0, height: 0)
             .allowsHitTesting(false)
             .task(id: Key(recordingID: recordingContext.recording?.id,
-                          owned: store.hasStudio)) {
+                          owned: store.hasStudio,
+                          analysisLeadRevision: recordingContext.analysisLeadRevision)) {
                 await recompute()
             }
     }
