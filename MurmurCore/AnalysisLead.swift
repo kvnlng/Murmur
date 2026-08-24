@@ -256,6 +256,43 @@ public enum AnalysisLeadHeaderLine {
     }
 }
 
+// MARK: - The per-lead menu entry
+
+/// What a lead's right-click offers for designation (§1.6). Pure and
+/// public so the rule is pinned by tests rather than buried in a menu
+/// builder — the two predicates below are easy to get subtly wrong.
+public enum AnalysisLeadMenuEntry: Equatable, Sendable {
+    /// "Use as analysis lead".
+    case designate
+    /// "Revert to default (…)" — offered on THE DESIGNEE, which is not the
+    /// same question as "is this the lead that resolves". A record with no
+    /// designation resolves a lead through the stored default, and that lead
+    /// still offers `designate`: pinning the default explicitly is a
+    /// legitimate assertion (it says an analyst looked and agreed), and it is
+    /// what makes the choice survive a re-scored re-import.
+    case revert
+    /// Nothing offered.
+    case none
+
+    /// `designation` is the sidecar's own section, NOT a resolution — a
+    /// designation naming a channel that can't resolve still shows its
+    /// revert entry, or the analyst would have no way to withdraw the very
+    /// designation the header line is complaining about.
+    ///
+    /// A channel with no samples is never offered `designate`: resolution
+    /// only considers populated channels, so the write would produce a
+    /// designation that never resolves and a header line claiming a lead is
+    /// "not in this record" while the analyst is looking at its panel.
+    public static func resolve(
+        for channel: Channel,
+        designation: AnalysisLeadFile.Designation?
+    ) -> AnalysisLeadMenuEntry {
+        if designation?.channelName == channel.name { return .revert }
+        guard !channel.isTrendChannel, channel.sampleCount > 0 else { return .none }
+        return .designate
+    }
+}
+
 // MARK: - Designating
 
 /// The analyst's assertion, written to the bundle. Read → set/clear →

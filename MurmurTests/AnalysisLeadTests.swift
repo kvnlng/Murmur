@@ -394,6 +394,72 @@ struct AnalysisLeadDesignatorTests {
         #expect(fallback?.staleDesignation == nil)
     }
 
+    @Test("An undesignated record offers designation on every lead, revert on none")
+    func undesignatedRecordOffersDesignateEverywhere() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try scoredDefault().write(to: dir)
+        let designation = AnalysisLeadFile.read(from: dir)?.designation
+        #expect(designation == nil)
+
+        let recording = makeRecording()
+        // MLII is what the stored default RESOLVES to — and it still offers
+        // "Use as analysis lead", because pinning the default explicitly is
+        // an assertion the analyst is entitled to make.
+        #expect(recording.analysisLead(inBundle: dir)?.channel.name == "MLII")
+        for channel in recording.channels {
+            #expect(AnalysisLeadMenuEntry.resolve(for: channel, designation: designation)
+                == .designate)
+        }
+    }
+
+    @Test("Designating the default lead pins it, and its menu flips to revert")
+    func designatingTheDefaultPinsIt() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try scoredDefault().write(to: dir)
+        // The lead the default already resolves to.
+        try AnalysisLeadDesignator.designate(
+            channelNamed: "MLII", inBundle: dir, reviewer: "kevin",
+            at: Date(timeIntervalSince1970: 500))
+
+        let designation = AnalysisLeadFile.read(from: dir)?.designation
+        #expect(designation?.channelName == "MLII")
+        #expect(designation?.reviewer == "kevin")
+
+        let recording = makeRecording()
+        let leads = Dictionary(uniqueKeysWithValues: recording.channels.map {
+            ($0.name, AnalysisLeadMenuEntry.resolve(for: $0, designation: designation))
+        })
+        #expect(leads["MLII"] == .revert)
+        #expect(leads["V5"] == .designate)
+        // The resolved lead is unchanged — but its provenance is now the
+        // analyst's assertion, not the import-time score.
+        let resolution = recording.analysisLead(inBundle: dir)
+        #expect(resolution?.channel.name == "MLII")
+        #expect(resolution?.provenance == .designated(reviewer: "kevin",
+                                                      date: Date(timeIntervalSince1970: 500)))
+    }
+
+    @Test("An empty channel is never offered as an analysis lead")
+    func emptyChannelHasNoDesignationAffordance() {
+        // Resolution only considers populated channels, so designating an
+        // empty one would write an assertion that never resolves — and a
+        // header line calling a visibly-present lead "not in this record".
+        let empty = Channel(
+            id: UUID(), name: "V5", unit: "mV", sampleRate: 360,
+            startTimeUnixMS: 0, sampleCount: 0,
+            storageFileName: "channel_V5.bin", pyramid: [])
+        #expect(AnalysisLeadMenuEntry.resolve(for: empty, designation: nil) == .none)
+
+        // A designation naming it is still withdrawable, though — otherwise
+        // the analyst could not clear the stale designation the header line
+        // is reporting.
+        let standing = AnalysisLeadFile.Designation(
+            channelName: "V5", reviewer: "kevin", designatedAt: Date(timeIntervalSince1970: 500))
+        #expect(AnalysisLeadMenuEntry.resolve(for: empty, designation: standing) == .revert)
+    }
+
     @Test("The revision stamp advances on every write")
     @MainActor
     func revisionStampAdvances() {

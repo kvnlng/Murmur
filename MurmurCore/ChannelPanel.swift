@@ -47,9 +47,10 @@ struct NoteAuthoringHooks {
 /// revision stamp are its business. Threaded exactly like
 /// `NoteAuthoringHooks`; the panel contributes only which lead was clicked.
 struct AnalysisLeadHooks {
-    /// True when this panel's channel is the resolved analysis lead — the
-    /// menu then offers the withdrawal instead of the assertion.
-    var isAnalysisLead: Bool
+    /// What this lead's menu offers — computed by
+    /// `AnalysisLeadMenuEntry.resolve(for:designation:)`, off the sidecar's
+    /// designation section rather than off which lead currently resolves.
+    var entry: AnalysisLeadMenuEntry
     /// What a revert lands on, as "<name> — <reason phrase>", so the item
     /// says where the analyst is going rather than merely "default".
     var defaultLabel: String
@@ -718,16 +719,23 @@ struct ChannelPanel: View {
                 // numbers were measured on is a statement ABOUT the record,
                 // not a paid computation, and the free viewer's numbers come
                 // from a lead too.
-                if let designation = analysisLead {
+                // A lead that offers neither (an empty channel that was never
+                // designated) contributes NO items and no divider — an
+                // affordance that would write a designation nothing can
+                // resolve is not offered at all.
+                if let designation = analysisLead, designation.entry != .none {
                     if noteAuthoring != nil { Divider() }
-                    if designation.isAnalysisLead {
+                    switch designation.entry {
+                    case .revert:
                         Button("Revert to default (\(designation.defaultLabel))") {
                             designation.revertToDefault()
                         }
                         .accessibilityIdentifier("bedside-context-revert-analysis-lead")
-                    } else {
+                    case .designate:
                         Button("Use as analysis lead") { designation.designate() }
                             .accessibilityIdentifier("bedside-context-designate-analysis-lead")
+                    case .none:
+                        EmptyView()
                     }
                 }
                 // Same rule as every other authoring surface: say WHY the

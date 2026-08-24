@@ -76,6 +76,11 @@ struct BedsideView: View {
     @State private var analysisLead: AnalysisLeadResolution?
     /// What a revert would land on — the context menu's item names it.
     @State private var analysisLeadDefault: AnalysisLeadResolution?
+    /// The sidecar's designation section itself, which is what the menu
+    /// branches on — "is there a standing designation naming this lead" is a
+    /// different question from "does this lead resolve", and only the first
+    /// one decides whether there is anything to revert.
+    @State private var analysisLeadDesignation: AnalysisLeadFile.Designation?
     /// Observed for `analysisLeadRevision`: a designation written here (or
     /// anywhere else this session) re-reads the sidecar.
     @State private var recordingContext = CurrentRecordingContext.shared
@@ -2979,15 +2984,19 @@ struct BedsideView: View {
     private func refreshAnalysisLead() {
         analysisLead = recording.analysisLead(inBundle: recordingDirectory)
         analysisLeadDefault = recording.analysisLeadDefault(inBundle: recordingDirectory)
+        analysisLeadDesignation = AnalysisLeadFile
+            .read(from: recordingDirectory)?.designation
     }
 
-    /// Per-lead designation hooks. Built per panel because "is this the
-    /// analysis lead?" is a question about the lead being drawn — matched by
-    /// channel ID, not name, so on a record with duplicate lead names only
-    /// the channel resolution actually picked reads as designated.
+    /// Per-lead designation hooks. The entry is decided by
+    /// `AnalysisLeadMenuEntry` from the sidecar's designation section, so an
+    /// undesignated record offers "Use as analysis lead" on EVERY populated
+    /// lead — including the one the stored default already resolves, where
+    /// designating pins the choice explicitly.
     private func analysisLeadHooks(for channel: Channel) -> AnalysisLeadHooks {
         AnalysisLeadHooks(
-            isAnalysisLead: analysisLead?.channel.id == channel.id,
+            entry: AnalysisLeadMenuEntry.resolve(
+                for: channel, designation: analysisLeadDesignation),
             defaultLabel: analysisLeadDefault.map(AnalysisLeadHeaderLine.label(for:))
                 ?? channel.name,
             designate: { designateAnalysisLead(channel) },
@@ -3005,9 +3014,9 @@ struct BedsideView: View {
     ///
     /// The sidecar names channels by NAME (X96: names survive re-import,
     /// channel IDs do not), so on a record with two identically-named leads
-    /// a designation resolves to the FIRST of them — designating the second
-    /// leaves the menu item unchanged on that panel, honestly, because the
-    /// first is what the calculations will read.
+    /// a designation resolves to the FIRST of them — and both panels show
+    /// the revert entry, honestly: the sidecar names the pair, and either
+    /// panel withdraws the same assertion.
     private func designateAnalysisLead(_ channel: Channel) {
         do {
             try AnalysisLeadDesignator.designate(
