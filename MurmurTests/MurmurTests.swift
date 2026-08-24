@@ -1870,6 +1870,55 @@ struct CalibrationMathTests {
         #expect(samples == 3600)
     }
 
+    @Test("Implied speed inverts window-samples (#359 lock capture)")
+    func impliedSpeedInvertsWindowSamples() {
+        // The lock-capture direction: 1250 pt showing 10 s at 5 pt/mm →
+        // 125 pt/s → 25 mm/s — the exact input windowSamples maps back to
+        // 3600 samples at 360 Hz (the test above).
+        let speed = CalibrationMath.impliedMillimetersPerSecond(
+            windowSeconds: 10, canvasWidthPoints: 1250, millimetersPerPoint: 0.2
+        )
+        #expect(speed != nil)
+        #expect(abs((speed ?? 0) - 25) < 1e-9)
+        // Round trip through windowSamples reproduces the on-screen window.
+        let samples = CalibrationMath.windowSamples(
+            millimetersPerSecond: speed ?? 0, canvasWidthPoints: 1250,
+            millimetersPerPoint: 0.2, sampleRate: 360
+        )
+        #expect(samples == 3600)
+    }
+
+    @Test("Implied speed rejects degenerate inputs")
+    func impliedSpeedDegenerate() {
+        #expect(CalibrationMath.impliedMillimetersPerSecond(windowSeconds: 0, canvasWidthPoints: 1250, millimetersPerPoint: 0.2) == nil)
+        #expect(CalibrationMath.impliedMillimetersPerSecond(windowSeconds: 10, canvasWidthPoints: 0, millimetersPerPoint: 0.2) == nil)
+        #expect(CalibrationMath.impliedMillimetersPerSecond(windowSeconds: 10, canvasWidthPoints: 1250, millimetersPerPoint: 0) == nil)
+    }
+
+    @Test("Canonical speed re-derivation: a wider canvas shows more seconds at the same scale (#359)")
+    func canonicalSpeedRederivation() {
+        // The resize contract: speed is canonical, width is derived. The same
+        // 25 mm/s on a canvas grown 1250 → 1930 pt (the report's ~1.54×
+        // resize) yields proportionally more samples — more seconds of the
+        // same-sized boxes, never a different box size.
+        let narrow = CalibrationMath.windowSamples(
+            millimetersPerSecond: 25, canvasWidthPoints: 1250,
+            millimetersPerPoint: 0.2, sampleRate: 360
+        )
+        let wide = CalibrationMath.windowSamples(
+            millimetersPerSecond: 25, canvasWidthPoints: 1930,
+            millimetersPerPoint: 0.2, sampleRate: 360
+        )
+        #expect(narrow == 3600)
+        #expect(wide == 5558)   // 1930 / 125 pt/s = 15.44 s × 360 Hz, rounded
+        // The frozen-extent failure mode this replaces: 3600 samples spread
+        // over 1930 pt read as 38.6 mm/s — the report's exact drift.
+        let drifted = CalibrationMath.impliedMillimetersPerSecond(
+            windowSeconds: 10, canvasWidthPoints: 1930, millimetersPerPoint: 0.2
+        )
+        #expect(abs((drifted ?? 0) - 38.6) < 0.01)
+    }
+
     @Test("Window-samples rejects degenerate inputs")
     func windowSamplesDegenerate() {
         #expect(CalibrationMath.windowSamples(millimetersPerSecond: 0, canvasWidthPoints: 1250, millimetersPerPoint: 0.2, sampleRate: 360) == nil)
