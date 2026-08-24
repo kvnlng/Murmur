@@ -196,8 +196,39 @@ public enum QTLeadDisclosure {
     /// beat inspector's provenance footer — never stored: `sourceLead` holds
     /// the lead's name, so a PR or QRS caption states the same lead without
     /// inheriting a QT-specific sentence.
-    public static func citedLeadName(for name: String) -> String {
-        clause(forLeadNamed: name) ?? name.trimmingCharacters(in: .whitespaces)
+    ///
+    /// `declaredPlacement` is #358's analyst assertion of what `name`
+    /// physically is, when one exists — `nil` reproduces #357's behaviour
+    /// byte-for-byte (existing callers pass nothing and are unaffected).
+    /// When present and its `placement` text reads as II/V5 by the SAME
+    /// normalise-and-compare test applied to the recorded name (plan
+    /// ruling 4 — `readsAsConventional(_:)` below, so the two paths can
+    /// never drift), the "not a conventional QT lead" clause is suppressed
+    /// and the declaration's parenthetical is appended instead: the analyst
+    /// has said this channel IS II or V5, so the caveat no longer applies.
+    /// A declared but non-conventional placement (e.g. "front patch") keeps
+    /// the clause — the analyst's assertion is disclosed alongside it, not
+    /// in place of it.
+    public static func citedLeadName(
+        for name: String,
+        declaredPlacement: LeadPlacementDeclaration? = nil,
+        isOverride: Bool = false
+    ) -> String {
+        let trimmedName = name.trimmingCharacters(in: .whitespaces)
+        guard let declaredPlacement else {
+            return clause(forLeadNamed: name) ?? trimmedName
+        }
+        let parenthetical = LeadPlacementDisclosure.parenthetical(
+            for: declaredPlacement, isOverride: isOverride)
+        if readsAsConventional(declaredPlacement.placement) {
+            return "\(trimmedName) \(parenthetical)"
+        }
+        guard let clause = clause(forLeadNamed: name) else {
+            // The recorded name itself already reads as II/V5 — no clause
+            // to append the parenthetical alongside; state the name plain.
+            return "\(trimmedName) \(parenthetical)"
+        }
+        return "\(clause) \(parenthetical)"
     }
 
     /// "<name> — not a conventional QT lead (II/V5)", or nil when the name
@@ -208,9 +239,20 @@ public enum QTLeadDisclosure {
     /// surface states the disclosure on its own — built from this clause,
     /// so the two grammars can never word the claim differently.
     private static func clause(forLeadNamed name: String) -> String? {
-        let normalized = name.uppercased().filter { !$0.isWhitespace }
-        guard normalized != "II", normalized != "V5" else { return nil }
+        guard !readsAsConventional(name) else { return nil }
         return "\(name.trimmingCharacters(in: .whitespaces)) — not a conventional QT lead (II/V5)"
+    }
+
+    /// The one normalise-and-compare test for "reads as II or V5" — exact
+    /// equality after uppercasing and stripping whitespace, no prefix
+    /// stripping. Shared by the recorded-name path (`clause(forLeadNamed:)`)
+    /// and the declared-placement path (`citedLeadName`'s suppression check)
+    /// so the two can never word the same rule differently (plan ruling 4).
+    /// `"V5, back patch"` does not read as V5 — this is exact equality, not
+    /// a prefix or substring test.
+    static func readsAsConventional(_ text: String) -> Bool {
+        let normalized = text.uppercased().filter { !$0.isWhitespace }
+        return normalized == "II" || normalized == "V5"
     }
 }
 
@@ -225,10 +267,15 @@ public enum AnalysisLeadHeaderLine {
     /// The full line. `excludedSummary` is the caller's own per-lead
     /// qualifier (e.g. "V5: 18% of beats excluded") when it has one;
     /// nil renders the reason phrase alone — the app never invents a
-    /// number to fill the slot.
-    public static func text(for resolution: AnalysisLeadResolution,
-                            excludedSummary: String?) -> String {
-        var line = "analysis lead: \(label(for: resolution))"
+    /// number to fill the slot. `declaration` is #358's analyst assertion
+    /// of what the resolved channel's name physically means, when one
+    /// exists; `nil` (the default) reproduces #357's line byte-for-byte.
+    public static func text(
+        for resolution: AnalysisLeadResolution,
+        excludedSummary: String?,
+        declaration: (declaration: LeadPlacementDeclaration, isOverride: Bool)? = nil
+    ) -> String {
+        var line = "analysis lead: \(label(for: resolution, declaration: declaration))"
         if let excludedSummary, !excludedSummary.isEmpty {
             line += " (\(excludedSummary))"
         }
@@ -243,8 +290,30 @@ public enum AnalysisLeadHeaderLine {
 
     /// "<name> — <reason phrase>": the lead and why, without the header's
     /// prefix. The context menu's "Revert to default (…)" slot states this.
+    /// Kept as its own single-parameter overload (rather than a defaulted
+    /// `declaration` parameter, as `text(for:excludedSummary:declaration:)`
+    /// above uses) because `BedsideView` captures this exact signature
+    /// point-free (`.map(AnalysisLeadHeaderLine.label(for:))`) — a default
+    /// parameter is erased when a method is converted to a function value,
+    /// so that capture needs an overload whose full signature really is
+    /// one argument.
     public static func label(for resolution: AnalysisLeadResolution) -> String {
-        "\(resolution.channel.name) — \(reasonPhrase(for: resolution.provenance))"
+        label(for: resolution, declaration: nil)
+    }
+
+    /// "<name> (declared: …) — <reason phrase>" when `declaration` is
+    /// present; identical to `label(for:)` when it is `nil` (#358).
+    public static func label(
+        for resolution: AnalysisLeadResolution,
+        declaration: (declaration: LeadPlacementDeclaration, isOverride: Bool)?
+    ) -> String {
+        var name = resolution.channel.name
+        if let (declaredPlacement, isOverride) = declaration {
+            let parenthetical = LeadPlacementDisclosure.parenthetical(
+                for: declaredPlacement, isOverride: isOverride)
+            name += " \(parenthetical)"
+        }
+        return "\(name) — \(reasonPhrase(for: resolution.provenance))"
     }
 
     /// One vocabulary for the three provenances, everywhere they are read.
@@ -266,12 +335,37 @@ public enum AnalysisLeadHeaderLine {
     /// yyyy-MM-dd, UTC, POSIX locale — the same discipline as every other
     /// stamped date in the app: the line must read identically wherever the
     /// bundle is opened, so it never renders in the machine's own zone.
-    private static func dateString(_ date: Date) -> String {
+    /// Internal (not private) so `LeadPlacementDisclosure` shares this exact
+    /// formatter — one date rendering, never two disciplines that could
+    /// silently drift apart.
+    static func dateString(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(identifier: "UTC")
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: date)
+    }
+}
+
+// MARK: - Lead placement disclosure (#358)
+
+/// The parenthetical that discloses a #358 `LeadPlacementDeclaration` inline
+/// with a channel name — the header line and the QT citation both render
+/// through this one function so the two surfaces can never word the same
+/// fact differently. Pure, like `AnalysisLeadHeaderLine`: this type never
+/// reads `LeadPlacementMapContext` (jurisdiction rule) — callers resolve the
+/// declaration and pass it in.
+public enum LeadPlacementDisclosure {
+
+    /// `(declared: II, by kevin, 2026-08-24)`, or with `isOverride: true`,
+    /// `(declared: II — record override, by kevin, 2026-08-24)` — the
+    /// per-record override says so inline, since it is the exception to a
+    /// folder-wide baseline the analyst may otherwise assume applies.
+    public static func parenthetical(for declaration: LeadPlacementDeclaration,
+                                     isOverride: Bool) -> String {
+        let overrideSuffix = isOverride ? " — record override" : ""
+        return "(declared: \(declaration.placement)\(overrideSuffix), by \(declaration.reviewer), "
+            + "\(AnalysisLeadHeaderLine.dateString(declaration.declaredAt)))"
     }
 }
 

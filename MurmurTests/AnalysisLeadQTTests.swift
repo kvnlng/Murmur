@@ -97,4 +97,65 @@ struct AnalysisLeadQTTests {
         #expect(samples?.isEmpty == false,
                 "The resolved lead is the one the pipeline reads — it must carry signal")
     }
+
+    // MARK: - #358: declared-placement clause interaction
+
+    private var declaredAt: Date {
+        var components = DateComponents()
+        components.year = 2026
+        components.month = 8
+        components.day = 24
+        components.hour = 0
+        components.minute = 30
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar.date(from: components)!
+    }
+
+    @Test("Declared II suppresses the not-conventional QT clause; the measurement text cites the declaration")
+    func declaredConventionalSuppressesClause() {
+        let declII = LeadPlacementDeclaration(
+            placement: "II", reviewer: "kevin", declaredAt: declaredAt)
+        let cited = QTLeadDisclosure.citedLeadName(for: "MLII", declaredPlacement: declII)
+        #expect(cited.contains("(declared: II"))
+        #expect(!cited.contains("not a conventional QT lead"))
+        #expect(cited == "MLII (declared: II, by kevin, 2026-08-24)")
+    }
+
+    @Test("A declared non-conventional placement keeps the clause")
+    func declaredUnconventionalKeepsClause() {
+        let declFrontPatch = LeadPlacementDeclaration(
+            placement: "front patch", reviewer: "kevin", declaredAt: declaredAt)
+        let cited = QTLeadDisclosure.citedLeadName(for: "MLII", declaredPlacement: declFrontPatch)
+        #expect(cited.contains("not a conventional QT lead (II/V5)"))
+        #expect(cited.contains("(declared: front patch"))
+    }
+
+    @Test("Free text 'V5, back patch' does not read as V5 — clause stays")
+    func freeTextDoesNotMatchConventional() {
+        let declFreeText = LeadPlacementDeclaration(
+            placement: "V5, back patch", reviewer: "kevin", declaredAt: declaredAt)
+        let cited = QTLeadDisclosure.citedLeadName(for: "MLII", declaredPlacement: declFreeText)
+        #expect(cited.contains("not a conventional QT lead (II/V5)"))
+        #expect(cited.contains("(declared: V5, back patch"))
+    }
+
+    @Test("A record override reads its own override wording in the clause interaction")
+    func declaredOverrideSuppressesClause() {
+        let declII = LeadPlacementDeclaration(
+            placement: "II", reviewer: "kevin", declaredAt: declaredAt)
+        let cited = QTLeadDisclosure.citedLeadName(
+            for: "MLII", declaredPlacement: declII, isOverride: true)
+        #expect(cited == "MLII (declared: II — record override, by kevin, 2026-08-24)")
+    }
+
+    @Test("No declaration: clause byte-identical to #357 behaviour")
+    func nilDeclarationUnchanged() {
+        #expect(QTLeadDisclosure.citedLeadName(for: "MLII")
+            == "MLII — not a conventional QT lead (II/V5)")
+        #expect(QTLeadDisclosure.citedLeadName(for: "MLII", declaredPlacement: nil)
+            == "MLII — not a conventional QT lead (II/V5)")
+        #expect(QTLeadDisclosure.citedLeadName(for: "II") == "II")
+        #expect(QTLeadDisclosure.citedLeadName(for: "II", declaredPlacement: nil) == "II")
+    }
 }

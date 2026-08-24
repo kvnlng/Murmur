@@ -275,6 +275,76 @@ struct AnalysisLeadHeaderLineTests {
         #expect(AnalysisLeadHeaderLine.label(for: resolution("V5", .firstInFile))
             == "V5 — first in file")
     }
+
+    // MARK: - #358: declared-placement parenthetical
+
+    private var declaration: LeadPlacementDeclaration {
+        LeadPlacementDeclaration(placement: "II", reviewer: "kevin", declaredAt: designationDate)
+    }
+
+    @Test("Header line appends the declaration parenthetical after the recorded name")
+    func headerShowsDeclaration() {
+        let scored = resolution("MLII", .rPeakScore(score: 6.1, perLead: [:]))
+        #expect(AnalysisLeadHeaderLine.label(for: scored, declaration: (declaration, false))
+            == "MLII (declared: II, by kevin, 2026-08-24) — strongest R peaks")
+        #expect(AnalysisLeadHeaderLine.text(for: scored, excludedSummary: nil,
+                                            declaration: (declaration, false))
+            == "analysis lead: MLII (declared: II, by kevin, 2026-08-24) — strongest R peaks")
+    }
+
+    @Test("Record override says so in the parenthetical")
+    func overrideParenthetical() {
+        let scored = resolution("MLII", .rPeakScore(score: 6.1, perLead: [:]))
+        #expect(AnalysisLeadHeaderLine.label(for: scored, declaration: (declaration, true))
+            == "MLII (declared: II — record override, by kevin, 2026-08-24) — strongest R peaks")
+    }
+
+    @Test("No declaration: header and label byte-identical to #357 behaviour")
+    func nilDeclarationUnchanged() {
+        let scored = resolution("MLII", .rPeakScore(score: 6.1, perLead: [:]))
+        #expect(AnalysisLeadHeaderLine.label(for: scored) == "MLII — strongest R peaks")
+        #expect(AnalysisLeadHeaderLine.label(for: scored, declaration: nil)
+            == "MLII — strongest R peaks")
+        #expect(AnalysisLeadHeaderLine.text(for: scored, excludedSummary: nil)
+            == "analysis lead: MLII — strongest R peaks")
+        #expect(AnalysisLeadHeaderLine.text(for: scored, excludedSummary: nil, declaration: nil)
+            == "analysis lead: MLII — strongest R peaks")
+    }
+}
+
+// MARK: - #358: lead placement disclosure parenthetical
+
+@Suite("Lead placement disclosure — parenthetical")
+struct LeadPlacementDisclosureTests {
+    /// 2026-08-24 00:30 UTC — same deliberate cross-zone instant as
+    /// `AnalysisLeadHeaderLineTests.designationDate`.
+    private var declaredAt: Date {
+        var components = DateComponents()
+        components.year = 2026
+        components.month = 8
+        components.day = 24
+        components.hour = 0
+        components.minute = 30
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar.date(from: components)!
+    }
+
+    @Test("Folder-wide declaration parenthetical")
+    func folderParenthetical() {
+        let declaration = LeadPlacementDeclaration(
+            placement: "II", reviewer: "kevin", declaredAt: declaredAt)
+        #expect(LeadPlacementDisclosure.parenthetical(for: declaration, isOverride: false)
+            == "(declared: II, by kevin, 2026-08-24)")
+    }
+
+    @Test("Record-override declaration parenthetical says so")
+    func overrideParenthetical() {
+        let declaration = LeadPlacementDeclaration(
+            placement: "II", reviewer: "kevin", declaredAt: declaredAt)
+        #expect(LeadPlacementDisclosure.parenthetical(for: declaration, isOverride: true)
+            == "(declared: II — record override, by kevin, 2026-08-24)")
+    }
 }
 
 // MARK: - Designation write path
