@@ -93,6 +93,25 @@ struct LeadPlacementMapTests {
         #expect(overrideHit?.isOverride == true)
     }
 
+    /// #358: the property the X77/X78 unsaved-work guards' third disjunct
+    /// reads, and the property `reset()` (fired at every X86 teardown site —
+    /// discard, `.mur` open, folder adopt) must clear. The dialogs
+    /// themselves are XCUI territory and unrunnable here; this is the one
+    /// expression the disjunct evaluates.
+    @Test("Guard/teardown: declare flags unsaved; reset() clears and marks clean")
+    func guardAndTeardown() {
+        let map = LeadPlacementMapContext()
+        #expect(map.hasUnsavedDeclarations == false)
+
+        map.declare(recordedName: "MLII", placement: "II", recordID: nil,
+                    reviewer: "kevin", at: fixedDate)
+        #expect(map.hasUnsavedDeclarations == true)
+
+        map.reset()
+        #expect(map.isEmpty == true)
+        #expect(map.hasUnsavedDeclarations == false)
+    }
+
     @Test("Empty placement deletes; reset clears everything")
     func emptyDeletesAndReset() {
         let map = LeadPlacementMapContext()

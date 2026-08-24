@@ -22,6 +22,12 @@ public enum MurSessionPackage {
     static let provenanceFile = "provenance.json"
     static let sessionFile = "session.json"
     static let cacheDir = "cache"
+    /// #358 — the folder-wide lead placement map plus per-record overrides
+    /// (`LeadPlacementMapSnapshot`), written at the package root beside
+    /// `session.json`. Present only when the session has at least one
+    /// declaration — an undeclared session must write byte-identically to
+    /// a pre-#358 one, so this member is omitted rather than written empty.
+    static let leadMapFile = "lead_map.json"
 
     /// Holds one subtree per record, named by `recordingID` (X63-A).
     ///
@@ -93,6 +99,7 @@ public enum MurSessionPackage {
     public static func write(
         records payloads: [RecordPayload],
         collectionJSON: Data? = nil,
+        leadMapJSON: Data? = nil,
         passphrase: String? = nil,
         to packageURL: URL,
         now: Date = .now
@@ -116,6 +123,9 @@ public enum MurSessionPackage {
         ]
         if let collectionJSON {
             children[sessionFile] = FileWrapper(regularFileWithContents: collectionJSON)
+        }
+        if let leadMapJSON {
+            children[leadMapFile] = FileWrapper(regularFileWithContents: leadMapJSON)
         }
 
         let manifest = MurSessionManifest(
@@ -309,6 +319,10 @@ public enum MurSessionPackage {
         public let records: [RecordResult]
         /// Session-level state (`MurCollectionState`), opaque here.
         public let collectionJSON: Data?
+        /// #358 — the lead placement map (`LeadPlacementMapSnapshot`), opaque
+        /// here. `nil` on a session with no declarations or a pre-#358
+        /// package — both read the same as "nothing declared".
+        public let leadMapJSON: Data?
 
         /// The record to present first: whatever the analyst had active at
         /// save, else the first in order.
@@ -421,7 +435,8 @@ public enum MurSessionPackage {
         return ReadResult(
             manifest: manifest,
             records: results,
-            collectionJSON: children[sessionFile]?.regularFileContents
+            collectionJSON: children[sessionFile]?.regularFileContents,
+            leadMapJSON: children[leadMapFile]?.regularFileContents
         )
     }
 

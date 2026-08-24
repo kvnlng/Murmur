@@ -216,11 +216,11 @@ public struct ContentView: View {
             docCoordinator.reopenRecentRequest = nil
             Task { @MainActor in runGuardingUnsavedNotes { reopen(entry) } }
         }
-        // X78 — the open-side half of the unsaved-anchored-notes guard
-        // (#117). Same check and copy family as the X77 quit and
-        // record-switch guards, so the three warnings read as one behaviour.
+        // X78 — the open-side half of the unsaved-work guard (#117). Same
+        // check and copy family as the X77 quit and record-switch guards, so
+        // the three warnings read as one behaviour.
         .confirmationDialog(
-            "Open with unsaved anchored notes?",
+            "Open with unsaved analyst work?",
             isPresented: Binding(
                 get: { pendingGuardedOpen != nil },
                 set: { if !$0 { pendingGuardedOpen = nil } }
@@ -236,25 +236,31 @@ public struct ContentView: View {
                 // down every record's in-memory work, not just the open one.
                 CurrentRecordingContext.shared.liveSessionState.anchoredNotes = nil
                 CarriedSessionStore.shared.reset()
+                // #358: an open tears down the lead map too — it is scoped
+                // to the working set exactly like the carried notes above.
+                LeadPlacementMapContext.shared.reset()
                 pending.run()
             }
             Button("Cancel", role: .cancel) { pendingGuardedOpen = nil }
         } message: {
-            Text("Anchored notes save with the session — File ▸ Save Session (⌘S). Opening something else discards them, on every record in this session.")
+            Text("Anchored notes and lead placement declarations save with the session — File ▸ Save Session (⌘S). Opening something else discards them, on every record in this session.")
         }
     }
 
     /// X78 — run `action` now, or park it behind the confirmation when the
-    /// open would tear down unsaved anchored notes. One guard at the choke
+    /// open would tear down unsaved analyst work. One guard at the choke
     /// point rather than one per entry path: Finder opens, Open Record… /
     /// Open Session… / Import CSV…, Open Recent, and the toolbar Open
     /// button's folder pick all pass through here.
     ///
     /// X86: "unsaved" now means the whole working set — the open record OR
     /// any record parked in `CarriedSessionStore` with unsaved notes.
+    /// #358 adds the lead placement map, whose declarations are scoped to
+    /// the working set rather than to any one record.
     private func runGuardingUnsavedNotes(_ action: @escaping () -> Void) {
         if CurrentRecordingContext.shared.hasUnsavedAnchoredNotes
-            || !CarriedSessionStore.shared.unsavedRecordIDs.isEmpty {
+            || !CarriedSessionStore.shared.unsavedRecordIDs.isEmpty
+            || LeadPlacementMapContext.shared.hasUnsavedDeclarations {
             pendingGuardedOpen = PendingOpen(run: action)
         } else {
             action()
@@ -400,6 +406,23 @@ public struct ContentView: View {
             // the X78 guard already adjudicated it before this open ran.
             SessionFlagStore.shared.reset()
             CarriedSessionStore.shared.reset()
+            // #358: same reasoning — the previous folder/session's lead
+            // placement map does not belong to this one, whatever this
+            // package restores below.
+            LeadPlacementMapContext.shared.reset()
+            if let leadMapData = result.leadMapJSON {
+                let decoder = JSONDecoder()
+                decoder.dateDecodingStrategy = .iso8601
+                if let snapshot = try? decoder.decode(LeadPlacementMapSnapshot.self, from: leadMapData) {
+                    LeadPlacementMapContext.shared.restore(snapshot)
+                }
+            }
+            // `restore(_:)` deliberately does not mark itself saved — it just
+            // replaced the live state, and this package's declarations ARE
+            // that reset's own saved baseline (or the reset's clean state,
+            // if the package carried none), so the open must not read back
+            // as instantly dirty.
+            LeadPlacementMapContext.shared.markSaved()
             for record in plan.records {
                 SessionFlagStore.shared.register(
                     FlaggedRecord(id: record.id, recording: record.recording, directory: record.directory)
@@ -940,6 +963,10 @@ public struct ContentView: View {
         // is a different working set.
         SessionFlagStore.shared.reset()
         CarriedSessionStore.shared.reset()
+        // #358: the lead placement map is scoped to the working set too —
+        // a new folder open starts with a clean map, same as the flags and
+        // carried notes above.
+        LeadPlacementMapContext.shared.reset()
         sessionStates = [:]
         sessionProvenances = [:]
         // Which metadata keys the subtitle may omit is a property of THIS
