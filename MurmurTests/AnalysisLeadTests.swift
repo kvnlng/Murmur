@@ -821,8 +821,15 @@ struct AnalysisLeadNoNameGateTests {
 
     @Test("No calculation path selects a channel by name or channels.first (#357)")
     func noNameGatesInCalculationPaths() throws {
+        // "LeadPlacementMap" is #358's jurisdiction, enforced by the same
+        // mechanism: a placement declaration feeds disclosure and preset
+        // resolution only. An orchestrator that reads the map has given a
+        // calculation a placement dependence — which is exactly the thing
+        // §2.3 forbids, and the thing that would make a declaration recompute
+        // an analysis.
         let banned = ["conventionalQTChannels", "primaryECGSamples(",
-                      "channels.first", "hasPrefix(\"ML\")"]
+                      "channels.first", "hasPrefix(\"ML\")",
+                      "LeadPlacementMap"]
         var filesChecked = 0
         for file in calculationSources {
             let text = try String(contentsOf: file, encoding: .utf8)

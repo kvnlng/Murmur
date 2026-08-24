@@ -571,4 +571,99 @@ struct LeadPlacementMapTests {
         #expect(strippingDeclaredParenthetical(mdAfter1) == mdBefore1)
         #expect(strippingDeclaredParenthetical(mdAfter2) == mdBefore2)
     }
+
+    // MARK: - #358 review wave: accessor, normalisation, caliper card
+
+    /// `declaredPlacements(forRecordID:)` is what `LeadPreset.resolve` is
+    /// handed, so its merge precedence is load-bearing for preset
+    /// resolution — pinned directly rather than only through the preset hook.
+    @Test("declaredPlacements merges folder + overrides, override shadowing; nil id is folder-only")
+    func declaredPlacementsMergesOverridesOverFolder() {
+        let map = LeadPlacementMapContext()
+        map.declare(recordedName: "MLII", placement: "II", recordID: nil,
+                    reviewer: "kevin", at: fixedDate)
+        map.declare(recordedName: "V1", placement: "V1", recordID: nil,
+                    reviewer: "kevin", at: fixedDate)
+        map.declare(recordedName: "MLII", placement: "front patch", recordID: "100.hea",
+                    reviewer: "kevin", at: fixedDate)
+        map.declare(recordedName: "V5", placement: "V5", recordID: "100.hea",
+                    reviewer: "kevin", at: fixedDate)
+
+        // Keys are the normalised recorded names, values the placement text.
+        let onRecord = map.declaredPlacements(forRecordID: "100.hea")
+        #expect(onRecord["mlii"] == "front patch")   // override shadows folder
+        #expect(onRecord["v1"] == "V1")              // folder baseline survives
+        #expect(onRecord["v5"] == "V5")              // override-only name is present
+        #expect(onRecord.count == 3)
+
+        // A record with no overrides sees the folder baseline unchanged.
+        let otherRecord = map.declaredPlacements(forRecordID: "101.hea")
+        #expect(otherRecord == ["mlii": "II", "v1": "V1"])
+
+        // `nil` is the folder-wide question: no override may leak into it.
+        let folderOnly = map.declaredPlacements(forRecordID: nil)
+        #expect(folderOnly == ["mlii": "II", "v1": "V1"])
+    }
+
+    @Test("Interior whitespace in a placement collapses to single spaces")
+    func placementInteriorWhitespaceCollapses() {
+        let map = LeadPlacementMapContext()
+        map.declare(recordedName: "MLII", placement: "  front\n\tchest   patch \n", recordID: nil,
+                    reviewer: "kevin", at: fixedDate)
+        #expect(map.declaration(forRecordedName: "MLII", recordID: nil)?.declaration.placement
+                == "front chest patch")
+    }
+
+    private func templateOnLead(_ lead: String?) -> MarkingsTemplate {
+        MarkingsTemplate(
+            sampleCount: 214,
+            medianPRMs: nil, iqrPRMs: nil,
+            medianQRSMs: nil, iqrQRSMs: nil,
+            medianQTMs: nil, iqrQTMs: nil,
+            qtcFormulaName: "Fridericia",
+            medianQTcMs: 410, iqrQTcMs: 12,
+            sourceLead: lead
+        )
+    }
+
+    /// The caliper card's provenance footer, through the SAME entry point
+    /// the view renders through (`templateProvenanceText(_:sampleRate:
+    /// placementMap:recordID:)`) — so declaring MLII → II reaches the QT
+    /// surface, which is the whole point of §2.3.
+    @Test("Caliper footer: a declared II retires the QT clause and states the assertion")
+    func caliperFooterHonoursDeclaration() {
+        let clause = "not a conventional QT lead (II/V5)"
+        let map = LeadPlacementMapContext()
+        let template = templateOnLead("MLII")
+
+        // Undeclared: #357's behaviour, unchanged.
+        let before = BeatCalipers.templateProvenanceText(
+            template, sampleRate: 360, placementMap: map, recordID: "100.hea")
+        #expect(before.contains("lead MLII — \(clause)"))
+        #expect(!before.contains("declared:"))
+
+        // Declared as II: the clause goes, the assertion is stated inline.
+        map.declare(recordedName: "MLII", placement: "II", recordID: nil,
+                    reviewer: "kevin", at: fixedDate)
+        let declaredII = BeatCalipers.templateProvenanceText(
+            template, sampleRate: 360, placementMap: map, recordID: "100.hea")
+        #expect(!declaredII.contains(clause))
+        #expect(declaredII.contains(
+            "lead MLII (declared: II, by kevin, \(AnalysisLeadHeaderLine.dateString(fixedDate)))"))
+
+        // A declared but non-conventional placement keeps the clause AND
+        // discloses the assertion — and a record override says so.
+        map.declare(recordedName: "MLII", placement: "front patch", recordID: "100.hea",
+                    reviewer: "kevin", at: fixedDate)
+        let declaredPatch = BeatCalipers.templateProvenanceText(
+            template, sampleRate: 360, placementMap: map, recordID: "100.hea")
+        #expect(declaredPatch.contains(clause))
+        #expect(declaredPatch.contains("(declared: front patch — record override, by kevin, "))
+
+        // The override is scoped: another record still reads the II baseline.
+        let elsewhere = BeatCalipers.templateProvenanceText(
+            template, sampleRate: 360, placementMap: map, recordID: "101.hea")
+        #expect(!elsewhere.contains(clause))
+        #expect(elsewhere.contains("(declared: II, by kevin, "))
+    }
 }

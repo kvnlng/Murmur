@@ -629,6 +629,20 @@ public enum IntervalTrendComputer {
         // the T offset, not for PR or QRS width. So only the QT-bearing
         // metric carries the clause, and it comes from `QTLeadDisclosure`
         // rather than a second spelling of the sentence.
+        //
+        // #358 ruling — NO `declaredPlacement:` argument here, deliberately.
+        // Compute-cached citation captions stay declaration-free by design:
+        // this string is composed in the COMPUTE path, memoised by
+        // `IntervalTrendComputeMemo` and copied verbatim into citation
+        // payloads, and the jurisdiction bars giving an orchestrator a
+        // placement dependence (nothing may recompute when a declaration
+        // changes). Nor can it be decorated at render time: `IntervalTrendLane`
+        // receives only the finished `IntervalTrendData` — no raw source-lead
+        // name, no record id — so threading either would reach back through
+        // the memo key into compute. The declaration-aware disclosure lives on
+        // the render-time surfaces instead (the analysis-lead header line, the
+        // beat-caliper provenance footer, the Markdown export). See the
+        // plan-358 ledger.
         let citedLead = sourceLead.map {
             metric == .qtc ? QTLeadDisclosure.citedLeadName(for: $0) : $0
         }

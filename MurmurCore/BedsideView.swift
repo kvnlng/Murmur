@@ -2499,7 +2499,11 @@ struct BedsideView: View {
                 qtWithheldReason: markingsContext.qtWithheldReason,
                 placeholderNote: markingsContext.beats.isEmpty
                     ? "No beats in this record"
-                    : "Hover the trace to focus a beat"
+                    : "Hover the trace to focus a beat",
+                // #358: the same id every other placement surface in this
+                // view asks under (see `declaredPlacement(forChannelNamed:)`)
+                // — the navigator's id, not `recording.sourceFileName`.
+                recordID: recordID
             )
             pinFooter(showing: focused?.rPeakSampleIndex)
         }

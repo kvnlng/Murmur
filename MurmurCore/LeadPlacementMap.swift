@@ -135,7 +135,11 @@ public final class LeadPlacementMapContext {
         reviewer: String = ProcessInfo.processInfo.userName,
         at date: Date = Date()
     ) {
-        let trimmedPlacement = placement.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Ends trimmed AND interior whitespace runs collapsed to single
+        // spaces: the placement text is quoted inline in the disclosure
+        // parenthetical ("(declared: …)"), on a single line, so a pasted
+        // newline or a double space would break the sentence it lands in.
+        let trimmedPlacement = placement.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         guard !trimmedPlacement.isEmpty else {
             deleteDeclaration(recordedName: recordedName, recordID: recordID)
             return
@@ -226,8 +230,12 @@ public final class LeadPlacementMapContext {
     }
 
     /// The `LeadPreset.matchKey` discipline: trimmed, lowercased, so
-    /// lookups are exact but case/whitespace-insensitive.
+    /// lookups are exact but case/whitespace-insensitive. Delegates rather
+    /// than restating it — `LeadPreset.resolve(in:declaredPlacements:)`
+    /// matches its preset leads against keys THIS type produced, so the two
+    /// normalisations agreeing is a correctness requirement of the preset
+    /// hook, not a coincidence two copies could drift out of.
     static func matchKey(_ name: String) -> String {
-        name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        LeadPreset.matchKey(name)
     }
 }
