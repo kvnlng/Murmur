@@ -143,6 +143,38 @@ struct AnalysisLeadTests {
         #expect(resolution?.channel.sampleCount == 3600)   // the first MLII
     }
 
+    @Test("An empty leading channel is not a candidate — first-in-file skips to the populated one")
+    func emptyLeadingChannelSkippedForFirstInFile() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let recording = makeRecording(channels: [
+            channel("MLII", sampleCount: 0, storageFileName: "channel_MLII.bin"),
+            channel("V5", sampleCount: 3600, storageFileName: "channel_V5.bin"),
+        ])
+        let resolution = recording.analysisLead(inBundle: dir)
+        #expect(resolution?.channel.name == "V5")
+        #expect(resolution?.provenance == .firstInFile)
+        #expect(resolution?.staleDesignation == nil)
+    }
+
+    @Test("A designation naming an empty channel falls through exactly like a missing name")
+    func designationNamingEmptyChannelFallsThrough() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let recording = makeRecording(channels: [
+            channel("MLII", sampleCount: 0, storageFileName: "channel_MLII.bin"),
+            channel("V5", sampleCount: 3600, storageFileName: "channel_V5.bin"),
+        ])
+        try AnalysisLeadFile(
+            defaultChoice: nil,
+            designation: .init(channelName: "MLII", reviewer: "kevin", designatedAt: .now)
+        ).write(to: dir)
+        let resolution = recording.analysisLead(inBundle: dir)
+        #expect(resolution?.channel.name == "V5")
+        #expect(resolution?.provenance == .firstInFile)
+        #expect(resolution?.staleDesignation == "MLII")
+    }
+
     @Test("Registry registers, serves, and clears a scorer")
     func registryLifecycle() {
         struct Fake: AnalysisLeadScorer {

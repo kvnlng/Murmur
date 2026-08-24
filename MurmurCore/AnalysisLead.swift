@@ -166,10 +166,16 @@ extension Recording {
 
     /// The channel calculations run on. Resolution order: designation →
     /// stored default → first-in-file; a stored name that no longer
-    /// resolves is skipped (and, for designations, disclosed). Nil only
-    /// when the recording has no ECG channel at all.
+    /// resolves — including one naming a now-empty channel — is skipped
+    /// (and, for designations, disclosed). Nil only when the recording has
+    /// no POPULATED ECG channel — an empty channel is never a candidate.
     public func analysisLead(inBundle directory: URL) -> AnalysisLeadResolution? {
-        let ecg = channels.filter { !$0.isTrendChannel }
+        // An empty channel is not analyzable — `samples(of:inDirectory:)`
+        // would return `[]`, not nil, so an unfiltered candidate set lets
+        // a zero-sample channel win a branch and silently starve the scan.
+        // Same filter as `ecgLeadSamples(inDirectory:)` and the import-time
+        // default stamp: only a channel with data is a candidate lead.
+        let ecg = channels.filter { !$0.isTrendChannel && $0.sampleCount > 0 }
         guard !ecg.isEmpty else { return nil }
         // First match by name — X96's duplicate rule.
         func channel(named name: String) -> Channel? {
@@ -202,7 +208,10 @@ extension Recording {
             )
         }
 
-        guard let first = primaryECGChannel else { return nil }
+        // First non-trend channel WITH SAMPLES — `ecg` is already filtered,
+        // so this is never `primaryECGChannel` (which admits an empty
+        // leading channel); `ecg` is non-empty per the guard above.
+        let first = ecg[0]
         return AnalysisLeadResolution(
             channel: first, provenance: .firstInFile, staleDesignation: stale
         )
