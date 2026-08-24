@@ -570,6 +570,7 @@ struct BedsideView: View {
             LeadChipBar(
                 channels: ecgChannels,
                 layoutMode: $layoutMode,
+                recordID: recordID,
                 recordDurationSeconds: totalDurationSeconds,
                 viewportDurationSeconds: viewport.durationSeconds,
                 onSelectZoom: applyZoomLadderStep

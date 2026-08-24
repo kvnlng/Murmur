@@ -28,6 +28,16 @@
 //  silently would let the analyst believe they are looking at six leads.
 //  `resolve(in:)` returns both halves so the caller can do exactly that.
 //
+//  ## No aliasing — except what the analyst declared (#358)
+//
+//  Beyond case/whitespace, `resolve(in:)` does not guess that one recorded
+//  name means another: WFDB sources do not agree on a closed set of lead
+//  names, and a bundled table mapping one spelling to another would be
+//  Murmur asserting an equivalence the record never stated. The one
+//  exception is `declaredPlacements` — an analyst's own placement
+//  declaration, passed in by the caller from `LeadPlacementMapContext`,
+//  never a table Murmur ships. See `resolve(in:declaredPlacements:)`.
+//
 
 import Foundation
 
@@ -98,29 +108,53 @@ public struct LeadPreset: Codable, Equatable, Identifiable, Sendable {
     /// preset written `V1`. Beyond case there is no normalisation and no
     /// aliasing: WFDB sources do not agree on a closed set of lead names, and
     /// a table mapping one spelling to another would be Murmur asserting an
-    /// equivalence the record never stated.
+    /// equivalence the record never stated. The one sanctioned exception is
+    /// `declaredPlacements` (#358): an analyst-declared placement, passed in
+    /// by the caller — never a bundled table — lets a preset lead also match
+    /// a channel whose RECORDED name doesn't say what it means but whose
+    /// declared placement does (`MLII` declared `II` satisfies a `Limb`
+    /// preset's `II`). Matching is the same `matchKey` equality either way:
+    /// `V5, back patch` does not match `V5`.
+    ///
+    /// A recorded-name match always wins over a declaration for the same
+    /// lead, and within each kind of match the first channel wins — a record
+    /// with two channels named `II` stages the first, the same rule the
+    /// session restore uses.
     ///
     /// Returns nil when NOTHING matches — there is no zero-lead focus mode,
     /// and a caller that got a selection back should be able to stage it.
-    public func resolve(in channels: [Channel]) -> Resolution? {
+    public func resolve(
+        in channels: [Channel],
+        declaredPlacements: [String: String]? = nil
+    ) -> Resolution? {
         guard !isEveryLead else {
             // Record order, which is the order the channels arrived in.
             guard let selection = LeadSelection(ordered: channels.map(\.id)) else { return nil }
             return Resolution(selection: selection, missing: [])
         }
 
-        var idsByKey: [String: Channel.ID] = [:]
+        var idsByRecordedKey: [String: Channel.ID] = [:]
+        var idsByDeclaredKey: [String: Channel.ID] = [:]
         for channel in channels {
+            let recordedKey = Self.matchKey(channel.name)
             // First wins: a record with two channels named `II` stages the
             // first, the same rule the session restore uses.
-            idsByKey[Self.matchKey(channel.name)] = idsByKey[Self.matchKey(channel.name)]
-                ?? channel.id
+            idsByRecordedKey[recordedKey] = idsByRecordedKey[recordedKey] ?? channel.id
+
+            if let placement = declaredPlacements?[recordedKey] {
+                let declaredKey = Self.matchKey(placement)
+                idsByDeclaredKey[declaredKey] = idsByDeclaredKey[declaredKey] ?? channel.id
+            }
         }
 
         var ids: [Channel.ID] = []
         var missing: [String] = []
         for lead in leads {
-            if let id = idsByKey[Self.matchKey(lead)] {
+            let leadKey = Self.matchKey(lead)
+            // Recorded-name match wins ties over a declaration for the same
+            // lead — checked first, so a declared alias never displaces a
+            // channel that already carries the name outright.
+            if let id = idsByRecordedKey[leadKey] ?? idsByDeclaredKey[leadKey] {
                 ids.append(id)
             } else {
                 missing.append(lead)

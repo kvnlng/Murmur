@@ -106,6 +106,69 @@ struct LeadPresetResolutionTests {
     }
 }
 
+@Suite("Lead presets (#358) — resolving against analyst-declared placements")
+struct LeadPresetDeclaredPlacementResolutionTests {
+    private func channel(_ name: String) -> Channel {
+        Channel(
+            id: UUID(), name: name, unit: "mV", sampleRate: 500,
+            startTimeUnixMS: 0, sampleCount: 5000,
+            storageFileName: "\(name).bin", pyramid: []
+        )
+    }
+
+    private func names(_ selection: LeadSelection, in channels: [Channel]) -> [String] {
+        let byID = Dictionary(uniqueKeysWithValues: channels.map { ($0.id, $0.name) })
+        return selection.ordered.compactMap { byID[$0] }
+    }
+
+    @Test("A declared placement lets a preset lead match a channel whose recorded name doesn't say it")
+    func declaredPlacementResolvesAPresetLead() throws {
+        // MLII names no limb lead by itself — Holter convention, not a
+        // recorded `II` — so only the analyst's declaration bridges it.
+        let channels = [channel("MLII")]
+        let resolution = try #require(
+            LeadPreset.limb.resolve(in: channels, declaredPlacements: ["mlii": "II"])
+        )
+
+        #expect(names(resolution.selection, in: channels) == ["MLII"])
+        #expect(resolution.selection.count == 1)
+        #expect(resolution.missing == ["I", "III", "aVR", "aVL", "aVF"])
+    }
+
+    @Test("With no declaration, resolution is exactly as it was before #358")
+    func noDeclarationResolvesAsBefore() {
+        let channels = [channel("MLII")]
+        #expect(LeadPreset.limb.resolve(in: channels, declaredPlacements: nil) == nil)
+        #expect(LeadPreset.limb.resolve(in: channels) == nil)
+    }
+
+    @Test("A declared placement match is exact — `V5, back patch` does not match `V5`")
+    func declaredPlacementMatchIsExactNotSubstring() {
+        let channels = [channel("CH1")]
+        let resolution = LeadPreset.precordial.resolve(
+            in: channels, declaredPlacements: ["ch1": "V5, back patch"]
+        )
+        #expect(resolution == nil)
+    }
+
+    @Test("A recorded-name match beats a conflicting declaration for the same lead")
+    func recordedNameMatchBeatsDeclaration() throws {
+        // Both a channel actually named `II` AND a declaration claiming
+        // `MLII` also means `II` — the recorded name must win, not the
+        // declared alias, and MLII must not steal `II`'s slot either.
+        let recordedII = channel("II")
+        let declaredMLII = channel("MLII")
+        let channels = [recordedII, declaredMLII]
+        let resolution = try #require(
+            LeadPreset.bipolarLimb.resolve(in: channels, declaredPlacements: ["mlii": "II"])
+        )
+
+        #expect(resolution.selection.contains(recordedII.id))
+        #expect(!resolution.selection.contains(declaredMLII.id))
+        #expect(resolution.missing == ["I", "III"])
+    }
+}
+
 @Suite("Lead presets (#332) — the store")
 struct LeadPresetStoreTests {
     /// Its own defaults suite: a test must never write into the analyst's

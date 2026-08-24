@@ -165,6 +165,22 @@ public final class LeadPlacementMapContext {
         }
     }
 
+    /// The folder baseline overlaid by `recordID`'s overrides, as normalised
+    /// recorded-name key (`matchKey`) → placement text — what
+    /// `LeadPreset.resolve(in:declaredPlacements:)` matches preset leads
+    /// against. Same precedence as `declaration(forRecordedName:recordID:)`:
+    /// an override wins over the folder-wide baseline for any name declared
+    /// in both. `recordID == nil` returns just the folder-wide baseline.
+    public func declaredPlacements(forRecordID recordID: String?) -> [String: String] {
+        var merged = folder.mapValues(\.placement)
+        if let recordID, let overrides = recordOverrides[recordID] {
+            for (key, declaration) in overrides {
+                merged[key] = declaration.placement
+            }
+        }
+        return merged
+    }
+
     /// The current state, in the shape Task 3's persistence layer writes.
     public var snapshot: LeadPlacementMapSnapshot {
         LeadPlacementMapSnapshot(folder: folder, recordOverrides: recordOverrides)
