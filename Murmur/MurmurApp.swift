@@ -121,7 +121,17 @@ struct MurmurApp: App {
     }
 
     var body: some Scene {
-        WindowGroup {
+        // #352 — a single `Window`, not a `WindowGroup`. A WindowGroup opens a
+        // SECOND window for an external open event (Dock drop, `open -a`, a
+        // launch document) and offers File ▸ New Window. Two windows mean two
+        // NSToolbars sharing `murmur.main.toolbar`, which NSToolbar treats as
+        // one family and mirrors item changes across — and the moment a folder
+        // open flips only one window's shell, the item sets diverge and the
+        // mirrored insert crashes on `index <= [_currentItems count]`. The app
+        // is single-window by design (12a's one frame; CurrentRecordingContext
+        // and the session stores are singletons a second window would fight
+        // over), so the honest scene type is the one that can't multiply.
+        Window("Murmur", id: "main") {
             ContentView()
                 .frame(minWidth: minimums.width, minHeight: minimums.height)
                 // Invisible orchestrator: watches CurrentRecordingContext +
