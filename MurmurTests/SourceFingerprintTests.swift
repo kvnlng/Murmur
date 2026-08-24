@@ -95,6 +95,24 @@ struct SourceFingerprintTests {
         defer { try? FileManager.default.removeItem(at: bundleDir) }
         #expect(SourceFingerprint.read(from: bundleDir) == nil)
     }
+
+    @Test("Equal fingerprints digest equally; different ones don't (#341)")
+    func stableDigestTracksEquality() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let hea = try writeFixture(in: dir)
+        let a = try SourceFingerprint.compute(heaURL: hea)
+        let b = try SourceFingerprint.compute(heaURL: hea)
+        #expect(a.stableDigest == b.stableDigest)
+        #expect(a.stableDigest.count == 64)   // SHA-256 hex — a valid filename
+        // A changed source digests differently.
+        let datURL = dir.appendingPathComponent("rec.dat")
+        var data = try Data(contentsOf: datURL)
+        data.append(0)
+        try data.write(to: datURL)
+        let c = try SourceFingerprint.compute(heaURL: hea)
+        #expect(a.stableDigest != c.stableDigest)
+    }
 }
 
 @Suite("RecordingStore — bundle reuse on re-import")
@@ -179,5 +197,114 @@ struct RecordingStoreReuseTests {
         let second = try await store.importWFDB(folderURL: source, heaFilename: "rec.hea")
 
         #expect(second.directory != first.directory)
+    }
+
+    // MARK: - Fingerprint index (#341)
+
+    private func indexDir(in root: URL) -> URL {
+        root.appendingPathComponent(".fingerprints", isDirectory: true)
+    }
+
+    @Test("A fresh import writes an index entry; a second import serves through it")
+    func freshImportIndexesAndSecondImportHits() async throws {
+        let (store, root) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = FileManager.default.temporaryDirectory
+            .appendingPathComponent("reuse-src-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: source) }
+        try writeSource(in: source)
+
+        let first = try await store.importWFDB(folderURL: source, heaFilename: "rec.hea")
+
+        let fingerprint = try SourceFingerprint.compute(
+            heaURL: source.appendingPathComponent("rec.hea"))
+        let entryURL = indexDir(in: root).appendingPathComponent(fingerprint.stableDigest)
+        let entry = try String(contentsOf: entryURL, encoding: .utf8)
+        #expect(entry == first.directory.lastPathComponent)
+
+        let second = try await store.importWFDB(folderURL: source, heaFilename: "rec.hea")
+        #expect(second.directory == first.directory)
+        #expect(second.recording.id == first.recording.id)
+    }
+
+    @Test("Reuse survives the index being deleted — migration rebuilds it")
+    func reuseSurvivesIndexDeletion() async throws {
+        let (store, root) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = FileManager.default.temporaryDirectory
+            .appendingPathComponent("reuse-src-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: source) }
+        try writeSource(in: source)
+
+        let first = try await store.importWFDB(folderURL: source, heaFilename: "rec.hea")
+        // The pre-index-store case: bundles exist, no index at all.
+        try FileManager.default.removeItem(at: indexDir(in: root))
+
+        let second = try await store.importWFDB(folderURL: source, heaFilename: "rec.hea")
+        #expect(second.directory == first.directory,
+                "the index is a cache — its absence must cost a scan, never the reuse")
+        // The migration pass rebuilt the entry and the complete marker.
+        let fingerprint = try SourceFingerprint.compute(
+            heaURL: source.appendingPathComponent("rec.hea"))
+        #expect(FileManager.default.fileExists(
+            atPath: indexDir(in: root).appendingPathComponent(fingerprint.stableDigest).path))
+        #expect(FileManager.default.fileExists(
+            atPath: indexDir(in: root).appendingPathComponent("complete").path))
+    }
+
+    @Test("A stale index entry falls back to the scan and recovers the real bundle")
+    func staleEntryFallsBackToScan() async throws {
+        let (store, root) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = FileManager.default.temporaryDirectory
+            .appendingPathComponent("reuse-src-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: source) }
+        try writeSource(in: source)
+
+        let first = try await store.importWFDB(folderURL: source, heaFilename: "rec.hea")
+        // Corrupt the entry to point at a bundle that doesn't exist.
+        let fingerprint = try SourceFingerprint.compute(
+            heaURL: source.appendingPathComponent("rec.hea"))
+        let entryURL = indexDir(in: root).appendingPathComponent(fingerprint.stableDigest)
+        try Data("no-such-bundle".utf8).write(to: entryURL, options: .atomic)
+
+        let second = try await store.importWFDB(folderURL: source, heaFilename: "rec.hea")
+        #expect(second.directory == first.directory,
+                "a stale entry must degrade to the linear scan, not to a duplicate import")
+        // And the fallback repaired the entry.
+        let repaired = try String(contentsOf: entryURL, encoding: .utf8)
+        #expect(repaired == first.directory.lastPathComponent)
+    }
+
+    @Test("A gutted bundle is refused even when the index entry matches")
+    func guttedBundleRefusedDespiteIndexEntry() async throws {
+        let (store, root) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = FileManager.default.temporaryDirectory
+            .appendingPathComponent("reuse-src-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: source) }
+        try writeSource(in: source)
+
+        let first = try await store.importWFDB(folderURL: source, heaFilename: "rec.hea")
+        // The invariant from the pre-index code's comment: a fingerprint file
+        // that outlives recording.json must not be served — no matter that
+        // the index entry is present and points straight at it.
+        let fingerprint = try SourceFingerprint.compute(
+            heaURL: source.appendingPathComponent("rec.hea"))
+        let entryURL = indexDir(in: root).appendingPathComponent(fingerprint.stableDigest)
+        #expect(FileManager.default.fileExists(atPath: entryURL.path))
+        try FileManager.default.removeItem(
+            at: first.directory.appendingPathComponent("recording.json"))
+
+        let second = try await store.importWFDB(folderURL: source, heaFilename: "rec.hea")
+        #expect(second.directory != first.directory)
+        #expect(FileManager.default.fileExists(
+            atPath: first.directory.appendingPathComponent(
+                SourceFingerprint.bundleFileName).path),
+            "precondition: the gutted bundle still carries its fingerprint")
     }
 }

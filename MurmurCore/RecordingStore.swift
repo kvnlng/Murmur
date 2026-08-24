@@ -107,23 +107,79 @@ final class RecordingStore {
             )
             // Stamp AFTER the import succeeds — a bundle only becomes
             // reusable once it is known complete. Failure to stamp is not
-            // failure to import; the bundle simply won't be reused.
+            // failure to import; the bundle simply won't be reused. The
+            // index entry rides with the stamp (#341): entry and fingerprint
+            // stay in step because they are written from the same value at
+            // the same moment.
             if let fingerprint = try? SourceFingerprint.compute(heaURL: heaURL) {
                 try? fingerprint.write(to: summary.directory)
+                Self.writeIndexEntry(for: fingerprint, bundleName: summary.directory.lastPathComponent, in: outputDir)
             }
             return summary
         }.value
     }
 
-    /// Scan `root` for a bundle stamped with `fingerprint` whose manifest
-    /// still loads. `nonisolated` — runs inside the detached import task.
+    /// Find a bundle stamped with `fingerprint` whose manifest still loads.
+    /// `nonisolated` — runs inside the detached import task.
     ///
-    /// The scan reads one small JSON per bundle; against the observed
-    /// worst-case population (~1,000 bundles) that is milliseconds, and it
-    /// buys out a multi-minute decode. The manifest re-load is the
-    /// gutted-bundle guard: a fingerprint file that outlived its
-    /// recording.json must not be served.
+    /// #341: the linear bundle scan this used to be was sized against ~1,000
+    /// bundles (milliseconds); a corpus navigator (#329) grows the population
+    /// to tens of thousands, where the measured per-click cost is ~550 ms at
+    /// 20k and ~1.3 s at 45k — paid on EVERY import, and in full whenever the
+    /// record is a fresh one. Lookups now go through a fingerprint index:
+    /// one tiny file per fingerprint digest under `.fingerprints/`, O(1)
+    /// regardless of population.
+    ///
+    /// The index stays a CACHE, never a source of truth:
+    ///   - every hit is validated by re-reading the named bundle's own
+    ///     fingerprint file AND re-loading its manifest — the existing
+    ///     gutted-bundle guard (a fingerprint that outlived its
+    ///     recording.json must not be served, whatever an index says);
+    ///   - a stale entry is deleted and the lookup falls back to the full
+    ///     linear scan, which re-indexes anything it finds;
+    ///   - a store from before the index existed is migrated by one linear
+    ///     pass (the same cost as a single pre-#341 click), after which the
+    ///     `complete` marker lets a definite miss return without scanning.
+    /// Any failure anywhere on this path falls through to a fresh import —
+    /// reuse remains an optimisation, never a correctness gate.
     private nonisolated static func reusableSummary(
+        matching fingerprint: SourceFingerprint,
+        in root: URL
+    ) -> ImportSummary? {
+        let indexDir = indexDirectory(in: root)
+        let digest = fingerprint.stableDigest
+        guard !digest.isEmpty else { return linearScan(matching: fingerprint, in: root) }
+
+        let marker = indexDir.appendingPathComponent(indexCompleteMarker)
+        guard FileManager.default.fileExists(atPath: marker.path) else {
+            // Pre-index store (or an interrupted migration): one linear pass
+            // builds the whole index, answering this click along the way.
+            return migrateIndexAndScan(matching: fingerprint, digest: digest, in: root)
+        }
+
+        let entryURL = indexDir.appendingPathComponent(digest)
+        guard let bundleName = try? String(contentsOf: entryURL, encoding: .utf8) else {
+            // No entry in a complete index: genuinely new source. This is the
+            // corpus-browsing common case, and the whole point — no scan.
+            return nil
+        }
+        if let summary = validatedSummary(bundleName: bundleName, matching: fingerprint, in: root) {
+            return summary
+        }
+        // Stale entry (bundle deleted, gutted, or re-stamped): drop it and
+        // fall back to the scan, which re-indexes a live match if one exists.
+        try? FileManager.default.removeItem(at: entryURL)
+        if let rescued = linearScan(matching: fingerprint, in: root) {
+            writeIndexEntry(for: fingerprint, bundleName: rescued.directory.lastPathComponent, in: root)
+            return rescued
+        }
+        return nil
+    }
+
+    /// The pre-#341 behaviour, verbatim: read every bundle's fingerprint
+    /// until one matches and its manifest loads. Kept as the fallback every
+    /// index miss-trust failure degrades to.
+    private nonisolated static func linearScan(
         matching fingerprint: SourceFingerprint,
         in root: URL
     ) -> ImportSummary? {
@@ -148,6 +204,87 @@ final class RecordingStore {
             )
         }
         return nil
+    }
+
+    /// One pass over the bundles that both answers `fingerprint` and writes
+    /// an index entry for every stamped bundle it walks, finishing with the
+    /// `complete` marker. Interruption is safe: without the marker the next
+    /// import simply migrates again, and entry writes are idempotent.
+    private nonisolated static func migrateIndexAndScan(
+        matching fingerprint: SourceFingerprint,
+        digest: String,
+        in root: URL
+    ) -> ImportSummary? {
+        let fm = FileManager.default
+        let indexDir = indexDirectory(in: root)
+        try? fm.createDirectory(at: indexDir, withIntermediateDirectories: true)
+        guard let children = try? fm.contentsOfDirectory(
+            at: root, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+        ) else { return nil }
+
+        var match: ImportSummary?
+        for child in children {
+            let bundleDir = root.appendingPathComponent(child.lastPathComponent, isDirectory: true)
+            guard let stamped = SourceFingerprint.read(from: bundleDir) else { continue }
+            writeIndexEntry(for: stamped, bundleName: bundleDir.lastPathComponent, in: root)
+            // Validate in-loop, exactly like the linear scan: a gutted match
+            // is skipped and a later intact duplicate can still serve.
+            if match == nil, stamped == fingerprint,
+               let recording = try? Self.loadManifestForReuse(at: bundleDir) {
+                match = ImportSummary(
+                    recording: recording,
+                    directory: bundleDir,
+                    signalsImported: recording.channels.count,
+                    totalSamples: recording.channels.reduce(0) { $0 + $1.sampleCount }
+                )
+            }
+        }
+        try? Data().write(to: indexDir.appendingPathComponent(indexCompleteMarker))
+        return match
+    }
+
+    /// The full index-hit validation: the named bundle must still carry an
+    /// EQUAL fingerprint (the digest is only a filename; equality is the
+    /// contract) and its manifest must still load (the gutted-bundle guard).
+    private nonisolated static func validatedSummary(
+        bundleName: String,
+        matching fingerprint: SourceFingerprint,
+        in root: URL
+    ) -> ImportSummary? {
+        let bundleDir = root.appendingPathComponent(bundleName, isDirectory: true)
+        guard SourceFingerprint.read(from: bundleDir) == fingerprint,
+              let recording = try? Self.loadManifestForReuse(at: bundleDir) else { return nil }
+        return ImportSummary(
+            recording: recording,
+            directory: bundleDir,
+            signalsImported: recording.channels.count,
+            totalSamples: recording.channels.reduce(0) { $0 + $1.sampleCount }
+        )
+    }
+
+    /// `.fingerprints/` under the store root — hidden, so the bundle scans
+    /// (`skipsHiddenFiles` here, in `listRecordingDirectories`, and in the
+    /// launch sweeper) never mistake it for a recording bundle.
+    private nonisolated static func indexDirectory(in root: URL) -> URL {
+        root.appendingPathComponent(".fingerprints", isDirectory: true)
+    }
+
+    private nonisolated static let indexCompleteMarker = "complete"
+
+    /// Upsert one digest → bundle-name entry. Best-effort by design: a
+    /// missing entry only costs a scan (pre-marker) or a duplicate import
+    /// (post-marker) — never a wrong bundle, because hits are validated.
+    private nonisolated static func writeIndexEntry(
+        for fingerprint: SourceFingerprint,
+        bundleName: String,
+        in root: URL
+    ) {
+        let digest = fingerprint.stableDigest
+        guard !digest.isEmpty else { return }
+        let indexDir = indexDirectory(in: root)
+        try? FileManager.default.createDirectory(at: indexDir, withIntermediateDirectories: true)
+        try? Data(bundleName.utf8).write(
+            to: indexDir.appendingPathComponent(digest), options: .atomic)
     }
 
     /// The manifest+sidecar load, minus the main-actor isolation of
