@@ -120,13 +120,21 @@ struct VTVFScanOrchestrator: View {
 
     @ViewBuilder
     private var sheetContent: some View {
+        // #357: resolve the analysis lead here, where `directory` is in
+        // hand, and hand the channel to the view rather than letting it
+        // pick one internally — one designated channel for every
+        // calculation, disclosed once. A recording with no populated ECG
+        // channel (resolution nil) falls to the same unavailable sheet a
+        // missing model does.
         if let model,
            let recording = recordingContext.recording,
-           let directory = recordingContext.directory {
+           let directory = recordingContext.directory,
+           let resolution = recording.analysisLead(inBundle: directory) {
             VTVFScanView(
                 model: model,
                 recording: recording,
                 directory: directory,
+                analysisLeadChannel: resolution.channel,
                 viewStartSample: scanContext.currentViewStartSample,
                 viewEndSample: scanContext.currentViewEndSample,
                 onCommit: { annotations, caption in
