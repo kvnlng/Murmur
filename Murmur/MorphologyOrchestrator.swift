@@ -9,10 +9,10 @@
 //
 //  Population: ALL annotator-coded beats (`Recording.annotatedBeats`), not
 //  only "N" — the second conduction is exactly the population the annotator
-//  coded away. Lead: the QT display lead (first conventional lead, II before
-//  V5; the analysis lead otherwise, #357), matching what the analyst sees in
-//  the beat inspector. Per-cluster QRS widths come from the same frozen
-//  delineator the markings pipeline uses — no new measurement algorithm.
+//  coded away. Lead: the analysis lead (#357), full stop — calculations run
+//  on the designated lead, no per-feature name gate. Per-cluster QRS widths
+//  come from the same frozen delineator the markings pipeline uses — no new
+//  measurement algorithm.
 //
 
 import Foundation
@@ -53,22 +53,16 @@ struct MorphologyOrchestrator: View {
         let signpost = ComputeSignpost.begin("Morphology")
         defer { ComputeSignpost.end(signpost, workSize: measuredBeatCount) }
 
-        // Same lead-selection order as the markings pipeline: conventional
-        // QT lead when present (matching what the analyst sees in the beat
-        // inspector), the analysis lead (#357) otherwise — never an
-        // arbitrary first channel. Resolved up front so the cache key below
-        // can carry whichever lead actually feeds the compute.
-        let conventional = recording.conventionalQTLeads(inDirectory: directory)
-        let lead = conventional.first
-        let leadName = lead?.channel.name ?? resolution.channel.name
+        // #357: calculations run on the designated lead, full stop — no
+        // name-gated preference (was: conventional QT lead first, II before
+        // V5). One source, no name consultation.
+        let leadName = resolution.channel.name
 
         // Bundle cache: the summary is a pure function of the record's beats
-        // and samples — no analyst dials feed it (endorsements act downstream,
-        // in the markings pipeline) — but the lead selected above can change
-        // (a stale conventional lead disappearing, or a new analysis-lead
-        // designation when no conventional lead exists), so the key carries
-        // that lead's name; the app-version stamp carries the rest of
-        // invalidation.
+        // and samples — no analyst dial feeds it (endorsements act downstream,
+        // in the markings pipeline) — but the resolved lead can change (a
+        // new analysis-lead designation), so the key carries that lead's
+        // name; the app-version stamp carries the rest of invalidation.
         let parametersKey = MorphologyCacheKey.make(analysisLeadName: leadName)
         if let hit = await Task.detached(priority: .userInitiated, operation: {
             BundleDerivedCache.load(
@@ -90,7 +84,7 @@ struct MorphologyOrchestrator: View {
 
         let beats = recording.annotatedBeats()
         measuredBeatCount = beats.count
-        guard let samples = lead?.samples ?? recording.samples(of: resolution.channel, inDirectory: directory),
+        guard let samples = recording.samples(of: resolution.channel, inDirectory: directory),
               !beats.isEmpty
         else {
             await MainActor.run { morphologyContext.clear() }
