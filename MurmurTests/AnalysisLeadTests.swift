@@ -156,3 +156,150 @@ struct AnalysisLeadTests {
         #expect(registry.currentScorer() == nil)
     }
 }
+
+// MARK: - Import-time stamping
+
+/// All tests here register into the process-wide `AnalysisLeadScoring.shared`
+/// singleton (Task 2 wires import to consult it) — kept in ONE `.serialized`
+/// suite so Swift Testing never runs two of these concurrently and stomps
+/// on each other's registration. Every test that registers a scorer clears
+/// it in a `defer`, whatever the outcome.
+@Suite("Analysis lead — import-time default", .serialized)
+@MainActor
+struct AnalysisLeadImportTests {
+    struct RiggedScorer: AnalysisLeadScorer {
+        let scores: [String: Double]?
+        func scoreLeads(_ leads: [(name: String, samples: [Float])],
+                        sampleRate: Double) -> [String: Double]? { scores }
+    }
+
+    private func makeStore() throws -> (RecordingStore, URL) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("analysis-lead-import-test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return (RecordingStore(rootURL: root), root)
+    }
+
+    /// Two-channel source: ECG1 low-amplitude flatline-ish, ECG2 a clear
+    /// repeating spike — real scoring content, though every test here
+    /// substitutes a `RiggedScorer` so the actual samples never drive the
+    /// assertions.
+    private func writeSource(in dir: URL) throws {
+        try WFDBRecordWriter.write(
+            recordName: "rec",
+            channelSamples: [
+                Array(repeating: Int32(2), count: 128),
+                (0..<128).map { $0 % 20 == 0 ? Int32(200) : Int32(0) },
+            ],
+            sampleRateHz: 128,
+            leadNames: ["ECG1", "ECG2"],
+            calibration: .init(gain: 200, baseline: 0, unit: "mV"),
+            in: dir
+        )
+    }
+
+    @Test("A fresh import with a scorer stamps the highest-scoring lead")
+    func importStampsScoredDefault() async throws {
+        AnalysisLeadScoring.shared.register(
+            RiggedScorer(scores: ["ECG1": 1.0, "ECG2": 9.0]))
+        defer { AnalysisLeadScoring.shared.clearForTesting() }
+
+        let (store, root) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = FileManager.default.temporaryDirectory
+            .appendingPathComponent("analysis-lead-src-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: source) }
+        try writeSource(in: source)
+
+        let summary = try await store.importWFDB(folderURL: source, heaFilename: "rec.hea")
+        let file = AnalysisLeadFile.read(from: summary.directory)
+        #expect(file?.defaultChoice?.channelName == "ECG2")
+        #expect(file?.defaultChoice?.reason == .rPeakScore)
+        #expect(file?.defaultChoice?.perLeadScores?["ECG2"] == 9.0)
+    }
+
+    @Test("No scorer registered stamps firstInFile explicitly")
+    func importStampsFirstInFileWithoutScorer() async throws {
+        AnalysisLeadScoring.shared.clearForTesting()
+
+        let (store, root) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = FileManager.default.temporaryDirectory
+            .appendingPathComponent("analysis-lead-src-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: source) }
+        try writeSource(in: source)
+
+        let summary = try await store.importWFDB(folderURL: source, heaFilename: "rec.hea")
+        let file = AnalysisLeadFile.read(from: summary.directory)
+        #expect(file?.defaultChoice?.reason == .firstInFile)
+        #expect(file?.defaultChoice?.channelName == "ECG1")
+        #expect(file?.defaultChoice?.perLeadScores == nil)
+    }
+
+    @Test("A scorer that declines (nil) stamps firstInFile")
+    func decliningScorerStampsFirstInFile() async throws {
+        AnalysisLeadScoring.shared.register(RiggedScorer(scores: nil))
+        defer { AnalysisLeadScoring.shared.clearForTesting() }
+
+        let (store, root) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = FileManager.default.temporaryDirectory
+            .appendingPathComponent("analysis-lead-src-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: source) }
+        try writeSource(in: source)
+
+        let summary = try await store.importWFDB(folderURL: source, heaFilename: "rec.hea")
+        let file = AnalysisLeadFile.read(from: summary.directory)
+        #expect(file?.defaultChoice?.reason == .firstInFile)
+        #expect(file?.defaultChoice?.channelName == "ECG1")
+    }
+
+    @Test("Equal scores tie-break to file order, recorded as a score choice")
+    func equalScoresTieBreakToFileOrder() async throws {
+        AnalysisLeadScoring.shared.register(
+            RiggedScorer(scores: ["ECG1": 5.0, "ECG2": 5.0]))
+        defer { AnalysisLeadScoring.shared.clearForTesting() }
+
+        let (store, root) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = FileManager.default.temporaryDirectory
+            .appendingPathComponent("analysis-lead-src-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: source) }
+        try writeSource(in: source)
+
+        let summary = try await store.importWFDB(folderURL: source, heaFilename: "rec.hea")
+        let file = AnalysisLeadFile.read(from: summary.directory)
+        #expect(file?.defaultChoice?.channelName == "ECG1")
+        #expect(file?.defaultChoice?.reason == .rPeakScore)
+    }
+
+    @Test("Bundle reuse keeps the original stamp — never re-scored (#341 composition)")
+    func reuseKeepsOriginalStamp() async throws {
+        AnalysisLeadScoring.shared.register(
+            RiggedScorer(scores: ["ECG1": 1.0, "ECG2": 9.0]))
+
+        let (store, root) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = FileManager.default.temporaryDirectory
+            .appendingPathComponent("analysis-lead-src-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: source) }
+        try writeSource(in: source)
+
+        let first = try await store.importWFDB(folderURL: source, heaFilename: "rec.hea")
+        // Re-register a scorer preferring ECG1 and re-import the same,
+        // unchanged source — reuse must serve the original stamp untouched.
+        AnalysisLeadScoring.shared.register(
+            RiggedScorer(scores: ["ECG1": 9.0, "ECG2": 1.0]))
+        let second = try await store.importWFDB(folderURL: source, heaFilename: "rec.hea")
+        defer { AnalysisLeadScoring.shared.clearForTesting() }
+
+        #expect(second.directory == first.directory)
+        #expect(AnalysisLeadFile.read(from: second.directory)?
+            .defaultChoice?.channelName == "ECG2")
+    }
+}
