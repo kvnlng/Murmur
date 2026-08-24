@@ -17,9 +17,9 @@ import Foundation
 enum MorphologyCacheKey {
     /// The bundle-cache `parametersKey` for the morphology summary. No
     /// analyst dial feeds the compute, but the lead it ran over can change
-    /// (the analysis-lead fallback used whenever no conventional QT lead is
-    /// present, #357) — the key carries that lead's name so a designation
-    /// change can never re-serve a summary computed on the old lead.
+    /// (morphology reads the analysis lead unconditionally, #357) — the key
+    /// carries that lead's name so a designation change can never re-serve
+    /// a summary computed on the old lead.
     static func make(analysisLeadName: String) -> String {
         "lead=\(analysisLeadName)"
     }

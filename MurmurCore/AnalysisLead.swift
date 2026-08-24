@@ -146,7 +146,9 @@ public struct AnalysisLeadFile: Codable, Equatable, Sendable {
 // MARK: - Resolution
 
 /// Why this channel is the analysis lead — the disclosure line and the
-/// export columns render from this, one vocabulary everywhere.
+/// export columns both render from this, but in two deliberately different
+/// vocabularies (header wording via `AnalysisLeadHeaderLine`, export wording
+/// via `exportReason` below) — only `firstInFile`'s phrasing coincides.
 public enum AnalysisLeadProvenance: Equatable, Sendable {
     case designated(reviewer: String, date: Date)
     case rPeakScore(score: Double, perLead: [String: Double])
@@ -417,8 +419,8 @@ extension Recording {
     }
 
     /// One channel's full sample buffer — the per-channel read the
-    /// analysis-lead consumers use (same `BinaryRecordingFile` call
-    /// `conventionalQTLeads(inDirectory:)` makes per-channel).
+    /// analysis-lead consumers use (same `BinaryRecordingFile` call the
+    /// deleted `conventionalQTLeads(inDirectory:)` used to make per-channel).
     public func samples(of channel: Channel, inDirectory directory: URL) -> [Float]? {
         let url = directory.appendingPathComponent(channel.storageFileName)
         return try? BinaryRecordingFile.readSamples(url: url, range: 0..<channel.sampleCount)

@@ -320,7 +320,7 @@ states why, in one of three forms:
 | `analysis_lead_reason` value | Meaning |
 |---|---|
 | `analyst override — <reviewer>` | An analyst explicitly designated this channel. |
-| `r-peak score N.NN` | The import-time scorer picked it for its R-peak support (0–1, 2 dp). |
+| `r-peak score N.NN` | The import-time scorer picked it for its R-peak support — an unbounded ratio (higher = sharper QRS relative to baseline), formatted to 2 dp. |
 | `first in file` | No designation and no scorer ran (or it declined) — the first populated non-trend channel by file order. |
 
 Both columns are **empty** for a record with no resolvable analysis

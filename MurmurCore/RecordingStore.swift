@@ -151,6 +151,9 @@ final class RecordingStore {
             let leads: [(name: String, samples: [Float])] = ecg.compactMap { channel in
                 recording.samples(of: channel, inDirectory: directory).map { (channel.name, $0) }
             }
+            // Scores every lead at `first.sampleRate` — the same
+            // "leads share `primaryECGChannel.sampleRate`" assumption
+            // `ecgLeadSamples(inDirectory:)` already documents (Recording.swift).
             if leads.count == ecg.count,
                let scores = scorer.scoreLeads(leads, sampleRate: first.sampleRate) {
                 // `max(by: <)` returns the LAST of equal maximal elements —
