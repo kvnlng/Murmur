@@ -2,16 +2,20 @@
 //  MurmurUIQTAbstentionTests.swift
 //  MurmurUITests
 //
-//  X109 (#185, cardiologist review §2.4) — principled QT abstention and
-//  its sanctioned override, end to end on the no-conventional-lead
-//  fixture (X105 machinery: lead II written as telemetry-style "MCL1", so
-//  the record genuinely carries no II/V5):
+//  X109 (#185, cardiologist review §2.4) + #357 §1.5 — what a record with
+//  no conventionally-named lead does now, end to end on the same fixture
+//  (X105 machinery: lead II written as telemetry-style "MCL1", so the
+//  record genuinely carries no II/V5):
 //
-//   1. The QTc lane renders the §2.4 null state — a plain status, not an
-//      error — where the metric normally sits.
+//   1. QT is MEASURED — on the analysis lead — and the QTc lane's repro
+//      caption discloses that the lead is not a conventional QT lead. The
+//      X109 record-wide abstention this test used to assert is retired
+//      with the name gate that was its only trigger (#357 §1.5): a lead is
+//      never skipped for being called the wrong thing.
 //   2. Manual QT calipers stay behind the Editing latch, then a two-click
 //      Q-onset → T-offset placement mints an analyst-authored measurement
-//      that lands in the review queue with explicit provenance.
+//      that lands in the review queue with explicit provenance — §2.4's
+//      sanctioned override, unchanged.
 //
 
 import XCTest
@@ -22,7 +26,7 @@ final class MurmurUIQTAbstentionTests: XCTestCase {
     }
 
     @MainActor
-    func testAbstentionNullStateAndManualCaliperOverride() throws {
+    func testNonConventionalLeadDisclosureAndManualCaliperOverride() throws {
         let app = XCUIApplication()
         app.launchArguments += ["--ui-test-sample-rich=no-qt-leads", "--ui-test-grant-studio"]
         app.launch()
@@ -32,17 +36,23 @@ final class MurmurUIQTAbstentionTests: XCTestCase {
         XCTAssertTrue(stagePanel.waitForExistence(timeout: 30),
                       "The renamed-lead fixture should open with lead I focused")
 
-        // 1. The §2.4 null state, where the QTc metric normally sits. The
-        // markings compute is async — the withheld status appears when the
-        // orchestrator publishes.
-        let withheld = app.descendants(matching: .any)
-            .matching(identifier: "interval-trend-lane-qt-withheld").firstMatch
-        XCTAssertTrue(withheld.waitForExistence(timeout: 30),
-                      "A record with no conventional lead must state the QT withholding")
-        let text = withheld.label.isEmpty
-            ? ((withheld.value as? String) ?? "") : withheld.label
-        XCTAssertTrue(text.contains("Conventional leads (II, V5) absent"),
-                      "The null state must be the §2.4 status, got: \(text)")
+        // 1. The QTc lane's repro caption — the citation the analyst copies —
+        // names the lead the intervals were measured on and discloses that it
+        // isn't a conventional QT lead. The markings compute is async, so the
+        // caption's lead fragment appears when the orchestrator publishes.
+        let caption = app.descendants(matching: .any)
+            .matching(identifier: "interval-trend-lane-repro-caption").firstMatch
+        XCTAssertTrue(caption.waitForExistence(timeout: 30),
+                      "The QTc lane must publish its repro caption")
+        let text = caption.label.isEmpty
+            ? ((caption.value as? String) ?? "") : caption.label
+        XCTAssertTrue(text.contains("not a conventional QT lead (II/V5)"),
+                      "No lead on this record reads as II/V5 — the caption must "
+                      + "disclose the lead it measured, got: \(text)")
+        XCTAssertFalse(
+            app.descendants(matching: .any)
+                .matching(identifier: "interval-trend-lane-qt-withheld").firstMatch.exists,
+            "#357 §1.5: QT is measured on the analysis lead, never withheld for a name")
 
         // 2a. The caliper items honour the Editing latch, same as every
         // authoring surface.

@@ -569,10 +569,11 @@ public struct ContentView: View {
             // quiet overlay entry.
             return (SyntheticECG.Parameters(droppedLeads: ["I"]), [:])
         case .noConventional:
-            // X109 (§2.4): lead II renamed to a telemetry-style MCL1 — the
-            // generated record carries NO conventional QT lead, so automated
-            // QT abstains and the manual-caliper override is the only path
-            // to a QT number.
+            // Lead II renamed to a telemetry-style MCL1 — the generated
+            // record carries no conventionally-NAMED lead. #357 §1.5: QT is
+            // still measured (on the analysis lead), and the citation
+            // discloses that the lead isn't a conventional QT lead; X109's
+            // manual-caliper override remains the analyst's alternative.
             return (SyntheticECG.Parameters(), ["II": "MCL1"])
         case .twoMorphology:
             // X112c: two wide-complex runs (X104 machinery, beats coded "V")

@@ -162,6 +162,41 @@ public struct AnalysisLeadResolution: Equatable, Sendable {
     public let staleDesignation: String?
 }
 
+// MARK: - QT lead disclosure
+
+/// #357 §1.5 — the one permitted direction for lead names: disclosure.
+/// "Reads as II/V5" is exact equality after uppercasing and stripping
+/// whitespace; NO prefix stripping (the X108 ML normaliser is gone — on
+/// MIT-BIH this honestly fires until the analyst declares MLII → II,
+/// #358). The comparison never chooses a lead; it only writes a sentence.
+public enum QTLeadDisclosure {
+
+    /// The standalone sentence, for a surface that states the disclosure on
+    /// its own: *"measured on V4 — not a conventional QT lead (II/V5)"*.
+    /// Nil when the recorded name reads as II or V5 — the standard case has
+    /// nothing to disclose.
+    public static func annotation(forLeadNamed name: String) -> String? {
+        clause(forLeadNamed: name).map { "measured on \($0)" }
+    }
+
+    /// The same claim in a citation's LEAD slot: the as-recorded name, with
+    /// the disclosure clause appended when it fires. This is the slot the
+    /// retired X108 method note ("median of II, V5") rode in, so the repro
+    /// caption, the `.mur` session and the caliper footer all carry the
+    /// disclosure without a second channel for the sentence.
+    public static func citedLeadName(for name: String) -> String {
+        clause(forLeadNamed: name) ?? name.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// "<name> — not a conventional QT lead (II/V5)", or nil when the name
+    /// reads as II/V5. One spelling of the claim, two grammars above.
+    private static func clause(forLeadNamed name: String) -> String? {
+        let normalized = name.uppercased().filter { !$0.isWhitespace }
+        guard normalized != "II", normalized != "V5" else { return nil }
+        return "\(name.trimmingCharacters(in: .whitespaces)) — not a conventional QT lead (II/V5)"
+    }
+}
+
 extension Recording {
 
     /// The channel calculations run on. Resolution order: designation →

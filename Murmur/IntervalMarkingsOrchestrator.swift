@@ -73,10 +73,14 @@ struct IntervalMarkingsOrchestrator: View {
         // Gate on entitlement + presence of a recording; clear
         // otherwise so a mid-session unmount doesn't leave stale
         // fiducials rendering on the next recording.
+        // #357 §1.5: every interval is measured on the ANALYSIS LEAD — the
+        // analyst's designation, the import-time R-peak score, or
+        // first-in-file, each disclosed as such. Nothing here consults a
+        // lead's name to choose it.
         guard store.hasStudio,
               let recording = recordingContext.recording,
               let directory = recordingContext.directory,
-              let ecgChannel = recording.primaryECGChannel else {
+              let resolution = recording.analysisLead(inBundle: directory) else {
             await MainActor.run { markingsContext.clear() }
             return
         }
@@ -85,36 +89,27 @@ struct IntervalMarkingsOrchestrator: View {
         defer { ComputeSignpost.end(signpost, workSize: measuredBeatCount) }
         let beatSampleIndices = recording.normalBeatSampleIndices()
         measuredBeatCount = beatSampleIndices.count
-        // X108 (cardiologist review §1.1): QT is measured on the CONVENTIONAL
-        // leads when the recording carries any — II, then V5, per-beat median
-        // across them when both exist. Before X108 the lead was whatever
-        // channel came first in the file (the packet's "II when present" was
-        // channel-order luck, not policy). With NO conventional lead the
-        // legacy first-channel path still runs — §2.4's principled
-        // abstention replaces it in X109.
-        let conventionalLeads = recording.conventionalQTLeads(inDirectory: directory)
-        let legacySamples = conventionalLeads.isEmpty
-            ? recording.primaryECGSamples(inDirectory: directory)
-            : nil
+        // The methods change (#357 §1.5): the X108 conventional-lead
+        // composite — per-beat median of II and V5 — is RETIRED with the name
+        // gate that was the only way to reach it. QT now runs on the analysis
+        // lead alone, through the same `MultiLeadQT` machinery (compose of one
+        // element is that element), so the gating, censoring and CI contracts
+        // are unchanged; on records where II and V5 disagreed the number
+        // changes, and the citation names one lead instead of the method.
         guard !beatSampleIndices.isEmpty,
-              !(conventionalLeads.isEmpty && legacySamples == nil) else {
+              let leadSamples = recording.samples(of: resolution.channel, inDirectory: directory)
+        else {
             await MainActor.run { markingsContext.clear() }
             return
         }
-        // Leads share the primary channel's sample rate (true for standard
-        // multi-lead records — the same assumption `ecgLeadSamples` documents).
-        let sampleRate = ecgChannel.sampleRate
-        // Reproducibility provenance (C3/C4): the lead(s) the intervals are
-        // measured in, and the sample span the template beats span. The
-        // multi-lead citation names the method, not just the leads.
-        let leadName: String = {
-            switch conventionalLeads.count {
-            case 0:  return ecgChannel.name
-            case 1:  return conventionalLeads[0].channel.name
-            default: return "median of "
-                + conventionalLeads.map(\.channel.name).joined(separator: ", ")
-            }
-        }()
+        // The analysis lead's OWN rate — the rate must describe the samples
+        // it is applied to, never a neighbouring channel's.
+        let sampleRate = resolution.channel.sampleRate
+        // Reproducibility provenance (C3/C4): the lead the intervals are
+        // measured in, and the sample span the template beats span. §1.5's
+        // disclosure rides the lead slot the retired method note used, so
+        // every citation surface states it without a second channel.
+        let leadName = QTLeadDisclosure.citedLeadName(for: resolution.channel.name)
         let spanStart = beatSampleIndices.min()
         let spanEnd = beatSampleIndices.max()
         let qtcFormula = await MainActor.run { markingsContext.qtcFormula }
@@ -128,9 +123,12 @@ struct IntervalMarkingsOrchestrator: View {
                 : Int.max
         }
 
-        let qtWithheldReason = conventionalLeads.isEmpty
-            ? "QT: Conventional leads (II, V5) absent."
-            : nil
+        // #357 §1.5: the "QT: Conventional leads (II, V5) absent." withholding
+        // is gone — QT always has a lead now, because the analysis lead is
+        // resolved for every record that has a populated ECG channel at all.
+        // X109's other gates are untouched: the per-beat plausibility (X53),
+        // T-offset reliability (X58) and censoring rules still withhold and
+        // count individual measurements.
 
         // X112c: with endorsements on record, the baseline(s) rebuild from
         // the endorsed clusters' beats — same pipeline, per mode. Falls
@@ -139,12 +137,14 @@ struct IntervalMarkingsOrchestrator: View {
         let endorsements = await MainActor.run { morphologyContext.endorsements }
 
         // Bundle cache. The key carries EVERYTHING the analyst can dial into
-        // this pipeline — formula, reliability threshold, and a digest of the
-        // endorsements — because a stale fiducial store is a wrong clinical
-        // measurement, not a cosmetic bug. Anything unkeyed is covered by the
-        // app-version stamp (the algorithms land via exact-pin bumps).
+        // this pipeline — formula, reliability threshold, a digest of the
+        // endorsements, and (#357) the lead the intervals were measured on —
+        // because a stale fiducial store is a wrong clinical measurement, not
+        // a cosmetic bug. Anything unkeyed is covered by the app-version stamp
+        // (the algorithms land via exact-pin bumps).
         let parametersKey = "qtc=\(qtcFormula.rawValue);threshold=\(reliabilityThreshold);"
-            + "endorsements=\(Self.endorsementsDigest(endorsements))"
+            + "endorsements=\(Self.endorsementsDigest(endorsements));"
+            + "lead=\(resolution.channel.name)"
         if let hit = await Task.detached(priority: .userInitiated, operation: {
             BundleDerivedCache.load(
                 MarkingsCachePayload.self, producer: "interval-markings",
@@ -157,12 +157,9 @@ struct IntervalMarkingsOrchestrator: View {
         }
         if !endorsements.isEmpty {
             let annotatedBeats = recording.annotatedBeats()
-            let clusterSamples = conventionalLeads.first?.samples ?? legacySamples
-            if let clusterSamples, !annotatedBeats.isEmpty {
+            if !annotatedBeats.isEmpty {
                 let input = EndorsedComputeInput(
-                    conventionalLeadSamples: conventionalLeads.map(\.samples),
-                    legacySamples: legacySamples,
-                    clusterSamples: clusterSamples,
+                    leadSamples: leadSamples,
                     sampleRate: sampleRate,
                     annotatedBeats: annotatedBeats,
                     endorsements: endorsements,
@@ -171,7 +168,6 @@ struct IntervalMarkingsOrchestrator: View {
                     leadName: leadName)
                 let handled = await publishEndorsed(
                     input: input, sampleRate: sampleRate,
-                    qtWithheldReason: qtWithheldReason,
                     parametersKey: parametersKey, directory: directory)
                 if handled { return }
             }
@@ -185,20 +181,8 @@ struct IntervalMarkingsOrchestrator: View {
             beats: [MarkingsBeat],
             template: NormalTemplate
         ) in
-            if conventionalLeads.isEmpty, let samples = legacySamples {
-                // X109 (§2.4): no conventional QT lead → the pipeline still
-                // delineates for PR/QRS and the overlays, but every
-                // T-boundary claim (QT, QTc, JT, JTc, T fiducials, censoring,
-                // CI) is WITHHELD — a structural null, not a flagged number.
-                return Self.singleLeadComputed(
-                    samples: samples, sampleRate: sampleRate,
-                    beatSampleIndices: beatSampleIndices,
-                    qtcFormula: Self.metricsFormula(from: qtcFormula),
-                    reliabilityThreshold: reliabilityThreshold,
-                    withholdQT: true)
-            }
-            return Self.conventionalComputed(
-                leadSamples: conventionalLeads.map(\.samples),
+            Self.analysisLeadComputed(
+                samples: leadSamples,
                 sampleRate: sampleRate,
                 beatSampleIndices: beatSampleIndices,
                 qtcFormula: Self.metricsFormula(from: qtcFormula),
@@ -213,7 +197,7 @@ struct IntervalMarkingsOrchestrator: View {
             MarkingsCachePayload(
                 beats: computed.beats,
                 template: computed.beats.isEmpty ? nil : coreTemplate,
-                qtWithheldReason: qtWithheldReason, modes: []),
+                modes: []),
             parametersKey: parametersKey, directory: directory)
         await MainActor.run {
             if computed.beats.isEmpty {
@@ -222,8 +206,7 @@ struct IntervalMarkingsOrchestrator: View {
                 markingsContext.set(
                     beats: computed.beats,
                     sampleRate: sampleRate,
-                    template: coreTemplate,
-                    qtWithheldReason: qtWithheldReason
+                    template: coreTemplate
                 )
             }
         }
@@ -266,116 +249,28 @@ struct IntervalMarkingsOrchestrator: View {
 // MARK: - Compute paths
 
 private extension IntervalMarkingsOrchestrator {
-    /// The pre-X108 single-lead pipeline, unchanged: runs only when the
-    /// recording has NO conventional QT lead (first-channel fallback —
-    /// X109 replaces this with §2.4's principled abstention).
-    ///
-    /// Uses `WaveletBeatDelineator.delineateWithFeatures` (v2, the frozen
-    /// tangent primitive validated end-to-end on ECGRDVQ + QTDB + LUDB).
-    /// `features` feeds the per-beat uncertainty pipeline: `tOffsetCensored`
-    /// drives the "QT ≥ X ms" render; `tOffsetRiskScore` looks up the
-    /// calibrated CI half-width.
-    static func singleLeadComputed(
+    /// #357 §1.5: the analysis-lead path — ONE lead, delineated by the same
+    /// validated pipeline (`WaveletBeatDelineator.delineateWithFeatures`, v2,
+    /// the frozen tangent primitive validated end-to-end on ECGRDVQ + QTDB +
+    /// LUDB), its per-beat QT gated by the same `MultiLeadQT` machinery the
+    /// retired X108 composite used — `compose` of a one-element array is that
+    /// element, so the gating, censoring and CI contracts are byte-for-byte
+    /// the ones the composite applied to its per-lead inputs. What changed is
+    /// which signal is measured: the analysis lead, never a name-chosen one.
+    static func analysisLeadComputed(
         samples: [Float],
-        sampleRate: Double,
-        beatSampleIndices: [Int64],
-        qtcFormula: QTcFormula,
-        reliabilityThreshold: Int,
-        withholdQT: Bool = false
-    ) -> (beats: [MarkingsBeat], template: NormalTemplate) {
-        let (store, features) = WaveletBeatDelineator.delineateWithFeatures(
-            samples: samples,
-            sampleRate: sampleRate,
-            rPeaks: beatSampleIndices
-        )
-        let readouts = IntervalMeasurement.measureAll(store: store)
-        // X53: exclude physically impossible beats from the template; X58:
-        // also exclude unreliable T-offsets. Same rules, same threshold as
-        // the per-beat flags below, so they can never disagree.
-        //
-        // X109: with QT withheld, the template keeps PR/QRS baselines only —
-        // built from readouts whose QT is structurally nil, so no QT/QTc
-        // statistic can exist to leak downstream.
-        let template = withholdQT
-            ? NormalTemplateBuilder.build(
-                from: readouts.map { IntervalReadout(
-                    rPeakSampleIndex: $0.rPeakSampleIndex,
-                    prMs: $0.prMs, qrsMs: $0.qrsMs,
-                    qtMs: nil, precedingRRMs: $0.precedingRRMs) },
-                qtcFormula: qtcFormula)
-            : NormalTemplateBuilder.build(
-                from: store,
-                qtcFormula: qtcFormula,
-                excluding: QTPlausibilityFilter.defaultRules,
-                features: features,
-                reliabilityThreshold: reliabilityThreshold
-            )
-        let implausibleMask = QTPlausibilityFilter.mask(for: store)
-        let calibration = CalibrationTable.builtInTOffset
-        let beats = store.beats.indices.map { i -> MarkingsBeat in
-            let bf = store.beats[i]
-            let ro = readouts[i]
-            let feat = i < features.count ? features[i] : .absent
-            if withholdQT {
-                // No T-boundary claims of any kind: values, fiducial
-                // markers, censoring, CI, and the QT-derived flags all
-                // withhold together, so no surface can reconstruct a QT
-                // the pipeline refused to state.
-                return Self.markingsBeat(
-                    bf: bf.withoutTBoundaries(), feat: .absent,
-                    values: BeatValues(
-                        prMs: ro.prMs, qrsMs: ro.qrsMs,
-                        qtMs: nil, qtcMs: nil,
-                        precedingRRMs: ro.precedingRRMs,
-                        jtMs: nil, jtcMs: nil,
-                        tOffsetCensored: false,
-                        ciHalfWidthMs: nil,
-                        isImplausible: false,
-                        isUnreliable: false
-                    ))
-            }
-            return Self.markingsBeat(bf: bf, feat: feat, values: BeatValues(
-                prMs: ro.prMs, qrsMs: ro.qrsMs,
-                qtMs: ro.qtMs,
-                qtcMs: ro.qtcMs(formula: qtcFormula),
-                precedingRRMs: ro.precedingRRMs,
-                jtMs: ro.jtMs,
-                jtcMs: ro.jtcMs(formula: qtcFormula),
-                tOffsetCensored: feat.tOffsetCensored,
-                ciHalfWidthMs: calibration.bin(forScore: feat.tOffsetRiskScore)?.p95AbsErr,
-                isImplausible: i < implausibleMask.count ? implausibleMask[i] : false,
-                isUnreliable: !TOffsetReliability.isReliable(feat, threshold: reliabilityThreshold)
-            ))
-        }
-        return (beats, template)
-    }
-
-    /// X108: the conventional-lead path — II, then V5, delineated
-    /// independently by the same validated pipeline; the per-beat QT (and
-    /// everything downstream of it: QTc, JT, JTc, censoring, CI) is the
-    /// cross-lead composite from `MultiLeadQT`. Fiducial overlays and the
-    /// depolarization intervals (PR/QRS) stay the DISPLAY lead's — index 0,
-    /// lead II when present. With one conventional lead the composite
-    /// degenerates to that lead's own gated measurement.
-    static func conventionalComputed(
-        leadSamples: [[Float]],
         sampleRate: Double,
         beatSampleIndices: [Int64],
         qtcFormula: QTcFormula,
         reliabilityThreshold: Int
     ) -> (beats: [MarkingsBeat], template: NormalTemplate) {
-        let delineated = leadSamples.map {
-            WaveletBeatDelineator.delineateWithFeatures(
-                samples: $0, sampleRate: sampleRate, rPeaks: beatSampleIndices)
-        }
-        let (primaryStore, primaryFeatures) = delineated[0]
-        let perLead = delineated.map {
-            MultiLeadQT.perLeadBeats(
-                store: $0.0, features: $0.1,
-                reliabilityThreshold: reliabilityThreshold)
-        }
+        let (primaryStore, primaryFeatures) = WaveletBeatDelineator.delineateWithFeatures(
+            samples: samples, sampleRate: sampleRate, rPeaks: beatSampleIndices)
+        let perLead = MultiLeadQT.perLeadBeats(
+            store: primaryStore, features: primaryFeatures,
+            reliabilityThreshold: reliabilityThreshold)
         let composites = primaryStore.beats.indices.map { i in
-            MultiLeadQT.compose(perLead.map { $0[i] })
+            MultiLeadQT.compose([perLead[i]])
         }
         let template = MultiLeadQT.template(
             primaryStore: primaryStore, composites: composites, qtcFormula: qtcFormula)
@@ -386,9 +281,9 @@ private extension IntervalMarkingsOrchestrator {
             let ro = readouts[i]
             let feat = i < primaryFeatures.count ? primaryFeatures[i] : .absent
             let comp = composites[i]
-            // Value provenance: the composite when any lead measured; the
-            // display lead's raw readout (flagged) when none did — the same
-            // show-but-flag contract the single-lead path keeps.
+            // Value provenance: the gated measurement when the lead produced
+            // one; its raw readout (flagged) when the gates rejected it — the
+            // show-but-flag contract, unchanged from the composite path.
             let qtMs = comp.qtMs ?? ro.qtMs
             let qtcMs: Double?
             let jtMs: Double?
@@ -436,7 +331,7 @@ private extension IntervalMarkingsOrchestrator {
         let isUnreliable: Bool
     }
 
-    /// Shared `MarkingsBeat` assembly — fiducials from the display lead's
+    /// Shared `MarkingsBeat` assembly — fiducials from the analysis lead's
     /// store, values from whichever path computed them.
     static func markingsBeat(
         bf: BeatFiducials,
@@ -468,23 +363,12 @@ private extension IntervalMarkingsOrchestrator {
     }
 }
 
-private extension BeatFiducials {
-    /// X109: the same beat with every T-boundary claim removed — the
-    /// abstention path publishes no T fiducials, so the overlay cannot
-    /// render boundary markers for a measurement the pipeline withheld.
-    func withoutTBoundaries() -> BeatFiducials {
-        BeatFiducials(
-            rPeakSampleIndex: rPeakSampleIndex,
-            rPeakConfidence: rPeakConfidence,
-            pOnset: pOnset,
-            pOffset: pOffset,
-            qrsOnset: qrsOnset,
-            qrsOffset: qrsOffset,
-            tOnset: nil,
-            tOffset: nil
-        )
-    }
-}
+// #357 §1.5: `BeatFiducials.withoutTBoundaries()` is deleted with the
+// record-wide abstention it served. Its only trigger was "this record has
+// no conventional QT lead", and that condition cannot arise now that QT is
+// measured on the analysis lead — every record with a populated ECG channel
+// has one. X109's per-beat withholding (X53 plausibility, X58 reliability,
+// censoring) is untouched and still runs on every beat below.
 
 // MARK: - X112c endorsed-baseline rebuild
 
@@ -581,9 +465,10 @@ private extension IntervalMarkingsOrchestrator {
     /// Inputs for the endorsed rebuild, bundled (SwiftLint parameter budget —
     /// same medicine as `BeatValues`).
     struct EndorsedComputeInput: Sendable {
-        let conventionalLeadSamples: [[Float]]
-        let legacySamples: [Float]?
-        let clusterSamples: [Float]
+        /// The analysis lead's samples — the one signal the modes cluster on
+        /// AND the one every interval is measured in (#357 §1.5); before, the
+        /// clustering lead and the QT leads could be different channels.
+        let leadSamples: [Float]
         let sampleRate: Double
         let annotatedBeats: [(sampleIndex: Int64, symbol: String)]
         let endorsements: [MorphologyEndorsement]
@@ -610,31 +495,18 @@ private extension IntervalMarkingsOrchestrator {
 
     static func endorsedComputed(_ input: EndorsedComputeInput) -> EndorsedBaseline? {
         let specs = endorsedModeSpecs(
-            clusterSamples: input.clusterSamples, sampleRate: input.sampleRate,
+            clusterSamples: input.leadSamples, sampleRate: input.sampleRate,
             annotatedBeats: input.annotatedBeats, endorsements: input.endorsements)
         guard !specs.isEmpty else { return nil }
 
         var built: [BuiltMode] = []
         for spec in specs {
-            let result: (beats: [MarkingsBeat], template: NormalTemplate)
-            if input.conventionalLeadSamples.isEmpty {
-                guard let samples = input.legacySamples else { continue }
-                // X109: no conventional lead → T-boundary claims withheld,
-                // endorsed or not.
-                result = singleLeadComputed(
-                    samples: samples, sampleRate: input.sampleRate,
-                    beatSampleIndices: spec.beatSampleIndices,
-                    qtcFormula: input.qtcFormula,
-                    reliabilityThreshold: input.reliabilityThreshold,
-                    withholdQT: true)
-            } else {
-                result = conventionalComputed(
-                    leadSamples: input.conventionalLeadSamples,
-                    sampleRate: input.sampleRate,
-                    beatSampleIndices: spec.beatSampleIndices,
-                    qtcFormula: input.qtcFormula,
-                    reliabilityThreshold: input.reliabilityThreshold)
-            }
+            let result = analysisLeadComputed(
+                samples: input.leadSamples,
+                sampleRate: input.sampleRate,
+                beatSampleIndices: spec.beatSampleIndices,
+                qtcFormula: input.qtcFormula,
+                reliabilityThreshold: input.reliabilityThreshold)
             built.append(BuiltMode(
                 name: spec.name, beats: result.beats, template: result.template,
                 spanStart: spec.beatSampleIndices.min(),
@@ -678,8 +550,11 @@ private extension IntervalMarkingsOrchestrator {
 private struct MarkingsCachePayload: Codable, Sendable {
     let beats: [MarkingsBeat]
     let template: MarkingsTemplate?
-    let qtWithheldReason: String?
     let modes: [MarkingsMode]
+    // #357 §1.5: no `qtWithheldReason` — this producer no longer withholds
+    // QT for a whole record. A payload cached by an earlier build still
+    // decodes (the retired key is simply ignored), and its stale withholding
+    // is dropped rather than re-served.
 }
 
 extension IntervalMarkingsOrchestrator {
@@ -690,7 +565,7 @@ extension IntervalMarkingsOrchestrator {
     /// nothing re-attached — falls through to the unadjudicated default.
     fileprivate func publishEndorsed(
         input: EndorsedComputeInput, sampleRate: Double,
-        qtWithheldReason: String?, parametersKey: String, directory: URL
+        parametersKey: String, directory: URL
     ) async -> Bool {
         let published = await Task.detached(priority: .userInitiated) {
             Self.endorsedComputed(input)
@@ -700,14 +575,13 @@ extension IntervalMarkingsOrchestrator {
         Self.storeCache(
             MarkingsCachePayload(
                 beats: published.beats, template: published.template,
-                qtWithheldReason: qtWithheldReason, modes: published.modes),
+                modes: published.modes),
             parametersKey: parametersKey, directory: directory)
         await MainActor.run {
             markingsContext.set(
                 beats: published.beats,
                 sampleRate: sampleRate,
                 template: published.template,
-                qtWithheldReason: qtWithheldReason,
                 modes: published.modes)
         }
         return true
@@ -722,7 +596,6 @@ extension IntervalMarkingsOrchestrator {
             markingsContext.set(
                 beats: hit.beats, sampleRate: sampleRate,
                 template: hit.template,
-                qtWithheldReason: hit.qtWithheldReason,
                 modes: hit.modes)
         }
     }

@@ -285,36 +285,12 @@ public extension Recording {
         channels.first { !$0.isTrendChannel }
     }
 
-    /// X108 (cardiologist review §1.1): the conventional QT leads present
-    /// on this recording — lead II first, then V5, matching the packet's
-    /// "II (or V5)" preference order. Until X108 this preference existed
-    /// only in prose: QT was measured on whatever channel came FIRST in
-    /// the file, which merely happens to be MLII on MIT-BIH records.
-    /// Name matching is normalized (case, whitespace, the Mason–Likar
-    /// "ML" prefix), so "MLII", " ii", and "MLV5" all qualify; the
-    /// as-recorded names are preserved for disclosure.
-    var conventionalQTChannels: [Channel] {
-        let ecg = channels.filter { !$0.isTrendChannel && $0.sampleCount > 0 }
-        func normalized(_ name: String) -> String {
-            var n = name.uppercased().filter { !$0.isWhitespace }
-            if n.hasPrefix("ML") { n.removeFirst(2) }
-            return n
-        }
-        return ecg.filter { normalized($0.name) == "II" }
-            + ecg.filter { normalized($0.name) == "V5" }
-    }
-
-    /// Samples for `conventionalQTChannels`, index-aligned with it. An
-    /// unreadable channel drops BOTH the samples and (for the caller's
-    /// alignment) must drop the channel — so this returns the pairs.
-    func conventionalQTLeads(inDirectory directory: URL) -> [(channel: Channel, samples: [Float])] {
-        conventionalQTChannels.compactMap { channel in
-            let url = directory.appendingPathComponent(channel.storageFileName)
-            guard let samples = try? BinaryRecordingFile.readSamples(
-                url: url, range: 0..<channel.sampleCount) else { return nil }
-            return (channel, samples)
-        }
-    }
+    // #357 §1.4: `conventionalQTChannels` and `conventionalQTLeads(inDirectory:)`
+    // are DELETED with the X108 name gate they existed to implement — no
+    // calculation selects a channel by its name any more. The lead every
+    // calculation runs on is `analysisLead(inBundle:)`; the II/V5 comparison
+    // survives only as `QTLeadDisclosure`, which writes a sentence and
+    // chooses nothing (AnalysisLead.swift).
 
     /// Every non-trend ECG channel's samples, in channel order — the
     /// multi-lead counterpart of `primaryECGSamples`. The arrhythmia scan

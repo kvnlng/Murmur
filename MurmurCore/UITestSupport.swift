@@ -314,8 +314,9 @@ enum UITestSupport {
     enum RichSampleVariant: String {
         case flatline
         case dropout
-        /// X109: lead II written as telemetry-style MCL1 — no conventional
-        /// QT lead, so §2.4 abstention + the manual-caliper override run.
+        /// Lead II written as telemetry-style MCL1 — no conventionally-NAMED
+        /// lead, so #357 §1.5's QT disclosure fires (and X109's
+        /// manual-caliper override is exercised on the same record).
         case noConventional = "no-qt-leads"
         /// X112c: a record with a genuine second conduction — enough
         /// wide-complex beats (X104 machinery, coded "V") to form a second

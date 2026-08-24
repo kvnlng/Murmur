@@ -275,9 +275,13 @@ struct BeatCalipers: View {
         // endorsement provenance once one has (X112c).
         let basis = t.adjudicationBasis ?? "unadjudicated — annotator-coded"
         var text = "Patient normal (\(basis)): \(t.sampleCount) beats"
-        // X25: disclose the lead the intervals were measured in. Convention is
-        // to measure where the T offset is clearest (II / V5 commonly), so
-        // which lead was used is reproducibility-relevant.
+        // X25: disclose the lead the intervals were measured in. #357 §1.5:
+        // that lead is the ANALYSIS lead (designated, scored, or first in
+        // file), and the slot carries §1.5's disclosure clause when its
+        // recorded name doesn't read as II/V5 — convention measures QT where
+        // the T offset is clearest (II / V5 commonly), so a departure is
+        // reproducibility-relevant and is stated rather than corrected.
+        // (Task 7 replaces this line with the full header disclosure.)
         if let lead = t.sourceLead, !lead.isEmpty {
             text += " · lead \(lead)"
         }
