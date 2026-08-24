@@ -53,6 +53,13 @@ enum ReviewTableCSV {
         var reviewedAt: Date?
         var flagged: Bool
         var headerComments: [String]
+        /// #357 — the channel calculations ran on for this record, and why.
+        /// Nil (empty column) when the record has no resolvable analysis
+        /// lead — same as a never-imported record: an absent column, not a
+        /// fabricated one. Record-level, so every row for the same record
+        /// repeats the same value.
+        var analysisLead: String?
+        var analysisLeadReason: String?
     }
 
     static let columns = [
@@ -60,7 +67,7 @@ enum ReviewTableCSV {
         "start_sample", "end_sample", "start_seconds", "end_seconds",
         "lead", "category", "label", "source", "confidence",
         "state", "confirmed_kind", "confirmed_category", "note", "reviewed_by", "reviewed_at",
-        "flagged", "header_comments",
+        "flagged", "header_comments", "analysis_lead", "analysis_lead_reason",
     ]
 
     /// Header line plus one line per row, sorted by record path, then start
@@ -103,6 +110,8 @@ enum ReviewTableCSV {
             row.reviewedAt.map(formatISO) ?? "",
             row.flagged ? "true" : "false",
             row.headerComments.joined(separator: " | "),
+            row.analysisLead ?? "",
+            row.analysisLeadReason ?? "",
         ]
         return fields.map(escape).joined(separator: ",")
     }

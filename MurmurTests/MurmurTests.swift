@@ -5053,6 +5053,40 @@ struct MarkdownReportTests {
         #expect(report.contains("- **Sample rate (primary channel)**: 500 Hz"))
     }
 
+    // MARK: - #357: analysis lead line
+
+    @Test("A resolved analysis lead renders one metadata line, in the header's own words")
+    func analysisLeadLineRendersWhenResolved() {
+        let rec = recording(channels: [channel()])
+        let resolution = AnalysisLeadResolution(
+            channel: channel(), provenance: .firstInFile, staleDesignation: nil
+        )
+        let report = MarkdownReport.generate(
+            recording: rec,
+            annotations: [],
+            dispositions: [:],
+            tally: .init(confirmed: 0, dismissed: 0, unreviewed: 0),
+            analysisLead: resolution,
+            now: now
+        )
+        // Same wording as `AnalysisLeadHeaderLine.label(for:)` — one
+        // vocabulary between the in-app disclosure and the report.
+        #expect(report.contains("- **Analysis lead**: II — first in file"))
+    }
+
+    @Test("No analysis lead resolution omits the metadata line entirely")
+    func analysisLeadLineOmittedWhenNil() {
+        let rec = recording(channels: [channel()])
+        let report = MarkdownReport.generate(
+            recording: rec,
+            annotations: [],
+            dispositions: [:],
+            tally: .init(confirmed: 0, dismissed: 0, unreviewed: 0),
+            now: now
+        )
+        #expect(!report.contains("Analysis lead"))
+    }
+
     @Test("Pipe character in finding metadata is escaped so table rows stay intact")
     func pipeEscapedInCategory() {
         let rec = recording(channels: [channel()])

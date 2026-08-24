@@ -1403,6 +1403,7 @@ struct BedsideView: View {
             // X72: inclusion is the analyst's per-note checkbox, decided here
             // at the call site — the report renders what it is given.
             notes: anchoredNotes.filter { $0.includeInReport == true },
+            analysisLead: analysisLead,
             now: Date()
         )
         do {

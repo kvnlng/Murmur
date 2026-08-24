@@ -26,7 +26,9 @@ struct ReviewTableCSVTests {
         state: String = "unreviewed",
         note: String? = nil,
         category: String = "AFib",
-        confirmedCategory: String? = nil
+        confirmedCategory: String? = nil,
+        analysisLead: String? = nil,
+        analysisLeadReason: String? = nil
     ) -> ReviewTableCSV.Row {
         ReviewTableCSV.Row(
             record: record, recordPath: path, annotationID: id, kind: "range",
@@ -35,7 +37,8 @@ struct ReviewTableCSVTests {
             lead: "II", category: category, label: nil, source: "physionet-dx",
             confidence: nil, state: state, confirmedKind: nil,
             confirmedCategory: confirmedCategory, note: note,
-            reviewedBy: nil, reviewedAt: nil, flagged: false, headerComments: []
+            reviewedBy: nil, reviewedAt: nil, flagged: false, headerComments: [],
+            analysisLead: analysisLead, analysisLeadReason: analysisLeadReason
         )
     }
 
@@ -48,8 +51,15 @@ struct ReviewTableCSVTests {
     @Test("The column order is the documented contract")
     func columnOrderIsStable() {
         #expect(ReviewTableCSV.columns.first == "record")
-        #expect(ReviewTableCSV.columns.last == "header_comments")
-        #expect(ReviewTableCSV.columns.count == 21)
+        #expect(ReviewTableCSV.columns.last == "analysis_lead_reason")
+        #expect(ReviewTableCSV.columns.count == 23)
+        // #357 — the analysis-lead pair trails everything else, record-level
+        // metadata like `flagged` and `header_comments` right before it.
+        #expect(ReviewTableCSV.columns.contains("analysis_lead"))
+        #expect(
+            ReviewTableCSV.columns.firstIndex(of: "analysis_lead_reason")
+            == (ReviewTableCSV.columns.firstIndex(of: "analysis_lead").map { $0 + 1 })
+        )
         // #331 — the override column sits immediately after the kind it
         // generalises, so a consumer reading left-to-right meets "what the
         // analyst said" right where it used to meet the closed VT/VF enum.
@@ -124,12 +134,13 @@ struct ReviewTableBuilderTests {
     }
 
     private func recording(
-        device: String, annotations: [Annotation], comments: [String] = []
+        device: String, annotations: [Annotation], comments: [String] = [],
+        channels: [Channel]? = nil
     ) -> Recording {
         Recording(
             version: 2, id: UUID(), device: device,
             createdAt: Date(timeIntervalSince1970: 0), sourceFileName: "\(device).hea",
-            channels: [Channel(
+            channels: channels ?? [Channel(
                 id: UUID(), name: "II", unit: "mV", sampleRate: 500,
                 startTimeUnixMS: 0, sampleCount: 5000,
                 storageFileName: "ch.bin", pyramid: []
@@ -139,13 +150,24 @@ struct ReviewTableBuilderTests {
         )
     }
 
+    /// A fresh, empty bundle directory — no `analysis_lead.json`, so
+    /// resolution falls through to `firstInFile`. Most of this suite
+    /// doesn't care about the analysis-lead columns; this keeps those
+    /// tests from having to think about them.
+    private func emptyBundleDir() -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("review-table-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
     @Test("An un-imported record is counted and skipped, never silently dropped")
     func countsUnimportedRecords() {
         let imported = ReviewTableBuilder.Source(
             recordPath: "a.hea",
             imported: .init(
                 recording: recording(device: "A", annotations: [annotation()]),
-                dispositions: [:], headerComments: []
+                dispositions: [:], headerComments: [], bundleDirectory: emptyBundleDir()
             )
         )
         let missing = ReviewTableBuilder.Source(recordPath: "b.hea", imported: nil)
@@ -163,7 +185,7 @@ struct ReviewTableBuilderTests {
             recordPath: "a.hea",
             imported: .init(
                 recording: recording(device: "A", annotations: [annotation(), annotation()]),
-                dispositions: [:], headerComments: []
+                dispositions: [:], headerComments: [], bundleDirectory: emptyBundleDir()
             )
         )
         let result = ReviewTableBuilder.build(sources: [source], flaggedIDs: [])
@@ -186,7 +208,7 @@ struct ReviewTableBuilderTests {
                     annotation(id: reviewed), annotation(id: untouched, start: 100),
                 ]),
                 dispositions: [reviewed: disposition],
-                headerComments: ["Dx: 164890007"]
+                headerComments: ["Dx: 164890007"], bundleDirectory: emptyBundleDir()
             )
         )
         let csv = ReviewTableBuilder.build(sources: [source], flaggedIDs: []).csv
@@ -204,13 +226,15 @@ struct ReviewTableBuilderTests {
             recordPath: "a.hea",
             imported: .init(
                 recording: recording(device: "A", annotations: [annotation()]),
-                dispositions: [:], headerComments: []
+                dispositions: [:], headerComments: [], bundleDirectory: emptyBundleDir()
             )
         )
         let flagged = ReviewTableBuilder.build(sources: [source], flaggedIDs: ["a.hea"]).csv
         let plain = ReviewTableBuilder.build(sources: [source], flaggedIDs: []).csv
-        #expect(flagged.split(separator: "\n")[1].hasSuffix(",true,"))
-        #expect(plain.split(separator: "\n")[1].hasSuffix(",false,"))
+        // Trailing fields: flagged, header_comments (empty), analysis_lead
+        // ("II" — firstInFile, no sidecar written), analysis_lead_reason.
+        #expect(flagged.split(separator: "\n")[1].hasSuffix(",true,,II,first in file"))
+        #expect(plain.split(separator: "\n")[1].hasSuffix(",false,,II,first in file"))
     }
 
     @Test("Sample indices convert to seconds using the record's own rate")
@@ -219,7 +243,7 @@ struct ReviewTableBuilderTests {
             recordPath: "a.hea",
             imported: .init(
                 recording: recording(device: "A", annotations: [annotation(start: 250)]),
-                dispositions: [:], headerComments: []
+                dispositions: [:], headerComments: [], bundleDirectory: emptyBundleDir()
             )
         )
         // 250 samples at 500 Hz = 0.5 s; end is 5250 samples = 10.5 s.
@@ -227,6 +251,103 @@ struct ReviewTableBuilderTests {
         let fields = csv.split(separator: "\n")[1].split(separator: ",", omittingEmptySubsequences: false)
         #expect(fields[6] == "0.500")
         #expect(fields[7] == "10.500")
+    }
+
+    // MARK: - #357: analysis lead columns
+
+    @Test("A designated bundle exports the analyst-override reason and channel name")
+    func designatedBundleExportsOverrideReason() throws {
+        let dir = emptyBundleDir()
+        try AnalysisLeadDesignator.designate(
+            channelNamed: "II", inBundle: dir, reviewer: "kevin",
+            at: Date(timeIntervalSince1970: 0)
+        )
+        let source = ReviewTableBuilder.Source(
+            recordPath: "a.hea",
+            imported: .init(
+                recording: recording(device: "A", annotations: [annotation()]),
+                dispositions: [:], headerComments: [], bundleDirectory: dir
+            )
+        )
+        let csv = ReviewTableBuilder.build(sources: [source], flaggedIDs: []).csv
+        let fields = csv.split(separator: "\n")[1].split(separator: ",", omittingEmptySubsequences: false)
+        #expect(fields[21] == "II")
+        #expect(fields[22] == "analyst override — kevin")
+    }
+
+    @Test("An undesignated bundle with no scored default exports first-in-file")
+    func undesignatedBundleExportsFirstInFile() {
+        let source = ReviewTableBuilder.Source(
+            recordPath: "a.hea",
+            imported: .init(
+                recording: recording(device: "A", annotations: [annotation()]),
+                dispositions: [:], headerComments: [], bundleDirectory: emptyBundleDir()
+            )
+        )
+        let csv = ReviewTableBuilder.build(sources: [source], flaggedIDs: []).csv
+        let fields = csv.split(separator: "\n")[1].split(separator: ",", omittingEmptySubsequences: false)
+        #expect(fields[21] == "II")
+        #expect(fields[22] == "first in file")
+    }
+
+    @Test("A scored default exports the r-peak score reason to two decimals")
+    func scoredDefaultExportsRPeakScore() throws {
+        let dir = emptyBundleDir()
+        let file = AnalysisLeadFile(
+            defaultChoice: .init(
+                channelName: "II", reason: .rPeakScore,
+                perLeadScores: ["II": 0.9137], scoredAt: Date(timeIntervalSince1970: 0),
+                scorerVersion: 1
+            ),
+            designation: nil
+        )
+        try file.write(to: dir)
+        let source = ReviewTableBuilder.Source(
+            recordPath: "a.hea",
+            imported: .init(
+                recording: recording(device: "A", annotations: [annotation()]),
+                dispositions: [:], headerComments: [], bundleDirectory: dir
+            )
+        )
+        let csv = ReviewTableBuilder.build(sources: [source], flaggedIDs: []).csv
+        let fields = csv.split(separator: "\n")[1].split(separator: ",", omittingEmptySubsequences: false)
+        #expect(fields[21] == "II")
+        #expect(fields[22] == "r-peak score 0.91")
+    }
+
+    @Test("A record with no populated non-trend channel leaves both columns empty")
+    func noResolvableLeadLeavesColumnsEmpty() {
+        // sampleRate < 5 Hz is what makes a channel a "trend" channel
+        // (`Channel.isTrendChannel`) — no ECG candidate for analysis lead.
+        let trendOnly = Channel(
+            id: UUID(), name: "HR", unit: "bpm", sampleRate: 1,
+            startTimeUnixMS: 0, sampleCount: 100, storageFileName: "hr.bin",
+            pyramid: []
+        )
+        let source = ReviewTableBuilder.Source(
+            recordPath: "a.hea",
+            imported: .init(
+                recording: recording(
+                    device: "A", annotations: [annotation()], channels: [trendOnly]
+                ),
+                dispositions: [:], headerComments: [], bundleDirectory: emptyBundleDir()
+            )
+        )
+        let csv = ReviewTableBuilder.build(sources: [source], flaggedIDs: []).csv
+        let fields = csv.split(separator: "\n")[1].split(separator: ",", omittingEmptySubsequences: false)
+        #expect(fields[21].isEmpty)
+        #expect(fields[22].isEmpty)
+    }
+
+    @Test("A never-imported record contributes no row at all, so no analysis-lead column to check")
+    func neverImportedRecordContributesNoAnalysisLeadRow() {
+        // #330's existing rule: an un-imported record contributes zero rows.
+        // Documented here so the "empty = never imported" claim in the docs
+        // has a test backing it, even though it collapses to the row-count
+        // assertion `countsUnimportedRecords` already makes.
+        let missing = ReviewTableBuilder.Source(recordPath: "b.hea", imported: nil)
+        let result = ReviewTableBuilder.build(sources: [missing], flaggedIDs: [])
+        #expect(result.annotationRows == 0)
     }
 
     @Test("Zero sources produce a header-only table, not an error")

@@ -405,4 +405,29 @@ struct MurSessionPackageTests {
         #expect(try Data(contentsOf: recordDir.appendingPathComponent("ch0.bin")) == Data([9, 9]))
         #expect(!FileManager.default.fileExists(atPath: recordDir.appendingPathComponent("annotations.json").path))
     }
+
+    /// #357 — `analysis_lead.json` is an analyst-layer sidecar like any
+    /// other: import → designate → save → reopen into a fresh store must
+    /// carry the designation, not just the scored default. Mirrors the
+    /// round-trip mechanics of `roundTrip()` above.
+    @Test("Analysis lead designation round-trips through a .mur package")
+    func analysisLeadDesignationRoundTrips() throws {
+        let (dir, recording, _) = try makeBundle()
+        try AnalysisLeadDesignator.designate(
+            channelNamed: "II", inBundle: dir, reviewer: "kevin",
+            at: Date(timeIntervalSince1970: 500)
+        )
+
+        let pkg = try tempDir("pkg").appendingPathComponent("Lead.mur")
+        try MurSessionPackage.write(recording: recording, recordingDirectory: dir, to: pkg)
+
+        let out = try tempDir("open")
+        let result = try MurSessionPackage.read(packageURL: pkg, into: out)
+        let restoredDir = result.records[0].recordingDirectory
+
+        let restored = AnalysisLeadFile.read(from: restoredDir)
+        #expect(restored?.designation?.channelName == "II")
+        #expect(restored?.designation?.reviewer == "kevin")
+        #expect(restored?.designation?.designatedAt == Date(timeIntervalSince1970: 500))
+    }
 }

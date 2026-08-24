@@ -995,7 +995,8 @@ public struct ContentView: View {
                 imported: .init(
                     recording: recording,
                     dispositions: ReviewTableBuilder.dispositions(inBundle: directory),
-                    headerComments: recording.headerComments
+                    headerComments: recording.headerComments,
+                    bundleDirectory: directory
                 )
             )
         }

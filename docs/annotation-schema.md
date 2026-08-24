@@ -298,8 +298,43 @@ quietly covers less than the cohort.
 | `reviewed_by` / `reviewed_at` | Who reviewed it and when (ISO 8601, UTC). |
 | `flagged` | Whether the record is flagged for the session. |
 | `header_comments` | The record's `.hea` comment lines, joined with ` \| `. |
+| `analysis_lead` | The channel every calculation on this record ran on — see [Analysis lead](#analysis-lead). Record-level: every row for the same record repeats it. |
+| `analysis_lead_reason` | Why that channel — see below. Record-level, same repetition. |
 
 UTF-8, no BOM, `\n` line endings, RFC 4180 quoting. Rows sort by record path,
 then start sample, then annotation id, so the same review exports
 byte-identically every time. The header row is always present, even when the
 table is empty.
+
+### Analysis lead
+
+Every calculation Murmur runs (QT/QTc, R-peak detection, interval
+measurement) runs on exactly one channel per record — the **analysis
+lead**. It is resolved designation → stored default → first-in-file; the
+channel's *name* never decides anything (an "MLII" import and a
+relabeled "II" import resolve identically).
+
+`analysis_lead` is the resolved channel's name. `analysis_lead_reason`
+states why, in one of three forms:
+
+| `analysis_lead_reason` value | Meaning |
+|---|---|
+| `analyst override — <reviewer>` | An analyst explicitly designated this channel. |
+| `r-peak score N.NN` | The import-time scorer picked it for its R-peak support (0–1, 2 dp). |
+| `first in file` | No designation and no scorer ran (or it declined) — the first populated non-trend channel by file order. |
+
+Both columns are **empty** for a record with no resolvable analysis
+lead — a record whose only channels are trend channels (no ECG to lead
+on), or, same as every other column, a record the analyst never
+imported (see [above](#review-table-export)). Empty is not an error
+state here any more than it is anywhere else in this table.
+
+The same choice and wording surface inside Murmur Studio itself, in the
+metrics header's "analysis lead: …" disclosure line, and in the
+per-record Markdown report's **Analysis lead** metadata field — one
+vocabulary, so a value read here matches what the analyst saw on
+screen.
+
+The resolution and its provenance are stored per record in
+`<bundle>/analysis_lead.json`, alongside the other analyst-layer
+sidecars; it travels with the record inside a `.mur` session package.

@@ -151,6 +151,23 @@ public enum AnalysisLeadProvenance: Equatable, Sendable {
     case designated(reviewer: String, date: Date)
     case rPeakScore(score: Double, perLead: [String: Double])
     case firstInFile
+
+    /// The `analysis_lead_reason` column in the review table (#330) and
+    /// the `.mur` report export — the same three provenances as
+    /// `AnalysisLeadHeaderLine.reasonPhrase`, worded for a spreadsheet
+    /// cell rather than a sentence: it names the score, not just that
+    /// one won, and never a date (exports are batch-scale; a reviewer
+    /// name and a score are enough for a consumer to sort/filter on).
+    public var exportReason: String {
+        switch self {
+        case let .designated(reviewer, _):
+            return "analyst override — \(reviewer)"
+        case let .rPeakScore(score, _):
+            return String(format: "r-peak score %.2f", score)
+        case .firstInFile:
+            return "first in file"
+        }
+    }
 }
 
 public struct AnalysisLeadResolution: Equatable, Sendable {
