@@ -143,3 +143,34 @@ struct ArrhythmiaPreflightScanTests {
     }
 }
 #endif
+
+// #357: `ArrhythmiaScanCacheKey` is the app-target static that builds the
+// arrhythmia scan's derived-cache `parametersKey`. It's exercised directly
+// (no `@testable import Murmur` — MurmurTests never does that) via the same
+// symlink mechanism as `QRSProminenceLeadScorer`: the file is a dependency-
+// free standalone type, symlinked from Murmur/ into MurmurTests/ so the
+// file-system-synchronized group compiles it into this module too.
+@Suite("Arrhythmia scan cache key carries the analysis lead (#357)")
+struct ArrhythmiaScanCacheKeyTests {
+    @Test("Two keys differing only by lead name are different — designating invalidates the cache")
+    func keyCarriesLead() {
+        let a = ArrhythmiaScanCacheKey.make(
+            lowBpm: 40, highBpm: 120, minDurationSeconds: 10,
+            minRunBeats: 5, analysisLeadName: "MLII")
+        let b = ArrhythmiaScanCacheKey.make(
+            lowBpm: 40, highBpm: 120, minDurationSeconds: 10,
+            minRunBeats: 5, analysisLeadName: "V5")
+        #expect(a != b)
+    }
+
+    @Test("Otherwise-identical dials produce identical keys")
+    func keyStableAcrossRuns() {
+        let a = ArrhythmiaScanCacheKey.make(
+            lowBpm: 45, highBpm: 150, minDurationSeconds: 8,
+            minRunBeats: 4, analysisLeadName: "MLII")
+        let b = ArrhythmiaScanCacheKey.make(
+            lowBpm: 45, highBpm: 150, minDurationSeconds: 8,
+            minRunBeats: 4, analysisLeadName: "MLII")
+        #expect(a == b)
+    }
+}
