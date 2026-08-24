@@ -83,6 +83,10 @@ Lane headers and queue captions echo the configuration they ran with,
 and exports carry the same statements — so a published figure names its
 own provenance. See [Citing Murmur Studio]({{ site.baseurl }}/citation).
 
+Murmur never chooses, and never gates, a calculation by a lead's
+name; the analysis lead is designated by the analyst or defaulted by
+measured R-peak quality, and lead names appear only in disclosures.
+
 ### 5. Analyst work is separate and attributed
 
 Dispositions and notes live in the imported bundle

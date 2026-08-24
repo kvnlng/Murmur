@@ -621,6 +621,60 @@ struct AnalysisLeadImportTests {
         #expect(AnalysisLeadFile.read(from: second.directory)?
             .defaultChoice?.channelName == "ECG2")
     }
+
+    /// The end-to-end acceptance test (spec §1.7, first bullet): a real
+    /// scorer, a real import, a real resolution — noise on channel 0,
+    /// signal on channel 1, and the default lands on the clean lead with
+    /// score provenance. Registers the real `QRSProminenceLeadScorer`
+    /// (reachable via the `MurmurTests/QRSProminenceLeadScorer.swift`
+    /// symlink), so this belongs in the serialized suite like every other
+    /// test here that touches `AnalysisLeadScoring.shared`.
+    @Test("Noisy ch0 / clean ch1 defaults to ch1 with score provenance, end-to-end")
+    func noisyFirstChannelDefaultsToClean() async throws {
+        AnalysisLeadScoring.shared.register(QRSProminenceLeadScorer(entitled: { true }))
+        defer { AnalysisLeadScoring.shared.clearForTesting() }
+
+        let (store, root) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = FileManager.default.temporaryDirectory
+            .appendingPathComponent("analysis-lead-e2e-src-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: source) }
+
+        // Same generators as Task 3's QRSProminenceLeadScorerTests.makeLeads
+        // (seeded LCG noise; a crude repeating QRS spike train), scaled to
+        // Int32 for WFDBRecordWriter — qrsProminence is a P95/median ratio,
+        // so the amplitude scale itself is immaterial to which lead wins.
+        let n = 360 * 30
+        var state: UInt64 = 0x5DEECE66D
+        var noisy = [Int32](repeating: 0, count: n)
+        for i in 0..<n {
+            state = state &* 6364136223846793005 &+ 1442695040888963407
+            let unit = Float(Int64(bitPattern: state) % 1000) / 1000.0
+            noisy[i] = Int32((unit * 1000).rounded())
+        }
+        var clean = [Int32](repeating: 0, count: n)
+        for beat in stride(from: 0, to: n, by: 360) { // 60 bpm at 360 Hz
+            clean[beat] = 1000
+            if beat + 1 < n { clean[beat + 1] = -400 }
+        }
+
+        try WFDBRecordWriter.write(
+            recordName: "rec",
+            channelSamples: [noisy, clean],
+            sampleRateHz: 360,
+            leadNames: ["NOISY", "CLEAN"],
+            calibration: .init(gain: 1000, baseline: 0, unit: "mV"),
+            in: source
+        )
+
+        let summary = try await store.importWFDB(folderURL: source, heaFilename: "rec.hea")
+        let resolution = try #require(summary.recording.analysisLead(inBundle: summary.directory))
+        #expect(resolution.channel.name == "CLEAN")
+        if case .rPeakScore = resolution.provenance {} else {
+            Issue.record("expected score provenance, got \(resolution.provenance)")
+        }
+    }
 }
 
 // MARK: - QRS-prominence scorer (App target)
@@ -664,5 +718,52 @@ struct QRSProminenceLeadScorerTests {
     func unentitledDeclines() {
         let scorer = QRSProminenceLeadScorer(entitled: { false })
         #expect(scorer.scoreLeads(makeLeads(), sampleRate: 360) == nil)
+    }
+}
+
+// MARK: - No-name-gate source guard
+
+/// A code-shape test in the repo's `LayoutFitSupport`-style precedent: reads
+/// the calculation sources at test time and asserts a fixed set of banned
+/// shapes stays out of them (#357). `primaryECGChannel` itself deliberately
+/// survives elsewhere — `RecordListEntry`, `MurSessionPackage` — because
+/// those are display paths, not calculation paths; that is why this guard
+/// walks only the four files named below, not the whole app target.
+@Suite("Analysis lead — no-name-gate guard")
+struct AnalysisLeadNoNameGateTests {
+    /// Resolved from this test file's own `#filePath` rather than the
+    /// process's current directory, so the guard works the same way under
+    /// `xcrun xctest` (this repo's `xcodebuild test` workaround) as under a
+    /// normal `xcodebuild test` run.
+    private var calculationSources: [URL] {
+        let thisFile = URL(fileURLWithPath: #filePath)
+        let repoRoot = thisFile
+            .deletingLastPathComponent() // MurmurTests/
+            .deletingLastPathComponent() // repo root
+        let murmur = repoRoot.appendingPathComponent("Murmur", isDirectory: true)
+        return [
+            "ArrhythmiaScanOrchestrator.swift",
+            "MorphologyOrchestrator.swift",
+            "IntervalMarkingsOrchestrator.swift",
+            "VTVFScanView.swift",
+        ].map { murmur.appendingPathComponent($0) }
+    }
+
+    @Test("No calculation path selects a channel by name or channels.first (#357)")
+    func noNameGatesInCalculationPaths() throws {
+        let banned = ["conventionalQTChannels", "primaryECGSamples(",
+                      "channels.first", "hasPrefix(\"ML\")"]
+        var filesChecked = 0
+        for file in calculationSources {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            filesChecked += 1
+            for pattern in banned {
+                #expect(!text.contains(pattern),
+                        "\(file.lastPathComponent) contains banned shape \(pattern)")
+            }
+        }
+        // A guard that silently reads zero files is not a guard — assert the
+        // #filePath resolution actually reached all four calculation sources.
+        #expect(filesChecked == 4)
     }
 }
