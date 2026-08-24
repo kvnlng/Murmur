@@ -55,6 +55,59 @@ struct WFDBHeaderParserTests {
         #expect(header.signals[2].gain  == 1000.0)
     }
 
+    @Test("Parses the spec gain-field form <gain>(<baseline>)/<units> (#360)")
+    func parsesSpecGainFieldForm() throws {
+        // header(5)'s own example shape: 200(0)/mV. Before #360 the parser
+        // read the parenthesised part as the unit and the slash part as the
+        // baseline, so a spec-conformant file showed unit "0" and silently
+        // dropped any non-zero baseline.
+        let hea = """
+        spec 3 250 2500
+        spec.dat 16 200(0)/mV 16 0 0 0 0 I
+        spec.dat 16 200(1024)/mV 16 0 0 0 0 II
+        spec.dat 16 1000/uV 16 0 0 0 0 V1
+        """
+        let header = try WFDBHeaderParser.parse(text: hea)
+        #expect(header.signals[0].unit == "mV")
+        #expect(header.signals[0].baseline == 0)
+
+        #expect(header.signals[1].unit == "mV")
+        #expect(header.signals[1].baseline == 1024)
+
+        #expect(header.signals[2].unit == "uV")
+        #expect(header.signals[2].gain == 1000.0)
+    }
+
+    @Test("Gain field with two integers reads as spec form: baseline in parens, unit after slash")
+    func gainFieldBothPartsIntegers() throws {
+        // 200(0)/0 — under either flavour the unit is "0" and the baseline 0,
+        // which is also how rdsamp and the wfdb Python package read it.
+        let hea = """
+        odd 1 250 2500
+        odd.dat 16 200(0)/0 16 0 0 0 0 I
+        """
+        let header = try WFDBHeaderParser.parse(text: hea)
+        #expect(header.signals[0].baseline == 0)
+        #expect(header.signals[0].unit == "0")
+    }
+
+    @Test("Still accepts the legacy flavour <gain>(<units>)/<baseline> by type")
+    func acceptsLegacyGainFieldFlavour() throws {
+        // Headers Murmur wrote before #360 carry 200(mV)/0; a unit string is
+        // never an integer and a baseline always is, so both flavours parse
+        // without a migration.
+        let hea = """
+        legacy 2 250 2500
+        legacy.dat 16 200(mV)/0 16 0 0 0 0 I
+        legacy.dat 16 500(mV)/500 16 0 0 0 0 II
+        """
+        let header = try WFDBHeaderParser.parse(text: hea)
+        #expect(header.signals[0].unit == "mV")
+        #expect(header.signals[0].baseline == 0)
+        #expect(header.signals[1].unit == "mV")
+        #expect(header.signals[1].baseline == 500)
+    }
+
     @Test("A gain field of 0 (uncalibrated) falls back to the WFDB default 200 adu/mV")
     func gainZeroFallsBackToDefault() throws {
         // NSRDB signal lines carry `gain 0` (uncalibrated). Parsed literally as
@@ -168,6 +221,40 @@ struct WFDBHeaderParserTests {
         #expect(throws: WFDBHeaderError.self) {
             try WFDBHeaderParser.parse(text: hea)
         }
+    }
+}
+
+// MARK: - WFDB record writer
+
+@Suite("WFDB record writer")
+struct WFDBRecordWriterTests {
+
+    @Test("Writes the gain field in spec form <gain>(<baseline>)/<units> and round-trips (#360)")
+    func writesSpecGainFieldForm() throws {
+        // rdsamp and the wfdb Python package read the parenthesised part as
+        // the baseline; a header written the other way around shows unit "0"
+        // in PhysioNet's own tooling.
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let heaURL = try WFDBRecordWriter.write(
+            recordName: "rt",
+            channelSamples: [[100, 200, 300]],
+            sampleRateHz: 250,
+            leadNames: ["II"],
+            calibration: .init(gain: 200, baseline: 512, unit: "mV"),
+            in: dir
+        )
+
+        let heaText = try String(contentsOf: heaURL, encoding: .utf8)
+        #expect(heaText.contains("200(512)/mV"))
+
+        let header = try WFDBHeaderParser.parse(text: heaText)
+        #expect(header.signals[0].gain == 200.0)
+        #expect(header.signals[0].baseline == 512)
+        #expect(header.signals[0].unit == "mV")
     }
 }
 
