@@ -18,6 +18,22 @@ import UniformTypeIdentifiers
 struct BedsideView: View {
     let recording: Recording
     let recordingDirectory: URL
+    /// #358 — this record's id in the NAVIGATOR's id space: the root-relative
+    /// `.hea` path (`RecordListEntry.id` / `WFDBRecordEntry.filename`), which
+    /// is the same string `importStates`, `SessionFlagStore`,
+    /// `CarriedSessionStore` and the cohort review-table export key by.
+    ///
+    /// Supplied by the creator because only it knows the id: `recording`
+    /// itself carries `sourceFileName`, the BARE `.hea` filename, which on a
+    /// nested corpus (`WFDBRecords/01/010/JS00001.hea`) is a DIFFERENT string
+    /// — and a per-record placement override written under one id and read
+    /// under the other is invisible to half the app. Every #358 lookup and
+    /// write in this view goes through this property for that reason.
+    ///
+    /// `nil` means "no record id in this shell" (previews): folder-wide
+    /// declarations still resolve, per-record ones are neither read nor
+    /// offered — a truthful degradation rather than a guessed id.
+    var recordID: String?
     /// X16: called after a gain reinterpretation is persisted to the bundle
     /// manifest, with the updated recording — the owner of the `recording`
     /// value adopts it so every panel re-renders against the new factor.
@@ -242,11 +258,13 @@ struct BedsideView: View {
     init(
         recording: Recording,
         recordingDirectory: URL,
+        recordID: String? = nil,
         onRecordingMutated: ((Recording) -> Void)? = nil,
         onExportReviewTable: (() -> Void)? = nil
     ) {
         self.recording = recording
         self.recordingDirectory = recordingDirectory
+        self.recordID = recordID
         self.onRecordingMutated = onRecordingMutated
         self.onExportReviewTable = onExportReviewTable
         // Viewport + focus mode key off the first *ECG* channel — trend
@@ -793,6 +811,19 @@ struct BedsideView: View {
                 channel: channel,
                 onApply: { factor in applyGainInterpretation(channel: channel, factor: factor) },
                 onCancel: { gainSheetChannel = nil }
+            )
+        }
+        // #358: the declare-placement sheet, on the same per-channel `item:`
+        // pattern. It writes straight into the shared map — an @Observable
+        // the header and the menus read inside `body`, so the change shows
+        // without re-running any orchestrator task (jurisdiction rule:
+        // nothing recomputes when a declaration changes).
+        .sheet(item: $placementSheetChannel) { channel in
+            LeadPlacementSheet(
+                recordedName: channel.name,
+                recordID: recordID,
+                map: LeadPlacementMapContext.shared,
+                onDismiss: { placementSheetChannel = nil }
             )
         }
         .alert(
@@ -1396,16 +1427,12 @@ struct BedsideView: View {
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
         // #358 — the report stays pure (jurisdiction rule); this is the one
-        // place that reads `LeadPlacementMapContext.shared`. `recordID` is
-        // `recording.sourceFileName` — the `.hea` filename this record was
-        // imported from — since a single-record view has no reach into the
-        // navigator's root-relative id; a per-record override keyed under
-        // that longer id (a nested corpus) won't match here and the export
-        // falls back to the folder-wide baseline, if any.
-        let declaredPlacement = analysisLead.flatMap {
-            LeadPlacementMapContext.shared.declaration(
-                forRecordedName: $0.channel.name, recordID: recording.sourceFileName)
-        }
+        // place in the export path that reads `LeadPlacementMapContext.shared`.
+        // The id is `recordID` — the navigator's root-relative path, the same
+        // string the declare sheet writes under and the cohort export looks up
+        // with. It used to be `recording.sourceFileName`, the bare `.hea`
+        // filename, which silently missed every override on a nested corpus.
+        let declaredPlacement = declaredPlacement(forChannelNamed: analysisLead?.channel.name)
         let body = MarkdownReport.generate(
             recording: recording,
             annotations: allAnnotations,
@@ -2243,20 +2270,54 @@ struct BedsideView: View {
     /// read lands a frame later, or when a designation lengthens the line.
     /// A statement too long for the reserved space truncates with the whole
     /// of it in `.help`, exactly as the beat card's status line does.
+    ///
+    /// #358: the line also carries the analysis lead's placement declaration,
+    /// as `AnalysisLeadHeaderLine`'s parenthetical, and the whole line is the
+    /// affordance that opens the declare sheet for that lead — the sentence
+    /// stating what the name was declared to mean is where an analyst reaches
+    /// to change it. Read from `LeadPlacementMapContext.shared` HERE, inside
+    /// `body`: the map is @Observable, so a declaration re-renders this line
+    /// (and every lead's menu) with no task key and no recomputation.
+    @ViewBuilder
     private var analysisLeadNote: some View {
         // `excludedSummary` stays nil: nothing measures per-lead beat
         // exclusions today (the delineator runs on the analysis lead alone),
         // and a qualifier the app cannot substantiate is worse than no
         // qualifier. The slot is here for whatever eventually measures one.
-        let line = analysisLead.map {
-            AnalysisLeadHeaderLine.text(for: $0, excludedSummary: nil)
+        if let resolution = analysisLead {
+            let line = AnalysisLeadHeaderLine.text(
+                for: resolution,
+                excludedSummary: nil,
+                declaration: declaredPlacement(forChannelNamed: resolution.channel.name)
+            )
+            // `.plain`, like the beat card's pin footer: the disclosure reads
+            // as a sentence, not as a control, and stays keyboard- and
+            // VoiceOver-reachable all the same.
+            Button {
+                placementSheetChannel = resolution.channel
+            } label: {
+                analysisLeadText(
+                    line,
+                    help: "\(line) — click to declare what this lead's name means"
+                )
+            }
+            .buttonStyle(.plain)
+        } else {
+            analysisLeadText(nil, help: "")
         }
-        return Text(line ?? " ")
+    }
+
+    /// The disclosure's one rendering, shared by both branches above so the
+    /// #246 reserved height cannot differ between them. The hover text is the
+    /// caller's because only the interactive branch has a gesture to name;
+    /// the truncated line itself is in it either way.
+    private func analysisLeadText(_ line: String?, help: String) -> some View {
+        Text(line ?? " ")
             .font(.caption2)
             .foregroundStyle(.secondary)
             .lineLimit(2, reservesSpace: true)
             .truncationMode(.tail)
-            .help(line ?? "")
+            .help(help)
             .accessibilityIdentifier("analysis-lead-disclosure")
             .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -2968,6 +3029,11 @@ struct BedsideView: View {
     // X16: the channel whose gain-reinterpretation sheet is open.
     @State private var gainSheetChannel: Channel?
 
+    // #358: the channel whose declare-placement sheet is open. `item:`, the
+    // same shape as the gain sheet, so each channel's sheet opens on THAT
+    // channel's standing declaration.
+    @State private var placementSheetChannel: Channel?
+
     /// X16: persist the analyst's factor to the bundle manifest and hand the
     /// updated recording to the owner. `nil` clears the correction. Failures
     /// surface in the attach-error alert path — same class of bundle-write
@@ -3013,8 +3079,32 @@ struct BedsideView: View {
             defaultLabel: analysisLeadDefault.map(AnalysisLeadHeaderLine.label(for:))
                 ?? channel.name,
             designate: { designateAnalysisLead(channel) },
-            revertToDefault: { revertAnalysisLeadToDefault() }
+            revertToDefault: { revertAnalysisLeadToDefault() },
+            // #358: offered on EVERY lead this panel draws, including an
+            // empty one — see the gate comment in `ChannelPanel`.
+            declarePlacement: { placementSheetChannel = channel },
+            declaredPlacement: declaredPlacement(forChannelNamed: channel.name)
         )
+    }
+
+    // MARK: - Lead placement (#358)
+
+    /// What has been declared about `name` on THIS record — the one lookup
+    /// every #358 surface in this view goes through (the header line, each
+    /// lead's menu, the Markdown export), so they can never disagree about
+    /// which record id they asked under. `recordID` is the navigator's id,
+    /// not `recording.sourceFileName`; see the property's note.
+    ///
+    /// Read inside `body` on the render paths, which is what makes the
+    /// @Observable map re-render the header and the menus when the sheet
+    /// writes. Nothing here keys any `.task(id:)`: a declaration recomputes
+    /// nothing (jurisdiction rule).
+    private func declaredPlacement(
+        forChannelNamed name: String?
+    ) -> (declaration: LeadPlacementDeclaration, isOverride: Bool)? {
+        guard let name else { return nil }
+        return LeadPlacementMapContext.shared.declaration(
+            forRecordedName: name, recordID: recordID)
     }
 
     /// Write the assertion, then bump the session stamp the orchestrators

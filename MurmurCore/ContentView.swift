@@ -756,6 +756,12 @@ public struct ContentView: View {
             BedsideView(
                 recording: recording,
                 recordingDirectory: directory,
+                // #358: the direct view has no navigator, so there is no
+                // root-relative id to hand down — the record's own `.hea`
+                // filename IS its whole identity in this shell, and every
+                // #358 read and write here uses that one string, so the
+                // sheet, the header and the report agree.
+                recordID: recording.sourceFileName,
                 // X16: a gain reinterpretation mutates the manifest; the
                 // view's own `recording` is this state's copy, so the state
                 // must adopt the mutation for the panels to re-render.
@@ -844,6 +850,14 @@ public struct ContentView: View {
                 BedsideView(
                     recording: recording,
                     recordingDirectory: directory,
+                    // #358: `key` is the navigator's `RecordListEntry.id` —
+                    // the root-relative `.hea` path — the SAME string
+                    // `importStates`, `SessionFlagStore` and the cohort
+                    // review-table export (`ReviewTableBuilder.Source
+                    // .recordPath`, built from `entry.id`) key by. Handing
+                    // it down is what makes an override declared here
+                    // visible to both exports on a nested corpus.
+                    recordID: key,
                     // X16: same adoption as the direct view, into this
                     // folder-entry's import cache.
                     onRecordingMutated: { updated in

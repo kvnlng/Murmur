@@ -56,6 +56,14 @@ struct AnalysisLeadHooks {
     var defaultLabel: String
     var designate: () -> Void
     var revertToDefault: () -> Void
+    /// #358 — open the declare-placement sheet for THIS lead. Offered on
+    /// every lead the panel draws, populated or not (see the menu).
+    var declarePlacement: () -> Void
+    /// #358 — what has already been declared about this lead's recorded
+    /// name, so the menu states the standing declaration rather than
+    /// offering an edit to something invisible. Resolved by the owner from
+    /// `LeadPlacementMapContext`; the panel never reads that map itself.
+    var declaredPlacement: (declaration: LeadPlacementDeclaration, isOverride: Bool)?
 }
 
 struct ChannelPanel: View {
@@ -720,10 +728,16 @@ struct ChannelPanel: View {
                 // not a paid computation, and the free viewer's numbers come
                 // from a lead too.
                 // A lead that offers neither (an empty channel that was never
-                // designated) contributes NO items and no divider — an
+                // designated) contributes NO DESIGNATION items — an
                 // affordance that would write a designation nothing can
-                // resolve is not offered at all.
-                if let designation = analysisLead, designation.entry != .none {
+                // resolve is not offered at all. #358's declare item is NOT
+                // subject to that rule and sits outside the `entry != .none`
+                // gate: declaring what a channel's NAME meant physically is a
+                // statement about the folder's wiring, true of an empty
+                // channel exactly as of a populated one, and it is not an
+                // input to any computation. The two predicates above stay
+                // exactly as #357 wrote them.
+                if let designation = analysisLead {
                     if noteAuthoring != nil { Divider() }
                     switch designation.entry {
                     case .revert:
@@ -736,6 +750,16 @@ struct ChannelPanel: View {
                             .accessibilityIdentifier("bedside-context-designate-analysis-lead")
                     case .none:
                         EmptyView()
+                    }
+                    Button("Declare placement…") { designation.declarePlacement() }
+                        .accessibilityIdentifier("bedside-context-declare-placement")
+                    // The standing declaration, read back beneath the item
+                    // that edits it — the same discipline as the gain item
+                    // naming its current factor, in the one wording every
+                    // #358 surface renders through.
+                    if let declared = designation.declaredPlacement {
+                        Text(LeadPlacementDisclosure.parenthetical(
+                            for: declared.declaration, isOverride: declared.isOverride))
                     }
                 }
                 // Same rule as every other authoring surface: say WHY the
