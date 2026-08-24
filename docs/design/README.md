@@ -12,6 +12,7 @@ This directory is excluded from the published docs site (`_config.yml`
 | Handoff | Tracking issue | Canonical option |
 | --- | --- | --- |
 | [2026-08-15-main-window](2026-08-15-main-window/) — main window: toolbar, navigator, pinned stage, anchored notes, trend stack, info bar, review queue | [#252](https://github.com/kvnlng/Murmur/issues/252) | `11a` (launch `12a`, trend stack `13a`, notes `8a`/`9a`) |
+| [2026-08-24-analysis-lead-and-placement-map](2026-08-24-analysis-lead-and-placement-map/) — analysis-lead designation (R-peak-quality default, no name gates) and the analyst-declared lead placement map | [#357](https://github.com/kvnlng/Murmur/issues/357), [#358](https://github.com/kvnlng/Murmur/issues/358) | spec text (no wireframes) |
 
 Reading a handoff: start with its `README.md` (the spec), then open
 `ECG Analyst Wireframes.dc.html` in a browser (keep `support.js` beside
