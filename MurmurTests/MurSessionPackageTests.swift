@@ -175,7 +175,8 @@ struct MurSessionPackageTests {
 
         let withPaper = MurSessionState(
             viewportStartSample: 0, viewportEndSample: 2_500,
-            gainMillimetersPerMillivolt: 20      // deliberately NOT standard 10
+            gainMillimetersPerMillivolt: 20,     // deliberately NOT standard 10
+            speedMillimetersPerSecond: 50        // #359: the timebase half, ditto
         )
         let pkgA = try tempDir("pkg-paper").appendingPathComponent("Paper.mur")
         _ = try MurSessionPackage.write(
@@ -187,6 +188,12 @@ struct MurSessionPackageTests {
             MurSessionState.self, from: #require(a.records[0].sessionJSON)
         )
         #expect(restoredA.gainMillimetersPerMillivolt == 20)
+        #expect(restoredA.speedMillimetersPerSecond == 50)
+        // #359: the speed is view-owned like the gain — the live-snapshot
+        // merge must carry it, or the first pan wipes the saved paper.
+        let merged = MurSessionState(tau: 2.5).replacingViewState(with: withPaper)
+        #expect(merged.speedMillimetersPerSecond == 50)
+        #expect(merged.tau == 2.5)
 
         // A session captured before any gain resolved carries no paper.
         let noPaper = MurSessionState(viewportStartSample: 0, viewportEndSample: 2_500)
@@ -201,6 +208,17 @@ struct MurSessionPackageTests {
         )
         #expect(restoredB.gainMillimetersPerMillivolt == nil,
                 "no saved paper must stay absent — the open falls back to Standard View")
+        #expect(restoredB.speedMillimetersPerSecond == nil,
+                "a chosen-extent session restores its exact sample width, not a speed")
+
+        // A pre-#359 package (no speed key in the JSON at all) decodes with
+        // the field absent — nothing fabricated for older saves.
+        let legacy = try JSONDecoder().decode(
+            MurSessionState.self,
+            from: Data(#"{"viewportStartSample":0,"viewportEndSample":2500,"gainMillimetersPerMillivolt":10}"#.utf8)
+        )
+        #expect(legacy.gainMillimetersPerMillivolt == 10)
+        #expect(legacy.speedMillimetersPerSecond == nil)
     }
 
     /// X26: the template's provenance — its population, lead, span and formula

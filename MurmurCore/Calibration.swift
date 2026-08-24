@@ -33,6 +33,20 @@ final class Calibration {
     /// canonical). Shared across leads by clinical convention.
     var gainMillimetersPerMillivolt: Double?
 
+    /// Canonical paper speed in mm/s (#359) — the timebase twin of the gain
+    /// above, so BOTH axes are calibration-canonical and a window resize
+    /// changes visible duration, never scale. `nil` means no speed has been
+    /// chosen (legacy auto view, point-fallback displays): the viewport width
+    /// in samples is then the only truth and the readout honestly reports
+    /// whatever scale that implies. Standard View and the speed presets set
+    /// it; an analyst zoom CLEARS it (zoom is a choice of extent, and the
+    /// readout goes honest-non-standard rather than asserting a speed nobody
+    /// picked); engaging the calibration lock captures the current implied
+    /// speed so the lock holds the timebase against everything, resize
+    /// included. `BedsideView` re-derives the viewport width from this on
+    /// every canvas-size change.
+    var speedMillimetersPerSecond: Double?
+
     /// Lock-to-standard state. Placeholder in Phase 1; wired to hold
     /// calibration across zoom gestures in a later phase.
     var locked: Bool = false
@@ -96,6 +110,23 @@ enum CalibrationMath {
         guard span > 0, gain > 0, mmPerPoint > 0 else { return nil }
         let height = span * gain / mmPerPoint
         return height.isFinite && height > 0 ? height : nil
+    }
+
+    /// The paper speed (mm/s) a window of `windowSeconds` actually renders at
+    /// across a canvas `widthPoints` wide — the inverse of `windowSamples`,
+    /// used when the calibration lock engages with no canonical speed chosen:
+    /// the lock's contract is a genuine hold of the timebase (#359), so the
+    /// speed on screen at that moment becomes the canonical one. nil for
+    /// degenerate input — the caller then locks nothing extra rather than
+    /// canonising a nonsense speed.
+    static func impliedMillimetersPerSecond(
+        windowSeconds: Double,
+        canvasWidthPoints widthPoints: Double,
+        millimetersPerPoint mmPerPoint: Double
+    ) -> Double? {
+        guard windowSeconds > 0, widthPoints > 0, mmPerPoint > 0 else { return nil }
+        let speed = (widthPoints / windowSeconds) * mmPerPoint
+        return speed.isFinite && speed > 0 ? speed : nil
     }
 
     /// Viewport width in samples that renders `speed` mm/s across a canvas

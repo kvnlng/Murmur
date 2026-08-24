@@ -215,6 +215,14 @@ public struct MurSessionState: Codable, Equatable, Sendable {
     /// a raw import does. The time scale (mm/s) is not stored separately: it is
     /// implied by the saved viewport width against the canvas.
     public var gainMillimetersPerMillivolt: Double?
+    /// #359 — the timebase half of the saved paper (mm/s), making both axes
+    /// calibration-canonical on restore: a session saved at 25 mm/s reopens
+    /// at 25 mm/s in any window size (the width re-derives against the new
+    /// canvas). `nil` when no canonical speed was in effect at save — the
+    /// analyst had zoomed to an extent, or the display couldn't prove mm —
+    /// and the restore then lands the saved sample width exactly as before,
+    /// so older packages and older readers are both unaffected.
+    public var speedMillimetersPerSecond: Double?
     /// VT/VF scan operating point in effect.
     public var tau: Double?
     public var minDurationSeconds: Double?
@@ -240,6 +248,7 @@ public struct MurSessionState: Codable, Equatable, Sendable {
         selectedTrendMetric: String? = nil,
         selectedBinPreset: String? = nil,
         gainMillimetersPerMillivolt: Double? = nil,
+        speedMillimetersPerSecond: Double? = nil,
         tau: Double? = nil,
         minDurationSeconds: Double? = nil,
         mergeGapSeconds: Double? = nil,
@@ -255,6 +264,7 @@ public struct MurSessionState: Codable, Equatable, Sendable {
         self.selectedTrendMetric = selectedTrendMetric
         self.selectedBinPreset = selectedBinPreset
         self.gainMillimetersPerMillivolt = gainMillimetersPerMillivolt
+        self.speedMillimetersPerSecond = speedMillimetersPerSecond
         self.tau = tau
         self.minDurationSeconds = minDurationSeconds
         self.mergeGapSeconds = mergeGapSeconds
@@ -293,6 +303,9 @@ public struct MurSessionState: Codable, Equatable, Sendable {
         copy.focusedChannelNames = other.focusedChannelNames
         copy.windowLockedTo10s = other.windowLockedTo10s
         copy.gainMillimetersPerMillivolt = other.gainMillimetersPerMillivolt
+        // #359: the timebase half of the paper is view-owned like the gain —
+        // dropping it here would wipe the saved speed on the first pan.
+        copy.speedMillimetersPerSecond = other.speedMillimetersPerSecond
         // X72: anchored notes are drawn and edited in the bedside view, so
         // they are view-owned. Omitting this line is exactly the X11 failure
         // mode DECISIONS §4 warns about — the view republishes on every
