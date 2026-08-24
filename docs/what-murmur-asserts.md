@@ -86,6 +86,9 @@ own provenance. See [Citing Murmur Studio]({{ site.baseurl }}/citation).
 Murmur never chooses, and never gates, a calculation by a lead's
 name; the analysis lead is designated by the analyst or defaulted by
 measured R-peak quality, and lead names appear only in disclosures.
+The app asserts no lead-name meanings; a declared placement is the
+analyst's statement about the recording setup, carried verbatim with
+its reviewer and date, and it never selects or gates a calculation.
 
 ### 5. Analyst work is separate and attributed
 

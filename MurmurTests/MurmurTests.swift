@@ -5140,6 +5140,94 @@ struct MarkdownReportTests {
         #expect(!report.contains("Analysis lead"))
     }
 
+    // MARK: - #358: declared-placement parenthetical on the analysis lead line
+
+    /// 2026-08-24 00:30 UTC — the same deliberate cross-zone instant
+    /// `AnalysisLeadHeaderLineTests.designationDate` uses.
+    private var declarationDate: Date {
+        var components = DateComponents()
+        components.year = 2026
+        components.month = 8
+        components.day = 24
+        components.hour = 0
+        components.minute = 30
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar.date(from: components)!
+    }
+
+    @Test("A declared placement adds its parenthetical after the name, keeping the export's reason wording")
+    func analysisLeadLineShowsDeclaredPlacement() {
+        let mlii = Channel(
+            id: UUID(), name: "MLII", unit: "mV", sampleRate: 250,
+            startTimeUnixMS: 0, sampleCount: 2500, storageFileName: "mlii.bin", pyramid: []
+        )
+        let rec = recording(channels: [mlii])
+        let resolution = AnalysisLeadResolution(
+            channel: mlii,
+            provenance: .rPeakScore(score: 6.13, perLead: ["MLII": 6.13]),
+            staleDesignation: nil
+        )
+        let declaration = LeadPlacementDeclaration(
+            placement: "II", reviewer: "kevin", declaredAt: declarationDate)
+        let report = MarkdownReport.generate(
+            recording: rec,
+            annotations: [],
+            dispositions: [:],
+            tally: .init(confirmed: 0, dismissed: 0, unreviewed: 0),
+            analysisLead: resolution,
+            declaredPlacement: (declaration, false),
+            now: now
+        )
+        #expect(report.contains(
+            "- **Analysis lead**: MLII (declared: II, by kevin, 2026-08-24) — r-peak score 6.13"
+        ))
+    }
+
+    @Test("A record-override declaration says so in the parenthetical")
+    func analysisLeadLineShowsRecordOverride() {
+        let mlii = Channel(
+            id: UUID(), name: "MLII", unit: "mV", sampleRate: 250,
+            startTimeUnixMS: 0, sampleCount: 2500, storageFileName: "mlii.bin", pyramid: []
+        )
+        let rec = recording(channels: [mlii])
+        let resolution = AnalysisLeadResolution(
+            channel: mlii, provenance: .firstInFile, staleDesignation: nil
+        )
+        let declaration = LeadPlacementDeclaration(
+            placement: "front patch", reviewer: "kevin", declaredAt: declarationDate)
+        let report = MarkdownReport.generate(
+            recording: rec,
+            annotations: [],
+            dispositions: [:],
+            tally: .init(confirmed: 0, dismissed: 0, unreviewed: 0),
+            analysisLead: resolution,
+            declaredPlacement: (declaration, true),
+            now: now
+        )
+        #expect(report.contains(
+            "- **Analysis lead**: MLII (declared: front patch — record override, by kevin, 2026-08-24) — first in file"
+        ))
+    }
+
+    @Test("No declared placement: the analysis lead line is byte-identical to #357's")
+    func analysisLeadLineUnchangedWhenNoDeclaration() {
+        let rec = recording(channels: [channel()])
+        let resolution = AnalysisLeadResolution(
+            channel: channel(), provenance: .firstInFile, staleDesignation: nil
+        )
+        let report = MarkdownReport.generate(
+            recording: rec,
+            annotations: [],
+            dispositions: [:],
+            tally: .init(confirmed: 0, dismissed: 0, unreviewed: 0),
+            analysisLead: resolution,
+            now: now
+        )
+        #expect(report.contains("- **Analysis lead**: II — first in file"))
+        #expect(!report.contains("declared:"))
+    }
+
     @Test("Pipe character in finding metadata is escaped so table rows stay intact")
     func pipeEscapedInCategory() {
         let rec = recording(channels: [channel()])

@@ -300,6 +300,8 @@ quietly covers less than the cohort.
 | `header_comments` | The record's `.hea` comment lines, joined with ` \| `. |
 | `analysis_lead` | The channel every calculation on this record ran on — see [Analysis lead](#analysis-lead). Record-level: every row for the same record repeats it. |
 | `analysis_lead_reason` | Why that channel — see below. Record-level, same repetition. |
+| `declared_placement` | The analyst's free-text declaration of what the analysis lead's recorded name physically is — see [Declared placement](#declared-placement). Record-level, same repetition. Empty when nothing was declared. |
+| `declared_placement_by` | Who declared it and when — see below. Empty exactly when `declared_placement` is empty. |
 
 UTF-8, no BOM, `\n` line endings, RFC 4180 quoting. Rows sort by record path,
 then start sample, then annotation id, so the same review exports
@@ -345,3 +347,39 @@ and the on-screen header.
 The resolution and its provenance are stored per record in
 `<bundle>/analysis_lead.json`, alongside the other analyst-layer
 sidecars; it travels with the record inside a `.mur` session package.
+
+### Declared placement
+
+A recorded channel's name is not always the physical lead placement —
+"MLII" is a WFDB naming convention for what is, physically, limb lead
+II; a single-lead Holter patch may record under a name that says
+nothing about where the electrode actually sat. The **lead placement
+map** lets an analyst declare what a recorded name means: a folder-wide
+baseline ("MLII everywhere in this folder means II"), optionally
+overridden per record ("but on this one it was a front chest patch").
+A declaration is provenance attached to a *name* — it feeds disclosure
+only, never a calculation input; it does not change which channel is
+the analysis lead or how anything is scored.
+
+`declared_placement` and `declared_placement_by` disclose whatever was
+declared for the **analysis lead's** recorded name, in the analyst's
+own words:
+
+- `declared_placement` — the placement text, verbatim, exactly as the
+  analyst typed it (e.g. `II`, `front patch`).
+- `declared_placement_by` — `<reviewer>, <date>` (e.g.
+  `kevin, 2026-08-24`), or, when the declaration is a per-record
+  override rather than the folder-wide baseline,
+  `record override — <reviewer>, <date>`.
+
+**Both columns are empty when nothing has been declared** — same rule
+as every other column in this table: empty means undeclared, never
+omitted. A dataset with no lead placement map at all exports both
+columns present and empty for every row.
+
+The per-record Markdown report's **Analysis lead** line discloses the
+same declaration, as a parenthetical right after the channel name —
+`MLII (declared: II, by kevin, 2026-08-24) — r-peak score 6.13` (a
+record override reads `(declared: front patch — record override, by
+kevin, 2026-08-24) — …`) — followed by the same `analysis_lead_reason`
+wording the review table uses, not the on-screen header's.

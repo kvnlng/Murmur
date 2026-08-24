@@ -406,6 +406,87 @@ struct MurSessionPackageTests {
         #expect(!FileManager.default.fileExists(atPath: recordDir.appendingPathComponent("annotations.json").path))
     }
 
+    /// #358: the lead placement map travels in `.mur` as its own root
+    /// member, present only when something was declared. Encoded/decoded
+    /// with `AnalysisLeadFile.write`'s discipline (`.iso8601` + `.sortedKeys`)
+    /// since `LeadPlacementDeclaration` carries a `Date`.
+    @Test(".mur round-trip: declare → save → reopen → still declared; old package → undeclared")
+    @MainActor
+    func leadMapRoundTrips() throws {
+        let (dir, recording, _) = try makeBundle()
+        let map = LeadPlacementMapContext()
+        map.declare(recordedName: "MLII", placement: "II", recordID: nil,
+                    reviewer: "kevin", at: Date(timeIntervalSince1970: 1_700_000_000))
+        map.declare(recordedName: "MLII", placement: "front patch", recordID: recording.sourceFileName,
+                    reviewer: "kevin", at: Date(timeIntervalSince1970: 1_700_000_000))
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        let leadMapJSON = try encoder.encode(map.snapshot)
+
+        let pkg = try tempDir("pkg-leadmap").appendingPathComponent("LeadMap.mur")
+        _ = try MurSessionPackage.write(
+            records: [MurSessionPackage.RecordPayload(recording: recording, recordingDirectory: dir)],
+            leadMapJSON: leadMapJSON,
+            to: pkg
+        )
+
+        let result = try MurSessionPackage.read(packageURL: pkg, into: try tempDir("open-leadmap"))
+        let leadMapData = try #require(result.leadMapJSON)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(LeadPlacementMapSnapshot.self, from: leadMapData)
+
+        let restored = LeadPlacementMapContext()
+        restored.restore(decoded)
+        let folderHit = restored.declaration(forRecordedName: "MLII", recordID: "some-other-record.hea")
+        #expect(folderHit?.declaration.placement == "II")
+        #expect(folderHit?.isOverride == false)
+        let overrideHit = restored.declaration(forRecordedName: "MLII", recordID: recording.sourceFileName)
+        #expect(overrideHit?.declaration.placement == "front patch")
+        #expect(overrideHit?.isOverride == true)
+
+        // Undeclared: writing with leadMapJSON: nil omits the member
+        // entirely — no `lead_map.json` in the package, and the read side
+        // reports it absent rather than an empty snapshot.
+        let undeclaredPkg = try tempDir("pkg-noleadmap").appendingPathComponent("NoLeadMap.mur")
+        _ = try MurSessionPackage.write(
+            records: [MurSessionPackage.RecordPayload(recording: recording, recordingDirectory: dir)],
+            leadMapJSON: nil,
+            to: undeclaredPkg
+        )
+        #expect(!FileManager.default.fileExists(
+            atPath: undeclaredPkg.appendingPathComponent(MurSessionPackage.leadMapFile).path))
+        let undeclaredResult = try MurSessionPackage.read(
+            packageURL: undeclaredPkg, into: try tempDir("open-noleadmap"))
+        #expect(undeclaredResult.leadMapJSON == nil)
+    }
+
+    /// #358: a session with no declarations must write byte-identically to
+    /// the pre-#358 signature — the new member is additive-only, never a
+    /// silent change to the undeclared path's output.
+    @Test("A session with no declarations writes a byte-identical package to pre-#358")
+    func undeclaredPackageUnchanged() throws {
+        let (dir, recording, _) = try makeBundle()
+        let payload = MurSessionPackage.RecordPayload(recording: recording, recordingDirectory: dir)
+
+        let withLeadMapParam = try tempDir("pkg-with-param").appendingPathComponent("A.mur")
+        let manifestA = try MurSessionPackage.write(
+            records: [payload], leadMapJSON: nil, to: withLeadMapParam
+        )
+
+        let prePath = try tempDir("pkg-pre-change").appendingPathComponent("B.mur")
+        let manifestB = try MurSessionPackage.write(records: [payload], to: prePath)
+
+        #expect(manifestA.contents == manifestB.contents)
+        #expect(manifestA.contents?.contains(MurSessionPackage.leadMapFile) != true)
+        #expect(!FileManager.default.fileExists(
+            atPath: withLeadMapParam.appendingPathComponent(MurSessionPackage.leadMapFile).path))
+        #expect(!FileManager.default.fileExists(
+            atPath: prePath.appendingPathComponent(MurSessionPackage.leadMapFile).path))
+    }
+
     /// #357 — `analysis_lead.json` is an analyst-layer sidecar like any
     /// other: import → designate → save → reopen into a fresh store must
     /// carry the designation, not just the scored default. Mirrors the

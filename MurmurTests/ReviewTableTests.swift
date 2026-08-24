@@ -28,7 +28,9 @@ struct ReviewTableCSVTests {
         category: String = "AFib",
         confirmedCategory: String? = nil,
         analysisLead: String? = nil,
-        analysisLeadReason: String? = nil
+        analysisLeadReason: String? = nil,
+        declaredPlacement: String? = nil,
+        declaredPlacementBy: String? = nil
     ) -> ReviewTableCSV.Row {
         ReviewTableCSV.Row(
             record: record, recordPath: path, annotationID: id, kind: "range",
@@ -38,7 +40,8 @@ struct ReviewTableCSVTests {
             confidence: nil, state: state, confirmedKind: nil,
             confirmedCategory: confirmedCategory, note: note,
             reviewedBy: nil, reviewedAt: nil, flagged: false, headerComments: [],
-            analysisLead: analysisLead, analysisLeadReason: analysisLeadReason
+            analysisLead: analysisLead, analysisLeadReason: analysisLeadReason,
+            declaredPlacement: declaredPlacement, declaredPlacementBy: declaredPlacementBy
         )
     }
 
@@ -51,14 +54,23 @@ struct ReviewTableCSVTests {
     @Test("The column order is the documented contract")
     func columnOrderIsStable() {
         #expect(ReviewTableCSV.columns.first == "record")
-        #expect(ReviewTableCSV.columns.last == "analysis_lead_reason")
-        #expect(ReviewTableCSV.columns.count == 23)
+        #expect(ReviewTableCSV.columns.last == "declared_placement_by")
+        #expect(ReviewTableCSV.columns.count == 25)
         // #357 — the analysis-lead pair trails everything else, record-level
         // metadata like `flagged` and `header_comments` right before it.
         #expect(ReviewTableCSV.columns.contains("analysis_lead"))
         #expect(
             ReviewTableCSV.columns.firstIndex(of: "analysis_lead_reason")
             == (ReviewTableCSV.columns.firstIndex(of: "analysis_lead").map { $0 + 1 })
+        )
+        // #358 — the declared-placement pair trails the analysis-lead pair.
+        #expect(
+            ReviewTableCSV.columns.firstIndex(of: "declared_placement")
+            == (ReviewTableCSV.columns.firstIndex(of: "analysis_lead_reason").map { $0 + 1 })
+        )
+        #expect(
+            ReviewTableCSV.columns.firstIndex(of: "declared_placement_by")
+            == (ReviewTableCSV.columns.firstIndex(of: "declared_placement").map { $0 + 1 })
         )
         // #331 — the override column sits immediately after the kind it
         // generalises, so a consumer reading left-to-right meets "what the
@@ -110,6 +122,43 @@ struct ReviewTableCSVTests {
         #expect(fields[15].isEmpty)            // note
         #expect(fields[16].isEmpty)            // reviewed_by
         #expect(fields[17].isEmpty)            // reviewed_at
+    }
+
+    // MARK: - #358: declared-placement columns
+
+    @Test("Declared-placement columns render verbatim when set, empty when not")
+    func declaredPlacementColumnsRoundTrip() {
+        // `declaredPlacementBy` contains a comma ("kevin, 2026-08-24"), so
+        // RFC 4180 quotes the field — a naive comma-split would fracture it.
+        // The last two columns are `record.trailing.record",<placement>,"<by>"` —
+        // check via `contains` instead, the same discipline
+        // `quotesTroublesomeNotes` uses for a comma-bearing field.
+        let declared = ReviewTableCSV.generate(rows: [
+            row(declaredPlacement: "II", declaredPlacementBy: "kevin, 2026-08-24"),
+        ])
+        #expect(declared.contains(",II,\"kevin, 2026-08-24\"\n"))
+
+        let undeclared = ReviewTableCSV.generate(rows: [row()])
+        let undeclaredFields = undeclared.split(separator: "\n")[1]
+            .split(separator: ",", omittingEmptySubsequences: false)
+        #expect(undeclaredFields[23].isEmpty)
+        #expect(undeclaredFields[24].isEmpty)
+    }
+
+    @Test("`declaredPlacementByField` states the reviewer and date, prefixed for a record override")
+    func declaredPlacementByFieldFormatting() {
+        let declaration = LeadPlacementDeclaration(
+            placement: "II", reviewer: "kevin",
+            declaredAt: Date(timeIntervalSince1970: 1_787_531_400) // 2026-08-24T00:30:00Z
+        )
+        #expect(
+            ReviewTableCSV.declaredPlacementByField(for: declaration, isOverride: false)
+            == "kevin, 2026-08-24"
+        )
+        #expect(
+            ReviewTableCSV.declaredPlacementByField(for: declaration, isOverride: true)
+            == "record override — kevin, 2026-08-24"
+        )
     }
 
     @Test("Timestamps render as fixed-locale ISO 8601 regardless of analyst locale")
@@ -232,9 +281,10 @@ struct ReviewTableBuilderTests {
         let flagged = ReviewTableBuilder.build(sources: [source], flaggedIDs: ["a.hea"]).csv
         let plain = ReviewTableBuilder.build(sources: [source], flaggedIDs: []).csv
         // Trailing fields: flagged, header_comments (empty), analysis_lead
-        // ("II" — firstInFile, no sidecar written), analysis_lead_reason.
-        #expect(flagged.split(separator: "\n")[1].hasSuffix(",true,,II,first in file"))
-        #expect(plain.split(separator: "\n")[1].hasSuffix(",false,,II,first in file"))
+        // ("II" — firstInFile, no sidecar written), analysis_lead_reason,
+        // declared_placement (empty — no lookup passed), declared_placement_by.
+        #expect(flagged.split(separator: "\n")[1].hasSuffix(",true,,II,first in file,,"))
+        #expect(plain.split(separator: "\n")[1].hasSuffix(",false,,II,first in file,,"))
     }
 
     @Test("Sample indices convert to seconds using the record's own rate")
@@ -337,6 +387,99 @@ struct ReviewTableBuilderTests {
         let fields = csv.split(separator: "\n")[1].split(separator: ",", omittingEmptySubsequences: false)
         #expect(fields[21].isEmpty)
         #expect(fields[22].isEmpty)
+    }
+
+    // MARK: - #358: declared placement columns
+
+    /// 2026-08-24 00:30 UTC — same deliberate cross-zone instant
+    /// `AnalysisLeadHeaderLineTests.designationDate` uses, so this suite's
+    /// expected date string ("2026-08-24") can never be an artifact of the
+    /// test machine's own time zone.
+    private var fixedDeclarationDate: Date {
+        var components = DateComponents()
+        components.year = 2026
+        components.month = 8
+        components.day = 24
+        components.hour = 0
+        components.minute = 30
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar.date(from: components)!
+    }
+
+    private func mlii() -> Channel {
+        Channel(
+            id: UUID(), name: "MLII", unit: "mV", sampleRate: 500,
+            startTimeUnixMS: 0, sampleCount: 5000, storageFileName: "ch.bin", pyramid: []
+        )
+    }
+
+    @MainActor
+    @Test("A folder-wide declaration exports the placement and reviewer/date to every record's rows")
+    func declaredPlacementColumnsFromFolderDeclaration() {
+        let map = LeadPlacementMapContext()
+        map.declare(recordedName: "MLII", placement: "II", recordID: nil,
+                    reviewer: "kevin", at: fixedDeclarationDate)
+        let source = ReviewTableBuilder.Source(
+            recordPath: "a.hea",
+            imported: .init(
+                recording: recording(device: "A", annotations: [annotation()], channels: [mlii()]),
+                dispositions: [:], headerComments: [], bundleDirectory: emptyBundleDir()
+            )
+        )
+        let csv = ReviewTableBuilder.build(
+            sources: [source], flaggedIDs: [],
+            declaredPlacementLookup: { name, recordID in
+                map.declaration(forRecordedName: name, recordID: recordID)
+            }
+        ).csv
+        // `declaredPlacementBy` ("kevin, 2026-08-24") contains a comma, so
+        // RFC 4180 quotes it — `contains` on the raw text, not a naive
+        // comma-split, matching `quotesTroublesomeNotes`'s discipline.
+        #expect(csv.contains(",II,\"kevin, 2026-08-24\"\n"))
+    }
+
+    @MainActor
+    @Test("A per-record override says so in the declared-placement-by column")
+    func declaredPlacementColumnsFromRecordOverride() {
+        let map = LeadPlacementMapContext()
+        map.declare(recordedName: "MLII", placement: "II", recordID: nil,
+                    reviewer: "kevin", at: fixedDeclarationDate)
+        map.declare(recordedName: "MLII", placement: "front patch", recordID: "a.hea",
+                    reviewer: "kevin", at: fixedDeclarationDate)
+        let source = ReviewTableBuilder.Source(
+            recordPath: "a.hea",
+            imported: .init(
+                recording: recording(device: "A", annotations: [annotation()], channels: [mlii()]),
+                dispositions: [:], headerComments: [], bundleDirectory: emptyBundleDir()
+            )
+        )
+        let csv = ReviewTableBuilder.build(
+            sources: [source], flaggedIDs: [],
+            declaredPlacementLookup: { name, recordID in
+                map.declaration(forRecordedName: name, recordID: recordID)
+            }
+        ).csv
+        #expect(csv.contains(",front patch,\"record override — kevin, 2026-08-24\"\n"))
+    }
+
+    @Test("An undeclared dataset leaves both declared-placement columns present and empty")
+    func undeclaredDatasetLeavesDeclaredPlacementColumnsEmpty() {
+        let source = ReviewTableBuilder.Source(
+            recordPath: "a.hea",
+            imported: .init(
+                recording: recording(device: "A", annotations: [annotation()]),
+                dispositions: [:], headerComments: [], bundleDirectory: emptyBundleDir()
+            )
+        )
+        // No `declaredPlacementLookup` — nil default, matching #357's
+        // pre-#358 behaviour byte-for-byte: the columns are still present
+        // (never omitted), just empty.
+        let csv = ReviewTableBuilder.build(sources: [source], flaggedIDs: []).csv
+        #expect(csv.split(separator: "\n")[0].hasSuffix("declared_placement,declared_placement_by"))
+        let fields = csv.split(separator: "\n")[1].split(separator: ",", omittingEmptySubsequences: false)
+        #expect(fields[23].isEmpty)
+        #expect(fields[24].isEmpty)
     }
 
     @Test("A never-imported record contributes no row at all, so no analysis-lead column to check")

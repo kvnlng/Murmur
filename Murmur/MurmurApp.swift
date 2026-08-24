@@ -11,7 +11,7 @@ import MurmurMetrics
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// X77 — the quit-side half of the unsaved-anchored-notes guard (#113).
+/// X77 — the quit-side half of the unsaved-work guard (#113).
 ///
 /// Anchored notes are session work product: durable only after File ▸ Save
 /// Session (DECISIONS §4 made that deliberate, no autosave). The Context
@@ -25,13 +25,17 @@ final class MurmurAppDelegate: NSObject, NSApplicationDelegate {
         // X86: unsaved work is no longer only the open record's — switching
         // records parks notes in `CarriedSessionStore` instead of forcing a
         // save, so this guard covers the whole in-memory set.
+        // #358: a folder-wide or per-record lead placement declaration is
+        // session work product exactly like an anchored note — durable only
+        // after Save Session — so it joins the same guard.
         let hasUnsavedAnywhere = CurrentRecordingContext.shared.hasUnsavedAnchoredNotes
             || !CarriedSessionStore.shared.unsavedRecordIDs.isEmpty
+            || LeadPlacementMapContext.shared.hasUnsavedDeclarations
         guard hasUnsavedAnywhere else { return .terminateNow }
         let alert = NSAlert()
-        alert.messageText = "Quit with unsaved anchored notes?"
-        alert.informativeText = "Anchored notes save with the session — File ▸ Save Session (⌘S). "
-            + "Quitting now discards them, on every record in this session."
+        alert.messageText = "Quit with unsaved analyst work?"
+        alert.informativeText = "Anchored notes and lead placement declarations save with the session — "
+            + "File ▸ Save Session (⌘S). Quitting now discards them, on every record in this session."
         alert.addButton(withTitle: "Save Session…")
         alert.addButton(withTitle: "Discard and Quit")
         alert.addButton(withTitle: "Cancel")
@@ -414,6 +418,14 @@ func saveSessionPanel() -> Bool {
     panel.accessoryView = accessory
     guard panel.runModal() == .OK, let url = panel.url else { return false }
     do {
+        // #358: nil, not an encoded-empty snapshot, when nothing is
+        // declared — an undeclared session must write byte-identically to a
+        // pre-#358 one.
+        let leadMap = LeadPlacementMapContext.shared
+        let leadMapEncoder = JSONEncoder()
+        leadMapEncoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        leadMapEncoder.dateEncodingStrategy = .iso8601
+        let leadMapJSON: Data? = leadMap.isEmpty ? nil : try? leadMapEncoder.encode(leadMap.snapshot)
         try MurSessionPackage.write(
             records: payloads,
             // Land the reopen on whatever the analyst had open, which is
@@ -421,6 +433,7 @@ func saveSessionPanel() -> Bool {
             collectionJSON: try? JSONEncoder().encode(
                 MurCollectionState(activeRecordingID: context.recording?.id)
             ),
+            leadMapJSON: leadMapJSON,
             passphrase: accessory.passphrase,
             to: url
         )
@@ -434,6 +447,10 @@ func saveSessionPanel() -> Bool {
         CarriedSessionStore.shared.markSaved(
             recordIDs: SessionFlagStore.shared.flaggedRecords.map(\.id)
         )
+        // #358: the write succeeded, so the live declarations are durable —
+        // beside the anchored-notes baseline above, the same "just wrote it"
+        // fact for the lead map.
+        leadMap.markSaved()
         return true
     } catch {
         presentSessionAlert(title: "Couldn't save session", message: error.localizedDescription)

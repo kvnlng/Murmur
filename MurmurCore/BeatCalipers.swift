@@ -92,6 +92,14 @@ struct BeatCalipers: View {
     /// distinguishes "hover to focus" from "this record has no beats".
     var placeholderNote: String = "Hover the trace to focus a beat"
 
+    /// #358: the navigator's record id, so the provenance footer can ask the
+    /// lead-placement map what THIS record declares the measurement lead to
+    /// be. The same id `BedsideView.recordID` carries — never a second
+    /// convention. `nil` (the idle card, and every caller that has no record)
+    /// reads the folder-wide baseline only, which is the correct answer for
+    /// "no record open".
+    var recordID: String?
+
     // #246: every slot below renders in EVERY state, so the card's height
     // cannot change under the analyst's eye. What varies per beat — the
     // status, the mode basis, JT applicability — varies inside a reserved
@@ -259,17 +267,54 @@ struct BeatCalipers: View {
     @ViewBuilder
     private var templateProvenanceFooter: some View {
         Divider().opacity(0.4)
-        Text(template.map { Self.templateProvenanceText($0, sampleRate: sampleRate) }
-             ?? "No per-patient normal template yet")
+        Text(template.map {
+                // #358: resolved HERE, inside `body`, so the @Observable map
+                // re-renders this line the moment a declaration is written —
+                // and so nothing is cached and no task re-fires (jurisdiction
+                // rule: a declaration recomputes nothing).
+                Self.templateProvenanceText(
+                    $0, sampleRate: sampleRate,
+                    placementMap: LeadPlacementMapContext.shared,
+                    recordID: recordID)
+             } ?? "No per-patient normal template yet")
             .font(.caption2)
             .foregroundStyle(.tertiary)
             .fixedSize(horizontal: false, vertical: true)
             .accessibilityIdentifier("beat-calipers-template-provenance")
     }
 
+    /// #358 §2.3: the footer as the card renders it — the map is consulted
+    /// for the TEMPLATE's source lead at render time, so declaring "MLII
+    /// means II" both suppresses the "not a conventional QT lead" clause and
+    /// states the assertion inline. This is the entry point the view calls;
+    /// tests call it too, with a fresh `LeadPlacementMapContext()` (never
+    /// `.shared`), so what is pinned is exactly what renders.
+    ///
+    /// The declaration is looked up, never stored: `sourceLead` on the
+    /// template stays the as-recorded name, and nothing downstream of compute
+    /// gains a placement dependence.
+    @MainActor
+    static func templateProvenanceText(
+        _ t: MarkingsTemplate,
+        sampleRate: Double,
+        placementMap: LeadPlacementMapContext,
+        recordID: String?
+    ) -> String {
+        let declared = t.sourceLead.flatMap { lead -> (declaration: LeadPlacementDeclaration, isOverride: Bool)? in
+            lead.isEmpty ? nil : placementMap.declaration(forRecordedName: lead, recordID: recordID)
+        }
+        return templateProvenanceText(t, sampleRate: sampleRate, declaredPlacement: declared)
+    }
+
     /// Internal (not private) so the wording — methods provenance the
     /// analyst reads against the template — is pinned by unit tests.
-    static func templateProvenanceText(_ t: MarkingsTemplate, sampleRate: Double) -> String {
+    /// `declaredPlacement` defaults to nil, which reproduces the pre-#358
+    /// sentence byte-for-byte.
+    static func templateProvenanceText(
+        _ t: MarkingsTemplate,
+        sampleRate: Double,
+        declaredPlacement: (declaration: LeadPlacementDeclaration, isOverride: Bool)? = nil
+    ) -> String {
         // X112 §2: the baseline names its adjudication state — the
         // annotator-coded default until an analyst endorses (X112b), the
         // endorsement provenance once one has (X112c).
@@ -286,8 +331,12 @@ struct BeatCalipers: View {
         // (designated / scored / first in file) is a different claim, stated
         // once in the metrics header by `AnalysisLeadHeaderLine` (#357 §1.6)
         // rather than repeated on every card that quotes a number.
+        // #358: when the analyst has declared what this channel physically
+        // is, that assertion rides along — and a declaration that reads as
+        // II/V5 retires the clause, because the analyst has said this IS a
+        // conventional QT lead. One function decides both (§2.3).
         if let lead = t.sourceLead, !lead.isEmpty {
-            text += " · lead \(QTLeadDisclosure.citedLeadName(for: lead))"
+            text += " · lead \(QTLeadDisclosure.citedLeadName(for: lead, declaredPlacement: declaredPlacement?.declaration, isOverride: declaredPlacement?.isOverride ?? false))"
         }
         if let start = t.spanStartSample, let end = t.spanEndSample, sampleRate > 0 {
             text += " · \(clockString(start, sampleRate: sampleRate))–\(clockString(end, sampleRate: sampleRate))"

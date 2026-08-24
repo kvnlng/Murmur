@@ -19,6 +19,13 @@ struct LeadChipBar: View {
     let channels: [Channel]
     @Binding var layoutMode: BedsideLayoutMode
 
+    /// #358 — this record's id in the navigator's id space, threaded from
+    /// `BedsideView.recordID` unchanged. Used only to look up analyst-
+    /// declared placements for preset resolution (`declaredPlacements`
+    /// below); `nil` (previews, or no record open) resolves presets against
+    /// recorded names only, same as before #358.
+    var recordID: String?
+
     /// Record length, for choosing which ladder rungs apply. Zero hides the
     /// ladder entirely — a record with no duration has nothing to zoom.
     var recordDurationSeconds: Double = 0
@@ -105,6 +112,18 @@ struct LeadChipBar: View {
 
     // MARK: - Presets (#332)
 
+    /// The analyst-declared placements for this record (#358) — folder
+    /// baseline overlaid by this record's overrides — that preset
+    /// resolution may also match against, per `LeadPreset.resolve(in:
+    /// declaredPlacements:)`. Read directly from `.shared` rather than an
+    /// injected property, the same way `BedsideView.declaredPlacement(
+    /// forChannelNamed:)` reads it, since presets never need a fake map in
+    /// a test (the binding ruling: tests exercise `resolve` and the
+    /// accessor directly, never through this view).
+    private var declaredPlacements: [String: String] {
+        LeadPlacementMapContext.shared.declaredPlacements(forRecordID: recordID)
+    }
+
     /// The leads currently on the stage, by NAME and in selection order —
     /// what a saved preset stores, and what the save dialog quotes back.
     private var stagedLeadNames: [String] {
@@ -125,7 +144,7 @@ struct LeadChipBar: View {
     private var presetsMenu: some View {
         Menu {
             ForEach(presetStore.allPresets) { preset in
-                let resolution = idle ? nil : preset.resolve(in: channels)
+                let resolution = idle ? nil : preset.resolve(in: channels, declaredPlacements: declaredPlacements)
                 Button(presetRowTitle(preset, resolution: resolution)) {
                     apply(preset)
                 }
@@ -174,7 +193,7 @@ struct LeadChipBar: View {
     }
 
     private func apply(_ preset: LeadPreset) {
-        guard let resolution = preset.resolve(in: channels) else {
+        guard let resolution = preset.resolve(in: channels, declaredPlacements: declaredPlacements) else {
             unresolvedPresetName = preset.name
             return
         }
