@@ -28,6 +28,7 @@
 //  mtime defeats it; that is the accepted trade, same as make/ninja.
 //
 
+import CryptoKit
 import Foundation
 
 public struct SourceFingerprint: Codable, Equatable, Sendable {
@@ -51,6 +52,23 @@ public struct SourceFingerprint: Codable, Equatable, Sendable {
     public let absentNames: [String]
 
     static let bundleFileName = "source_fingerprint.json"
+
+    /// Stable content digest, usable as a filesystem name — the key the
+    /// store's fingerprint index (#341) files entries under. SHA-256 over the
+    /// canonical (sorted-keys, unformatted) JSON encoding, so equal
+    /// fingerprints always digest equally across processes and versions of
+    /// this struct that encode the same fields. Collisions are theoretical,
+    /// and harmless anyway: every index hit is re-validated against the
+    /// bundle's own fingerprint file before it is served.
+    public var stableDigest: String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        // Encoding a Codable struct of plain values cannot fail; an empty
+        // digest would only ever mean that assumption broke, and reads as
+        // "no entry" — a fresh import, never a wrong bundle.
+        guard let data = try? encoder.encode(self) else { return "" }
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
 
     // MARK: - Compute
 
