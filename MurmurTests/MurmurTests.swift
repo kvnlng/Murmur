@@ -2045,6 +2045,96 @@ struct CalibrationMathTests {
     }
 }
 
+// MARK: - Canvas settle coalescer (#375)
+
+/// #375: the canonical-speed re-derivation must not run per layout tick of
+/// an animating canvas — it fights the animation with quantised viewport
+/// steps — but the FIRST valid layout must stay immediate, because X50's
+/// open snap, #359's restore acceptance and #373's deferred implied-speed
+/// capture all resolve on it. These tests pin that routing policy.
+@Suite("Canvas settle coalescer (#375)")
+@MainActor
+struct CanvasSettleCoalescerTests {
+
+    @Test("First valid layout applies immediately")
+    func firstValidLayoutImmediate() {
+        let coalescer = CanvasSettleCoalescer(settleNanoseconds: 50_000_000)
+        var applied = 0
+        coalescer.canvasChanged(
+            from: .zero, to: CGSize(width: 1250, height: 360)
+        ) { applied += 1 }
+        #expect(applied == 1)
+    }
+
+    @Test("The onChange initial fire (old == new) applies immediately")
+    func initialFireImmediate() {
+        // A rebuilt view re-fires onChange(initial:) with old == new and a
+        // valid width; the re-derivation must not wait out a settle window
+        // that exists only to smooth animations.
+        let coalescer = CanvasSettleCoalescer(settleNanoseconds: 50_000_000)
+        var applied = 0
+        let size = CGSize(width: 1250, height: 360)
+        coalescer.canvasChanged(from: size, to: size) { applied += 1 }
+        #expect(applied == 1)
+    }
+
+    @Test("An animation burst coalesces to one apply, after the size settles")
+    func burstCoalesces() async throws {
+        let coalescer = CanvasSettleCoalescer(settleNanoseconds: 50_000_000)
+        var applied = 0
+        // A pane animation: one size per frame, valid → valid each tick.
+        for width in stride(from: 1250.0, through: 1930.0, by: 68) {
+            coalescer.canvasChanged(
+                from: CGSize(width: width, height: 360),
+                to: CGSize(width: width + 68, height: 360)
+            ) { applied += 1 }
+        }
+        #expect(applied == 0)   // nothing mid-animation
+        try await Task.sleep(nanoseconds: 300_000_000)
+        #expect(applied == 1)   // exactly one re-derivation at settle
+    }
+
+    @Test("A valid-canvas change after settle applies again")
+    func secondBurstAppliesAgain() async throws {
+        let coalescer = CanvasSettleCoalescer(settleNanoseconds: 50_000_000)
+        var applied = 0
+        let apply: @MainActor () -> Void = { applied += 1 }
+        coalescer.canvasChanged(
+            from: CGSize(width: 1250, height: 360),
+            to: CGSize(width: 1400, height: 360), apply: apply
+        )
+        try await Task.sleep(nanoseconds: 300_000_000)
+        #expect(applied == 1)
+        coalescer.canvasChanged(
+            from: CGSize(width: 1400, height: 360),
+            to: CGSize(width: 1930, height: 360), apply: apply
+        )
+        try await Task.sleep(nanoseconds: 300_000_000)
+        #expect(applied == 2)
+    }
+
+    @Test("A first-valid layout supersedes a pending deferred apply")
+    func firstValidSupersedesPending() async throws {
+        // Canvas valid → zero → valid (focus panel torn down and re-laid-out
+        // mid-settle, e.g. a layout-mode switch): the immediate apply on the
+        // zero → valid transition must also cancel the stale deferred one,
+        // or the chain would run twice against different geometry.
+        let coalescer = CanvasSettleCoalescer(settleNanoseconds: 50_000_000)
+        var applied = 0
+        let apply: @MainActor () -> Void = { applied += 1 }
+        coalescer.canvasChanged(
+            from: CGSize(width: 1250, height: 360),
+            to: CGSize(width: 1400, height: 360), apply: apply
+        )
+        coalescer.canvasChanged(
+            from: .zero, to: CGSize(width: 1930, height: 360), apply: apply
+        )
+        #expect(applied == 1)   // the immediate one
+        try await Task.sleep(nanoseconds: 300_000_000)
+        #expect(applied == 1)   // the deferred one was cancelled, not queued
+    }
+}
+
 // MARK: - Annotation model + JSON ingest
 
 @Suite("Annotation JSON ingest")
