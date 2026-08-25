@@ -203,8 +203,10 @@ Stage the leads you want, then **Save current selection as preset…** —
 `I · II · V2`, say. Presets are stored by lead **name**, so the set you
 build here applies to any record carrying those leads, in this corpus or the
 next one. Each menu row tells you up front how much of itself the open
-record can satisfy (`Precordial — 3 of 6`), and a preset whose leads are
-none of this record's is disabled rather than silently doing nothing.
+record can satisfy (`Precordial — 3 of 6`). A built-in that resolves
+nothing on the open record is omitted from the menu; your saved presets
+are always listed, disabled rather than silently doing nothing
+([#351](https://github.com/kvnlng/Murmur/issues/351)).
 
 **An exercise.** Find a record labelled left bundle branch block
 (`164909002`), apply `Limb`, then drop to `I · II` and look again. What you

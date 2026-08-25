@@ -139,17 +139,36 @@ struct LeadChipBar: View {
     ///
     /// Each row says up front how much of itself this record can satisfy —
     /// "Precordial — 3 of 6" — rather than staging a partial set and leaving
-    /// the analyst to notice. A preset the record cannot satisfy at all is
-    /// disabled, so the menu never offers an action that would do nothing.
+    /// the analyst to notice. A BUILT-IN preset the record cannot satisfy at
+    /// all is OMITTED (#351) rather than shown disabled — `All leads` is
+    /// always present as the floor, so a disabled built-in row told the
+    /// analyst nothing actionable. A SAVED preset that cannot resolve stays,
+    /// disabled, per `LeadPresetMenuComposer.rows(…)` — it is the analyst's
+    /// own artifact, and hiding it would read as data loss.
     private var presetsMenu: some View {
         Menu {
-            ForEach(presetStore.allPresets) { preset in
-                let resolution = idle ? nil : preset.resolve(in: channels, declaredPlacements: declaredPlacements)
-                Button(presetRowTitle(preset, resolution: resolution)) {
-                    apply(preset)
+            if idle {
+                // The launch shell's idle rendering (#304/12a) — every
+                // preset present, disabled, undecorated: the frame at its
+                // final size, values absent. The omission rule below is
+                // about a RECORD's leads, which idle has none of.
+                ForEach(presetStore.allPresets) { preset in
+                    Button(preset.name) { apply(preset) }
+                        .disabled(true)
+                        .accessibilityIdentifier("lead-preset-\(preset.id.uuidString)")
                 }
-                .disabled(idle || resolution == nil)
-                .accessibilityIdentifier("lead-preset-\(preset.id.uuidString)")
+            } else {
+                ForEach(
+                    LeadPresetMenuComposer.rows(
+                        allPresets: presetStore.allPresets,
+                        channels: channels,
+                        declaredPlacements: declaredPlacements
+                    )
+                ) { row in
+                    Button(row.caption) { apply(row.preset) }
+                        .disabled(!row.isEnabled)
+                        .accessibilityIdentifier("lead-preset-\(row.preset.id.uuidString)")
+                }
             }
             Divider()
             Button("Save current selection as preset…") {
@@ -178,18 +197,6 @@ struct LeadChipBar: View {
         .help("Apply or save a named set of leads")
         .accessibilityLabel("Lead presets")
         .accessibilityIdentifier("lead-presets-menu")
-    }
-
-    private func presetRowTitle(
-        _ preset: LeadPreset, resolution: LeadPreset.Resolution?
-    ) -> String {
-        // `All leads` names no leads, so "n of m" would be meaningless for it.
-        guard !preset.isEveryLead, !idle else { return preset.name }
-        guard let resolution else { return "\(preset.name) — none in this record" }
-        guard resolution.missing.isEmpty else {
-            return "\(preset.name) — \(resolution.selection.count) of \(preset.leads.count)"
-        }
-        return preset.name
     }
 
     private func apply(_ preset: LeadPreset) {
@@ -394,5 +401,63 @@ struct LeadChipBar: View {
     private func switchToFocus() {
         if case .focus = layoutMode { return }
         if let first = channels.first { layoutMode = .focus(only: first.id) }
+    }
+}
+
+// MARK: - Presets menu composition (#351)
+
+/// One row `presetsMenu` renders: the preset a tap applies, its caption, and
+/// whether the row accepts taps.
+public struct LeadPresetMenuRow: Identifiable, Equatable, Sendable {
+    public let preset: LeadPreset
+    public let caption: String
+    public let isEnabled: Bool
+
+    public var id: LeadPreset.ID { preset.id }
+}
+
+/// Turns the preset store's presets into the rows the menu shows. Pure and
+/// public so the omission rule is pinned by tests rather than living inside
+/// `presetsMenu`'s `ForEach` — the pattern `AnalysisLeadMenuEntry.resolve(
+/// for:designation:)` (#357) established for menu predicates that are easy
+/// to get subtly wrong.
+public enum LeadPresetMenuComposer {
+    /// The rows to render, in `allPresets`' order.
+    ///
+    /// A BUILT-IN preset whose `resolve(in:declaredPlacements:)` is nil for
+    /// this record is OMITTED — `All leads` is always present as the menu's
+    /// floor, so a disabled built-in row offered nothing an analyst could
+    /// act on. A SAVED preset that cannot resolve stays, disabled, captioned
+    /// "none in this record": it is the analyst's own artifact, and hiding
+    /// it would read as data loss the way omitting a built-in does not.
+    ///
+    /// Captions match `LeadPreset.resolve`'s own vocabulary: "Name" when
+    /// every lead is present (or the preset names none, i.e. `All leads`),
+    /// "Name — n of m" when some are missing, "Name — none in this record"
+    /// for a saved preset with nothing to show.
+    public static func rows(
+        allPresets: [LeadPreset],
+        channels: [Channel],
+        declaredPlacements: [String: String]
+    ) -> [LeadPresetMenuRow] {
+        allPresets.compactMap { preset in
+            let resolution = preset.resolve(in: channels, declaredPlacements: declaredPlacements)
+            guard resolution != nil || !preset.isBuiltIn else { return nil }
+            return LeadPresetMenuRow(
+                preset: preset,
+                caption: caption(for: preset, resolution: resolution),
+                isEnabled: resolution != nil
+            )
+        }
+    }
+
+    private static func caption(for preset: LeadPreset, resolution: LeadPreset.Resolution?) -> String {
+        // `All leads` names no leads, so "n of m" would be meaningless for it.
+        guard !preset.isEveryLead else { return preset.name }
+        guard let resolution else { return "\(preset.name) — none in this record" }
+        guard resolution.missing.isEmpty else {
+            return "\(preset.name) — \(resolution.selection.count) of \(preset.leads.count)"
+        }
+        return preset.name
     }
 }

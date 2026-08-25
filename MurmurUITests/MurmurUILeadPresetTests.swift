@@ -7,6 +7,16 @@
 //  neither proves that the menu row reaches the stage or that the save
 //  dialog reaches the menu. These do.
 //
+//  #351 — a BUILT-IN preset that cannot resolve is OMITTED from the menu
+//  rather than shown disabled; `LeadPresetMenuComposer` (MurmurCore/
+//  LeadChipBar.swift) and `LeadPresetTests.swift`'s "menu composition" suite
+//  own that rule and its omission/floor/live-recomposition cases at the
+//  unit level — the `--ui-test-sample` fixture's eight leads (I, II, III,
+//  aVR, aVL, aVF, V1, V2) resolve every built-in here (fully or partially),
+//  so there is no unresolvable built-in to omit in this suite. What these
+//  tests still owe #351: that the refactor did not drop or relabel a row
+//  that SHOULD remain.
+//
 
 import XCTest
 
@@ -60,6 +70,22 @@ final class MurmurUILeadPresetTests: XCTestCase {
         XCTAssertTrue(limb.waitForExistence(timeout: 3), "Limb should be offered as a built-in row")
         XCTAssertEqual(limb.title, "Limb",
                        "Every Limb lead is in the sample, so the row carries no 'n of m' shortfall")
+
+        // #351: none of the sample's built-ins can resolve to nothing, so
+        // none should have been omitted by the composer's omission rule —
+        // all four still appear, Precordial with its partial-resolve
+        // caption since the sample carries only V1/V2 of its six.
+        XCTAssertTrue(limb.isEnabled, "Limb fully resolves and must not be disabled")
+        let bipolarLimb = app.menuItems["Bipolar limb"]
+        XCTAssertTrue(bipolarLimb.waitForExistence(timeout: 3), "Bipolar limb should not be omitted")
+        XCTAssertTrue(bipolarLimb.isEnabled, "Bipolar limb fully resolves")
+        let precordial = app.menuItems["Precordial — 2 of 6"]
+        XCTAssertTrue(precordial.waitForExistence(timeout: 3),
+                      "Precordial resolves partially (V1, V2) and stays with its shortfall caption")
+        XCTAssertTrue(precordial.isEnabled, "A partially-resolving built-in stays enabled")
+        let allLeads = app.menuItems["All leads"]
+        XCTAssertTrue(allLeads.waitForExistence(timeout: 3), "All leads is always present as the menu's floor")
+
         limb.click()
 
         for lead in ["I", "II", "III", "aVR", "aVL", "aVF"] {
