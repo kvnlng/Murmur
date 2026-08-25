@@ -133,6 +133,10 @@ struct BedsideView: View {
     /// the focused panel has published a real canvas size; consumed by the
     /// canvas-change chain once the width is valid.
     @State private var pendingImpliedSpeedCapture = false
+    /// #375: holds the canonical-speed re-derivation until the canvas size
+    /// settles, so a pane animation or live resize doesn't fight the
+    /// animation with a quantised viewport mutation per layout tick.
+    @State private var canvasSettleCoalescer = CanvasSettleCoalescer()
     @State private var layoutMode: BedsideLayoutMode
     /// App-wide read/write latch. Governs the context-notes editor and the
     /// per-finding disposition trio; new annotation create/edit/delete will
@@ -845,7 +849,7 @@ struct BedsideView: View {
         } message: {
             Text(attachError ?? "")
         }
-        .onChange(of: calibration.canvasSize, initial: true) { _, _ in
+        .onChange(of: calibration.canvasSize, initial: true) { oldSize, newSize in
             // Order is load-bearing (X50(b)): the saved PAPER goes on first, so
             // the snap guard sees a non-nil gain and declines; then the snap
             // runs for anything that has no saved paper; then the rest of the
@@ -860,13 +864,26 @@ struct BedsideView: View {
             applyPendingCalibrationRestoreIfNeeded()
             applyOpenCalibrationIfNeeded()
             applyPendingSessionRestoreIfNeeded()
-            reapplyCanonicalPaperSpeedIfNeeded()
-            // #373, fifth step: a restore that carried no speed left a
-            // deferred capture; the first valid canvas resolves it, so the
-            // restored extent's implied speed holds from here on.
-            if pendingImpliedSpeedCapture, calibration.canvasSize.width > 0 {
-                pendingImpliedSpeedCapture = false
-                captureImpliedPaperSpeed()
+            // #375: the re-derivation (and #373's fifth step below) is
+            // COALESCED. The first valid layout applies immediately —
+            // X50's snap, #359's restore acceptance and #373's deferred
+            // capture all resolve on it — but an ANIMATING canvas (the
+            // review-queue pane toggle, a live window resize) publishes a
+            // size per frame, and re-deriving per frame fought the
+            // animation: a quantised Int64 width step against a gliding
+            // canvas, rendered one pass behind, plus a cancelAnimation()
+            // per tick. Until the size settles the trace stretches (the
+            // smooth pre-#373 behaviour); one re-derivation then lands —
+            // more paper, same boxes, centre preserved.
+            canvasSettleCoalescer.canvasChanged(from: oldSize, to: newSize) {
+                reapplyCanonicalPaperSpeedIfNeeded()
+                // #373, fifth step: a restore that carried no speed left a
+                // deferred capture; the first valid canvas resolves it, so
+                // the restored extent's implied speed holds from here on.
+                if pendingImpliedSpeedCapture, calibration.canvasSize.width > 0 {
+                    pendingImpliedSpeedCapture = false
+                    captureImpliedPaperSpeed()
+                }
             }
         }
         // X59: republish the live snapshot on every change, so ⌘S can capture
