@@ -125,43 +125,46 @@ Two channels is already few, so this section is mostly an observation about
 how the **presets menu** behaves when a record carries almost none of the
 leads the built-ins name.
 
-On record 100 (MLII + V5) the menu reads, as observed:
+On record 100 (MLII + V5, nothing declared yet) the menu reads, as observed:
 
 | Row | Shows | State |
 |---|---|---|
-| `Limb` | *Limb — none in this record* | disabled |
 | `Precordial` | *Precordial — 1 of 6* | enabled — stages V5 alone |
-| `Bipolar limb` | *Bipolar limb — none in this record* | disabled |
 | `All leads` | *All leads* | enabled |
+| `Save current selection as preset…` | | disabled until something's staged |
 | `Manage presets…` | | disabled until you have saved one |
 
-Forty of the 48 records pair MLII with V1, so `Precordial — 1 of 6` is
-what most of this database sees. The menu is behaving exactly as specified
-— a preset is applied by lead **name**, `MLII` is not `II`, and a row says
-up front how much of itself the record can satisfy — but on this data the
-honesty reads as clutter: three of four built-ins are dead or near-dead,
-and the one that is live stages a single lead you could have clicked.
+`Limb` and `Bipolar limb` are not there at all. A built-in that cannot
+resolve **anything** in the open record is left off the menu rather than
+listed disabled ([#351](https://github.com/kvnlng/Murmur/issues/351)) —
+`All leads` is always present as the floor, so a disabled row saying *none
+in this record* told you nothing you could act on twice. A built-in that
+resolves **partially**, like `Precordial` here, still says so up front —
+`Precordial — 1 of 6` — rather than staging a partial set and leaving you
+to notice.
 
-That is awkward, and it is the real finding of this section. It is
-recorded as [#351](https://github.com/kvnlng/Murmur/issues/351): the
-built-ins should be seeded from what the open record carries rather than a
-fixed four. This page does not work around it. Saving your own preset works
-as the corpus guide describes — `MLII` alone as `Rhythm strip`, say — and
-applies by name to every record here.
+Forty of the 48 records pair MLII with V1, so `Precordial — 1 of 6` is what
+most of this database sees, and on those records `Limb` and `Bipolar limb`
+are omitted the same way. Saving your own preset works as the corpus guide
+describes — `MLII` alone as `Rhythm strip`, say — and applies by name to
+every record here; a **saved** preset that cannot resolve stays on the menu,
+disabled, rather than disappearing, because it is your own artifact and
+hiding it would read as data loss the built-ins don't carry.
 
-There is a second, more direct way to close that gap on this data: tell
+There is a second, more direct way to close the gap on this data: tell
 Murmur what `MLII` physically *is*. Right-click the `MLII` channel and
 choose **Declare placement…**, type `II`, and save it folder-wide. The
 sheet writes nothing but that assertion — it does not touch the channel's
 recorded name, and no calculation reads it. What changes is disclosure and
 preset matching: the header line and any QT citation on that channel now
 carry a `(declared: II, by <you>, <date>)` parenthetical alongside the name
-`MLII`, and the presets menu on record 100 now reads `Limb — 1 of 6`
-instead of *none in this record*, because `LeadPreset.resolve` matches a
-preset's lead names against declared placements as well as recorded ones.
-Nothing is inferred or backfilled onto records you haven't declared — this
-is the analyst's own statement, attributed and dated, not a rule the app
-derived from `MLII` being conventional.
+`MLII`, and the presets menu on record 100 now shows `Limb — 1 of 6` —
+declaring the placement is what brings the row back, since
+`LeadPreset.resolve` matches a preset's lead names against declared
+placements as well as recorded ones. Nothing is inferred or backfilled onto
+records you haven't declared — this is the analyst's own statement,
+attributed and dated, not a rule the app derived from `MLII` being
+conventional.
 
 The sheet also offers a **this record only** scope, for the rare record
 whose wiring genuinely differs from the rest of the folder. One honest
@@ -266,7 +269,9 @@ cite the database separately under its own licence.
 
 ## What changed between the two guides
 
-Nothing in the app. The scanner, the navigator's search, the presets menu,
+Nothing beyond the presets menu (§5). The scanner, the navigator's search,
 the producer contract, the queue, and the export all ran unchanged on data
-of a different shape, and where the fit was poor (§5) the page says so and
-an issue carries it. That is the test this page exists to run.
+of a different shape; the presets menu's built-in omission rule
+([#351](https://github.com/kvnlng/Murmur/issues/351)) exists because this
+page ran it on data of a different shape and found the fit poor. That is
+the test this page exists to run.

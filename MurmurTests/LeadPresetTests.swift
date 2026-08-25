@@ -169,6 +169,126 @@ struct LeadPresetDeclaredPlacementResolutionTests {
     }
 }
 
+@Suite("Lead presets (#351) — menu composition")
+struct LeadPresetMenuCompositionTests {
+    private func channel(_ name: String) -> Channel {
+        Channel(
+            id: UUID(), name: name, unit: "mV", sampleRate: 500,
+            startTimeUnixMS: 0, sampleCount: 5000,
+            storageFileName: "\(name).bin", pyramid: []
+        )
+    }
+
+    /// Record 100's shape from the issue: MLII + V5, no declaration.
+    private var record100: [Channel] { [channel("MLII"), channel("V5")] }
+
+    private var twelveLead: [Channel] {
+        ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"]
+            .map(channel)
+    }
+
+    @Test("A built-in that cannot resolve is omitted, not shown disabled")
+    func omitsUnresolvableBuiltIns() {
+        let rows = LeadPresetMenuComposer.rows(
+            allPresets: LeadPreset.builtIns,
+            channels: record100,
+            declaredPlacements: [:]
+        )
+
+        // Precordial resolves (V5); Limb, Bipolar limb and All leads do not
+        // — MLII and V5 satisfy none of their lead lists.
+        #expect(rows.map(\.preset.name) == ["Precordial", "All leads"])
+    }
+
+    @Test("A built-in that resolves partially stays, with its existing caption")
+    func keepsPartiallyResolvingBuiltIns() {
+        let rows = LeadPresetMenuComposer.rows(
+            allPresets: LeadPreset.builtIns,
+            channels: record100,
+            declaredPlacements: [:]
+        )
+
+        let precordial = rows.first { $0.preset.name == "Precordial" }
+        #expect(precordial?.caption == "Precordial — 1 of 6")
+        #expect(precordial?.isEnabled == true)
+    }
+
+    @Test("The sample 12-lead recording keeps all four built-ins, unchanged")
+    func keepsAllBuiltInsOnFullRecord() {
+        let rows = LeadPresetMenuComposer.rows(
+            allPresets: LeadPreset.builtIns,
+            channels: twelveLead,
+            declaredPlacements: [:]
+        )
+
+        #expect(rows.map(\.preset.name) == ["Limb", "Precordial", "Bipolar limb", "All leads"])
+        #expect(rows.allSatisfy { $0.isEnabled })
+        #expect(rows.map(\.caption) == ["Limb", "Precordial", "Bipolar limb", "All leads"])
+    }
+
+    @Test("When no built-in resolves, only `All leads` is listed among them")
+    func onlyAllLeadsWhenNothingElseResolves() {
+        let channels = [channel("CH1"), channel("CH2")]
+        let rows = LeadPresetMenuComposer.rows(
+            allPresets: LeadPreset.builtIns,
+            channels: channels,
+            declaredPlacements: [:]
+        )
+
+        #expect(rows.map(\.preset.name) == ["All leads"])
+        #expect(rows[0].isEnabled)
+    }
+
+    @Test("A declaration flips an omitted built-in back into the menu")
+    func declarationRestoresAnOmittedBuiltIn() {
+        // Undeclared: MLII matches nothing in Limb, so it is omitted.
+        let undeclared = LeadPresetMenuComposer.rows(
+            allPresets: LeadPreset.builtIns,
+            channels: record100,
+            declaredPlacements: [:]
+        )
+        #expect(!undeclared.map(\.preset.name).contains("Limb"))
+
+        // Declaring MLII → II lets Limb resolve one of six, so it reappears.
+        let declared = LeadPresetMenuComposer.rows(
+            allPresets: LeadPreset.builtIns,
+            channels: record100,
+            declaredPlacements: ["mlii": "II"]
+        )
+        let limb = declared.first { $0.preset.name == "Limb" }
+        #expect(limb?.caption == "Limb — 1 of 6")
+        #expect(limb?.isEnabled == true)
+    }
+
+    @Test("A saved preset that resolves nil stays visible and disabled")
+    func savedPresetThatCannotResolveStaysAndIsDisabled() {
+        let saved = LeadPreset(name: "My set", leads: ["X1", "X2"])
+        let rows = LeadPresetMenuComposer.rows(
+            allPresets: LeadPreset.builtIns + [saved],
+            channels: record100,
+            declaredPlacements: [:]
+        )
+
+        let row = rows.first { $0.preset.name == "My set" }
+        #expect(row != nil)
+        #expect(row?.caption == "My set — none in this record")
+        #expect(row?.isEnabled == false)
+    }
+
+    @Test("A saved preset that resolves fully keeps today's plain caption")
+    func savedPresetThatResolvesKeepsPlainCaption() {
+        let saved = LeadPreset(name: "My set", leads: ["MLII"])
+        let rows = LeadPresetMenuComposer.rows(
+            allPresets: [saved],
+            channels: record100,
+            declaredPlacements: [:]
+        )
+
+        #expect(rows.map(\.caption) == ["My set"])
+        #expect(rows[0].isEnabled)
+    }
+}
+
 @Suite("Lead presets (#332) — the store")
 struct LeadPresetStoreTests {
     /// Its own defaults suite: a test must never write into the analyst's
