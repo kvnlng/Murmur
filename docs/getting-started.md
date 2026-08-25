@@ -109,8 +109,10 @@ hour → window.
   carries those leads.
 
   Each row says how much of itself the open record can satisfy —
-  `Precordial — 3 of 6` — before you click, and a preset whose leads are
-  none of this record's is disabled rather than silently doing nothing.
+  `Precordial — 3 of 6` — before you click. A built-in set that none of
+  this record's leads can satisfy is omitted from the menu; a preset you
+  saved is always listed, disabled rather than silently doing nothing
+  ([#351](https://github.com/kvnlng/Murmur/issues/351)).
   Matching ignores case, but nothing else: Murmur does not map one lead
   spelling to another, because WFDB sources do not agree on a closed set
   of lead names and an alias table would be an equivalence the record
