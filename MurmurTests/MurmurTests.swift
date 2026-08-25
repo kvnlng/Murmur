@@ -1919,6 +1919,34 @@ struct CalibrationMathTests {
         #expect(abs((drifted ?? 0) - 38.6) < 0.01)
     }
 
+    @Test("A zoomed extent's implied speed holds through a canvas change (#373)")
+    func impliedSpeedHoldsThroughResize() {
+        // The capture-after-zoom contract: a 4 s pinch on a 1250 pt canvas at
+        // 5 pt/mm implies 62.5 mm/s; that speed is stored, and re-deriving on
+        // a canvas grown to 1930 pt reproduces the SAME speed — more beats of
+        // the same-sized boxes, non-standard but held.
+        let captured = CalibrationMath.impliedMillimetersPerSecond(
+            windowSeconds: 4, canvasWidthPoints: 1250, millimetersPerPoint: 0.2
+        )
+        #expect(abs((captured ?? 0) - 62.5) < 1e-9)
+        let rederived = CalibrationMath.windowSamples(
+            millimetersPerSecond: captured ?? 0, canvasWidthPoints: 1930,
+            millimetersPerPoint: 0.2, sampleRate: 360
+        )
+        let held = CalibrationMath.impliedMillimetersPerSecond(
+            windowSeconds: Double(rederived ?? 0) / 360,
+            canvasWidthPoints: 1930, millimetersPerPoint: 0.2
+        )
+        #expect(abs((held ?? 0) - 62.5) < 0.05)
+        // The pre-#373 failure this replaces: the 4 s extent frozen while the
+        // canvas grew read as 96.5 mm/s — the paper stretched (the #373
+        // report's beat count held constant when it should have grown).
+        let stretched = CalibrationMath.impliedMillimetersPerSecond(
+            windowSeconds: 4, canvasWidthPoints: 1930, millimetersPerPoint: 0.2
+        )
+        #expect(abs((stretched ?? 0) - 96.5) < 0.01)
+    }
+
     @Test("Window-samples rejects degenerate inputs")
     func windowSamplesDegenerate() {
         #expect(CalibrationMath.windowSamples(millimetersPerSecond: 0, canvasWidthPoints: 1250, millimetersPerPoint: 0.2, sampleRate: 360) == nil)
