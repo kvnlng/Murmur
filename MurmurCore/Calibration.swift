@@ -35,16 +35,18 @@ final class Calibration {
 
     /// Canonical paper speed in mm/s (#359) — the timebase twin of the gain
     /// above, so BOTH axes are calibration-canonical and a window resize
-    /// changes visible duration, never scale. `nil` means no speed has been
-    /// chosen (legacy auto view, point-fallback displays): the viewport width
-    /// in samples is then the only truth and the readout honestly reports
-    /// whatever scale that implies. Standard View and the speed presets set
-    /// it; an analyst zoom CLEARS it (zoom is a choice of extent, and the
-    /// readout goes honest-non-standard rather than asserting a speed nobody
-    /// picked); engaging the calibration lock captures the current implied
-    /// speed so the lock holds the timebase against everything, resize
-    /// included. `BedsideView` re-derives the viewport width from this on
-    /// every canvas-size change.
+    /// changes visible duration, never scale. `nil` means no speed CAN be
+    /// held (point-fallback displays, degenerate geometry, or the legacy
+    /// auto view before any choice): the viewport width in samples is then
+    /// the only truth and the readout honestly reports whatever scale that
+    /// implies. Standard View and the speed presets set it explicitly; an
+    /// analyst zoom (pinch, ladder rung, range zoom, zoom-to-note) captures
+    /// the speed its new extent IMPLIES (#373 — possibly non-standard, but
+    /// definite, exactly as Fit amplitude stores its computed gain); the
+    /// calibration lock captures likewise. The 10 s window pin is the one
+    /// standing extent promise, so it clears the speed while engaged and
+    /// captures on release. `BedsideView` re-derives the viewport width from
+    /// this on every canvas-size change.
     var speedMillimetersPerSecond: Double?
 
     /// Lock-to-standard state. Placeholder in Phase 1; wired to hold

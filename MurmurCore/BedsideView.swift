@@ -126,6 +126,13 @@ struct BedsideView: View {
     /// the open state is the default for a record the app has never seen, not
     /// an override. `.mur` restore is gated on X14.)
     @State private var hasAppliedOpenCalibration = false
+    /// #373: set when a session restores with no saved paper speed (every
+    /// pre-#373 save) and no 10 s pin — the restored extent implies a speed
+    /// on whatever canvas it lands on, and that speed should hold from
+    /// there. Deferred through this flag because the restore can run before
+    /// the focused panel has published a real canvas size; consumed by the
+    /// canvas-change chain once the width is valid.
+    @State private var pendingImpliedSpeedCapture = false
     @State private var layoutMode: BedsideLayoutMode
     /// App-wide read/write latch. Governs the context-notes editor and the
     /// per-finding disposition trio; new annotation create/edit/delete will
@@ -854,6 +861,13 @@ struct BedsideView: View {
             applyOpenCalibrationIfNeeded()
             applyPendingSessionRestoreIfNeeded()
             reapplyCanonicalPaperSpeedIfNeeded()
+            // #373, fifth step: a restore that carried no speed left a
+            // deferred capture; the first valid canvas resolves it, so the
+            // restored extent's implied speed holds from here on.
+            if pendingImpliedSpeedCapture, calibration.canvasSize.width > 0 {
+                pendingImpliedSpeedCapture = false
+                captureImpliedPaperSpeed()
+            }
         }
         // X59: republish the live snapshot on every change, so ⌘S can capture
         // state that lives in this view's @State. MERGES rather than replaces —
@@ -951,9 +965,11 @@ struct BedsideView: View {
             // resolves a gain, which is exactly right — a package saved in that
             // state carries no paper and reopens at Standard View.
             gainMillimetersPerMillivolt: calibration.gainMillimetersPerMillivolt,
-            // #359: the timebase half of the paper rides with the gain; nil
-            // when the analyst was on a chosen extent rather than a chosen
-            // speed, so such a save restores its exact sample width as before.
+            // #359/#373: the timebase half of the paper rides with the gain;
+            // since #373 an extent choice captures its implied speed, so nil
+            // survives only where no speed could be held (point-fallback
+            // display, 10 s pin engaged) — such a save restores its exact
+            // sample width as before.
             speedMillimetersPerSecond: calibration.speedMillimetersPerSecond,
             // X72: nil-when-empty so a session with no notes is byte-identical
             // to one saved before notes existed. Carried through
@@ -1028,6 +1044,32 @@ struct BedsideView: View {
         viewport.setWidth(samples, anchorFraction: 0.5)
     }
 
+    /// #373: an extent choice (zoom, ladder rung, range zoom, zoom-to-note)
+    /// picks seconds-on-screen; the paper speed that extent implies then
+    /// becomes canonical — the timebase twin of Fit amplitude, which stores
+    /// its computed (non-standard) gain — so a later canvas change holds the
+    /// boxes and grows visible duration instead of stretching the paper.
+    /// Called AFTER the viewport mutation, so the captured speed reflects
+    /// the clamped result. Falls back to nil (legacy stretch, honest
+    /// readout) when the display's physical size can't be trusted or the
+    /// geometry is degenerate — nothing false asserted. The 10 s pin is the
+    /// one standing extent promise (ten seconds on screen whatever the
+    /// window), so it suppresses the capture while engaged; releasing the
+    /// pin captures (`toggleWindowLock`).
+    private func captureImpliedPaperSpeed() {
+        guard !windowLockedTo10s,
+              let mmPerPoint = DisplayMetrics.millimetersPerPoint(),
+              let implied = CalibrationMath.impliedMillimetersPerSecond(
+                  windowSeconds: viewport.durationSeconds,
+                  canvasWidthPoints: Double(calibration.canvasSize.width),
+                  millimetersPerPoint: mmPerPoint
+              ) else {
+            calibration.speedMillimetersPerSecond = nil
+            return
+        }
+        calibration.speedMillimetersPerSecond = implied
+    }
+
     /// Applies session state restored from a `.mur`, exactly once.
     ///
     /// Runs AFTER `applyOpenCalibrationIfNeeded()` so a viewport the analyst
@@ -1059,6 +1101,15 @@ struct BedsideView: View {
         }
         if let locked = restore.windowLockedTo10s {
             windowLockedTo10s = locked
+        }
+        // #373: a restored session that never saved a speed (pre-#373
+        // packages, carried relaunch state) lands on an extent; the speed
+        // that extent implies becomes canonical so the first pane toggle or
+        // window resize grows the paper instead of stretching it. Deferred
+        // (see `pendingImpliedSpeedCapture`) — the canvas may not have laid
+        // out yet. A restored 10 s pin suppresses it, per the pin's promise.
+        if calibration.speedMillimetersPerSecond == nil && !windowLockedTo10s {
+            pendingImpliedSpeedCapture = true
         }
         // X96: restore the whole staged overlay, in the saved selection
         // order — order is what X64-C assigns trace inks by, so preserving
@@ -1270,10 +1321,10 @@ struct BedsideView: View {
             if let seconds = UITestSupport.zoomToSeconds,
                let firstECG = ecgChannels.first {
                 let width = Int64(seconds * firstECG.sampleRate)
-                // #359: mirrors the production zoom paths — an injected
-                // extent clears the canonical speed too.
-                calibration.speedMillimetersPerSecond = nil
                 viewport.setWidth(width, anchorFraction: 0.5)
+                // #373: mirrors the production zoom paths — an injected
+                // extent captures its implied speed too.
+                captureImpliedPaperSpeed()
             }
             if let url = UITestSupport.attachFindingsURL {
                 handleAttachFindings(.success(url))
@@ -1577,13 +1628,13 @@ struct BedsideView: View {
         // A deliberate zoom breaks the 10 s window lock — the analyst has
         // chosen a different frame.
         if windowLockedTo10s { windowLockedTo10s = false }
-        // #359: a zoom is a choice of extent, not of paper — the canonical
-        // speed clears and the readout goes honestly non-standard, rather
-        // than a resize later "correcting" a frame the analyst just chose.
-        calibration.speedMillimetersPerSecond = nil
         let currentWidth = viewport.endSample - viewport.startSample
         let newWidth = Int64(Double(currentWidth) * factor)
         viewport.setWidth(newWidth, anchorFraction: 0.5)
+        // #373: the zoomed extent's implied speed becomes canonical — the
+        // readout may read non-standard, but a later resize holds it
+        // instead of drifting it.
+        captureImpliedPaperSpeed()
     }
 
     /// Standard View (X40): snap BOTH axes back to standard ECG paper —
@@ -1677,6 +1728,11 @@ struct BedsideView: View {
             calibration.speedMillimetersPerSecond = nil
             let tenSeconds = Int64(viewport.sampleRate * 10)
             viewport.setWidth(tenSeconds, anchorFraction: 0.5)
+        } else {
+            // #373: releasing the pin ends the seconds promise; the extent
+            // it leaves behind implies a speed, and that speed holds from
+            // here — same capture the padlock performs.
+            captureImpliedPaperSpeed()
         }
     }
 
@@ -1691,11 +1747,11 @@ struct BedsideView: View {
     /// true.
     private func applyZoomLadderStep(seconds: Double) {
         windowLockedTo10s = false
-        // #359: a ladder rung is seconds-on-screen — an extent choice, so the
-        // canonical speed clears exactly as it does for a pinch zoom.
-        calibration.speedMillimetersPerSecond = nil
         let width = Int64((seconds * max(1, viewport.sampleRate)).rounded())
         viewport.setWidth(max(2, width), anchorFraction: 0.5)
+        // #373: the rung is seconds-on-screen at THIS canvas; its implied
+        // speed becomes canonical, same as a pinch zoom.
+        captureImpliedPaperSpeed()
     }
 
     /// Animated jump to the first filtered finding strictly after the
@@ -1889,10 +1945,11 @@ struct BedsideView: View {
                     let rate = max(1, viewport.sampleRate)
                     let width = (range.upperBound - range.lowerBound) * rate
                     guard width.isFinite, width < Double(Int64.max) else { return }
-                    // #359: an extent choice, like the ladder — speed clears.
-                    calibration.speedMillimetersPerSecond = nil
                     viewport.setWidth(Int64(width), anchorFraction: 0)
                     viewport.setStart(Int64(range.lowerBound * rate))
+                    // #373: an extent choice, like the ladder — the swept
+                    // extent's implied speed becomes canonical.
+                    captureImpliedPaperSpeed()
                 },
                 rmssdLane: rmssdLane,
                 intervalLane: intervalLane,
@@ -3278,10 +3335,11 @@ struct BedsideView: View {
             viewport.center(onSample: (note.startSample + note.endSample) / 2)
         } else {
             let width = max(note.endSample - note.startSample, Int64(viewport.sampleRate))
-            // #359: zoom-to-note is an extent choice — speed clears.
-            calibration.speedMillimetersPerSecond = nil
             viewport.setWidth(width, anchorFraction: 0)
             viewport.setStart(note.startSample)
+            // #373: zoom-to-note is an extent choice — its implied speed
+            // becomes canonical.
+            captureImpliedPaperSpeed()
         }
     }
 
