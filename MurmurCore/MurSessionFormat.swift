@@ -236,7 +236,8 @@ public struct MurSessionState: Codable, Equatable, Sendable {
     /// nil-when-empty discipline as `anchoredNotes`: a session saved before
     /// endorsements existed and one saved with none are byte-identical.
     /// Cluster identity is by representative waveform, re-attached on load
-    /// (`MorphologyContext.attachedCardIndex`).
+    /// by the App's morphology orchestrator (#381 — the verdict is paid
+    /// compute, published via `MorphologyContext.attachments`).
     public var morphologyEndorsements: [MorphologyEndorsement]?
 
     public init(

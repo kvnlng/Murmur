@@ -28,16 +28,24 @@ struct MorphologyPanel: View {
 
     private var canAuthor: Bool { isEditing && purchaseStore.hasStudio }
 
+    /// #381: the attachment verdicts come published from the App's
+    /// orchestrator (paid distance) — this panel only sorts them.
+    @State private var morphologyContext = MorphologyContext.shared
+
     /// Endorsement indices keyed by the card they re-attach to; the
-    /// leftovers are orphans.
+    /// leftovers are orphans. While the verdicts for the current
+    /// (summary, endorsements) pair are still resolving, nothing is
+    /// attached and nothing is tagged orphan — a transient blank beats a
+    /// wrong verdict.
     private var attachments: (byCard: [Int: [Int]], orphans: [Int]) {
+        guard let verdicts = morphologyContext.attachments else { return ([:], []) }
         var byCard: [Int: [Int]] = [:]
         var orphans: [Int] = []
         for (index, endorsement) in endorsements.enumerated() {
-            if let card = MorphologyContext.attachedCardIndex(of: endorsement, in: summary) {
-                byCard[card, default: []].append(index)
-            } else {
-                orphans.append(index)
+            switch verdicts[endorsement] {
+            case .some(.some(let card)): byCard[card, default: []].append(index)
+            case .some(.none): orphans.append(index)
+            case .none: break   // not resolved yet — no verdict to render
             }
         }
         return (byCard, orphans)
