@@ -276,6 +276,7 @@
 				0A9B42DD2FDF06BB0059C903 /* Sources */,
 				0A9B42DE2FDF06BB0059C903 /* Frameworks */,
 				0A9B42DF2FDF06BB0059C903 /* Resources */,
+				0AB390A12FEED21F00A3D0A5 /* Embed guarded sources */,
 			);
 			buildRules = (
 			);
@@ -464,6 +465,32 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		0AB390A12FEED21F00A3D0A5 /* Embed guarded sources */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Murmur/ArrhythmiaScanOrchestrator.swift",
+				"$(SRCROOT)/Murmur/MorphologyOrchestrator.swift",
+				"$(SRCROOT)/Murmur/IntervalMarkingsOrchestrator.swift",
+				"$(SRCROOT)/Murmur/VTVFScanView.swift",
+			);
+			name = "Embed guarded sources";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(BUILT_PRODUCTS_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/GuardedSources/ArrhythmiaScanOrchestrator.swift",
+				"$(BUILT_PRODUCTS_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/GuardedSources/MorphologyOrchestrator.swift",
+				"$(BUILT_PRODUCTS_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/GuardedSources/IntervalMarkingsOrchestrator.swift",
+				"$(BUILT_PRODUCTS_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/GuardedSources/VTVFScanView.swift",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# #390: the no-name-gate guard (AnalysisLeadNoNameGateTests) reads these\n# sources at test RUNTIME. Xcode Cloud's test runner has no source checkout,\n# so the guard reads them from the test bundle instead of the repo.\nDEST=\"${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/GuardedSources\"\nmkdir -p \"$DEST\"\nfor f in ArrhythmiaScanOrchestrator MorphologyOrchestrator IntervalMarkingsOrchestrator VTVFScanView; do\n    cp \"${SRCROOT}/Murmur/${f}.swift\" \"$DEST/\"\ndone\n";
+		};
 		0AC4C9502FEED21F00A3D0A5 /* Run SwiftLint */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
