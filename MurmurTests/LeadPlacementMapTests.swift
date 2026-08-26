@@ -667,3 +667,67 @@ struct LeadPlacementMapTests {
         #expect(elsewhere.contains("(declared: II, by kevin, "))
     }
 }
+
+/// #371: the trend-lane repro caption composes its lead fragment at render
+/// time, so declarations reach it — the same pattern (and the same fresh-
+/// context test convention) as the beat-caliper provenance tests above.
+@Suite("Lead placement map — trend-lane caption (#371)")
+struct TrendLaneCaptionPlacementTests {
+    /// The trend-lane caption fixture: the compute-produced split parts for
+    /// a QTc lane whose template was measured in MLII, with a T-offset gate
+    /// suffix so fragment ORDER is observable (lead stays before gate).
+    private func trendData(sourceLead: String? = "MLII") -> IntervalTrendData {
+        IntervalTrendData(
+            bins: [], baselineBand: nil, baselineMedian: nil,
+            captionPrefix: "QTc · Fridericia · 2-min bins · normal template = 214 beats",
+            captionLeadFragment: " · measured in MLII — not a conventional QT lead (II/V5)",
+            captionSuffix: " · T-offset gate: exclude score ≥ 1",
+            sourceLead: sourceLead
+        )
+    }
+
+    @Test("Declaring MLII → II reaches the trend-lane caption — clause suppressed, parenthetical in place (#371)")
+    @MainActor func trendCaptionWordsTheDeclaredLead() {
+        let map = LeadPlacementMapContext()
+        map.declare(recordedName: "MLII", placement: "II", recordID: nil, reviewer: "kevin")
+        let caption = IntervalTrendLane.renderedReproCaption(
+            data: trendData(), metric: .qtc, placementMap: map, recordID: "100.hea")
+        #expect(caption.contains("measured in MLII (declared: II, by kevin, "))
+        #expect(!caption.contains("not a conventional QT lead"))
+        // Fragment order held: lead before the gate suffix, prefix intact.
+        #expect(caption.hasPrefix("QTc · Fridericia · 2-min bins · normal template = 214 beats · measured in MLII"))
+        #expect(caption.hasSuffix(" · T-offset gate: exclude score ≥ 1"))
+        // Acceptance: identical lead wording to the caliper card — both
+        // surfaces speak through the same QTLeadDisclosure composer.
+        let declared = map.declaration(forRecordedName: "MLII", recordID: "100.hea")
+        let cardWording = QTLeadDisclosure.citedLeadName(
+            for: "MLII",
+            declaredPlacement: declared?.declaration,
+            isOverride: declared?.isOverride ?? false)
+        #expect(caption.contains("measured in \(cardWording)"))
+    }
+
+    @Test("No declaration reproduces the compute caption byte-for-byte (#371)")
+    @MainActor func trendCaptionUndeclaredIsComputeDefault() {
+        let data = trendData()
+        let caption = IntervalTrendLane.renderedReproCaption(
+            data: data, metric: .qtc, placementMap: LeadPlacementMapContext(), recordID: "100.hea")
+        #expect(caption == data.reproCaption)
+    }
+
+    @Test("PR caption keeps the recorded name — the parenthetical is QT-disclosure grammar (#371)")
+    @MainActor func trendCaptionPRStaysDeclarationFree() {
+        let map = LeadPlacementMapContext()
+        map.declare(recordedName: "MLII", placement: "II", recordID: nil, reviewer: "kevin")
+        let data = IntervalTrendData(
+            bins: [], baselineBand: nil, baselineMedian: nil,
+            captionPrefix: "PR · 2-min bins · normal template = 214 beats",
+            captionLeadFragment: " · measured in MLII",
+            captionSuffix: "",
+            sourceLead: "MLII"
+        )
+        let caption = IntervalTrendLane.renderedReproCaption(
+            data: data, metric: .pr, placementMap: map, recordID: "100.hea")
+        #expect(caption == data.reproCaption)
+    }
+}

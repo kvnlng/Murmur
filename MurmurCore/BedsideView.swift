@@ -2790,6 +2790,9 @@ struct BedsideView: View {
                 beats: markingsContext.beats,
                 template: markingsContext.template,
                 sampleRate: markingsContext.sampleRate,
+                // #371: the same navigator id every other placement surface
+                // asks under — resolves the caption's declared lead.
+                recordID: recordID,
                 metric: trendLaneContext.metric,
                 binSeconds: trendLaneContext.binSeconds,
                 templateBeatCount: markingsContext.template?.sampleCount,
