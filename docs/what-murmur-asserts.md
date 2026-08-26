@@ -120,6 +120,29 @@ confirming "sinus resumes at sample N," so the export refuses to say
 it, and writes a NOTE at the onset carrying the analyst's own words
 instead (`WFDBAnnotationExport.swift`).
 
+### 7. Operating points are disclosed on purpose
+
+Every surface that proposes a finding or a measurement states the
+measured validation envelope of the thing doing the proposing: the
+T-offset error distribution and its exclusion rate in the trend lane's
+help text, the VT/VF sensitivity and timing envelope in the scan view,
+the AFib operating point in its scan caption, and the tolerances the
+public test suites hold the pipeline to.
+
+This is deliberate disclosure policy, not an accident of accretion
+(ruled in [#386](https://github.com/kvnlng/Murmur/issues/386)). An
+RUO analyst is owed the accuracy envelope of anything that proposes
+findings — an operating point beside a candidate is what makes
+"candidate" an honest word, and honesty about limits is part of the
+product, not a leak from it. The numbers disclosed are measured
+results and grading conventions; the algorithms that achieve them are
+not part of this disclosure and live outside this repository.
+
+A future caption citing a validation number follows this policy:
+state the figure, its dataset, and its exclusion or gating conditions
+together — a sensitivity without its conditions is an advertisement,
+not a disclosure.
+
 ## If you are writing a producer
 
 The boundary is generous on your side of it. You own:
