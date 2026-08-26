@@ -1059,7 +1059,7 @@
 			repositoryURL = "https://github.com/kvnlng/Murmur-Extensions";
 			requirement = {
 				kind = exactVersion;
-				version = 0.30.0;
+				version = 0.31.0;
 			};
 		};
 		0AC0411B3019290E00025FAB /* XCRemoteSwiftPackageReference "swift-algorithms" */ = {
