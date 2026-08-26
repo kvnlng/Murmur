@@ -33,6 +33,18 @@ struct MorphologyOrchestrator: View {
         let analysisLeadRevision: Int
     }
 
+    /// #381: the attachment verdicts belong to one (summary, endorsements)
+    /// pair. The summary is fingerprinted by its provenance line (record ·
+    /// beats · lead · window · threshold — clustering is deterministic, so
+    /// same provenance ⇒ same cards) rather than hashing every
+    /// representative.
+    private struct AttachKey: Hashable {
+        let provenance: String?
+        let cardCount: Int
+        let matchThreshold: Double?
+        let endorsements: [MorphologyEndorsement]
+    }
+
     var body: some View {
         Color.clear
             .frame(width: 0, height: 0)
@@ -42,6 +54,34 @@ struct MorphologyOrchestrator: View {
                           analysisLeadRevision: recordingContext.analysisLeadRevision)) {
                 await recompute()
             }
+            .task(id: AttachKey(provenance: morphologyContext.summary?.provenance,
+                                cardCount: morphologyContext.summary?.cards.count ?? 0,
+                                matchThreshold: morphologyContext.summary?.matchThreshold,
+                                endorsements: morphologyContext.endorsements)) {
+                resolveAttachments()
+            }
+    }
+
+    /// #381: resolve each endorsement's card through the PAID verdict
+    /// (`MorphologyClustering.nearestRepresentativeIndex`) and publish —
+    /// MurmurCore renders verdicts, never computes them. Cheap (a few
+    /// endorsements × a few cards), so it runs inline on the task.
+    private func resolveAttachments() {
+        guard let summary = morphologyContext.summary else { return }
+        let candidates = summary.cards.map(\.representative)
+        var verdicts: [MorphologyEndorsement: Int?] = [:]
+        for endorsement in morphologyContext.endorsements {
+            let position = MorphologyClustering.nearestRepresentativeIndex(
+                of: endorsement.representative,
+                among: candidates,
+                threshold: summary.matchThreshold
+            )
+            // updateValue, not subscript assignment: the value type is Int?
+            // and a subscript-assigned nil DELETES the key — an orphan must
+            // be recorded as .some(nil), not silently dropped.
+            verdicts.updateValue(position.map { summary.cards[$0].id }, forKey: endorsement)
+        }
+        morphologyContext.setAttachments(verdicts)
     }
 
     private func recompute() async {
@@ -134,14 +174,12 @@ struct MorphologyOrchestrator: View {
             samples: samples, sampleRate: sampleRate, rPeaks: rPeaks)
         let qrsByBeat = IntervalMeasurement.measureAll(store: delineated).map(\.qrsMs)
 
-        // §3: small clusters (<1% AND <30 beats) fold into the remainder
-        // rather than inviting endorsement of noise.
+        // §3 fold rule — single-source on the paid side since #382
+        // (`MorphologyClustering.isFolded`), consumed here and by the
+        // endorsed-mode rebuild so the two can never drift.
         let total = clustering.totalBeats
-        let isSmall: (MorphologyClustering.Cluster) -> Bool = { cluster in
-            cluster.count < 30 && Double(cluster.count) < 0.01 * Double(total)
-        }
-        let major = clustering.clusters.filter { !isSmall($0) }
-        let folded = clustering.clusters.filter(isSmall)
+        let major = clustering.majorClusters
+        let folded = clustering.foldedClusters
 
         let cards = major.enumerated().map { rank, cluster -> MorphologyClusterCard in
             var codeCounts: [String: Int] = [:]
@@ -154,8 +192,9 @@ struct MorphologyOrchestrator: View {
             let qrs = widths.isEmpty
                 ? nil
                 : String(format: "median QRS %.0f ms", widths[widths.count / 2])
-            // Geometric names only — A, B, C… — never a clinical label (§4.1).
-            let letter = String(UnicodeScalar(UInt8(65 + min(rank, 25))))
+            // Geometric names only — A, B, C… — never a clinical label
+            // (§4.1). #382: one letter mapping, owned by the clustering.
+            let letter = MorphologyClustering.letter(forRank: rank)
             return MorphologyClusterCard(
                 id: rank,
                 title: "Cluster \(letter)",

@@ -139,53 +139,43 @@ public final class MorphologyContext {
 
     public func set(summary: MorphologySummary?) {
         self.summary = summary
+        // #381: verdicts belong to the summary they were resolved against.
+        attachments = nil
         isComputing = false
     }
 
     public func setEndorsements(_ endorsements: [MorphologyEndorsement]) {
         guard endorsements != self.endorsements else { return }
         self.endorsements = endorsements
+        // The verdicts were computed against the previous endorsement set —
+        // stale the moment it changes; the orchestrator republishes.
+        attachments = nil
+    }
+
+    // MARK: - Endorsement re-attachment (#381)
+
+    /// The endorsement→card attachment verdicts, resolved by the App's
+    /// morphology orchestrator through the PAID distance
+    /// (`MorphologyClustering.nearestRepresentativeIndex`) and published
+    /// here — MurmurCore renders the verdicts, it never computes them
+    /// (the pre-#381 arithmetic mirror is gone). Map value nil = a
+    /// resolved ORPHAN (the record's clusters no longer contain the
+    /// endorsed shape; the panel surfaces it rather than silently
+    /// dropping the endorsement). The map itself nil = not yet resolved
+    /// for the current (summary, endorsements) pair — surfaces render no
+    /// attachment and no orphan tag during that transient, never a wrong
+    /// verdict.
+    public private(set) var attachments: [MorphologyEndorsement: Int?]?
+
+    public func setAttachments(_ attachments: [MorphologyEndorsement: Int?]) {
+        self.attachments = attachments
     }
 
     public func clear() {
         self.summary = nil
         self.endorsements = []
+        self.attachments = nil
         isComputing = false
-    }
-
-    // MARK: - Endorsement re-attachment
-
-    /// Correlation distance between two normalized windows (1 − dot; both
-    /// are zero-mean unit-L2, so the dot IS Pearson r). Bookkeeping join
-    /// for endorsement identity — the clinical distance lives with the
-    /// clustering on the paid side; this mirrors its arithmetic so a saved
-    /// endorsement can find its cluster without MurmurCore linking
-    /// MurmurMetrics. `infinity` for mismatched lengths (a parameters
-    /// change), which correctly reads as "no match" → orphan.
-    nonisolated static func representativeDistance(_ a: [Float], _ b: [Float]) -> Double {
-        guard a.count == b.count, !a.isEmpty else { return .infinity }
-        var dot: Float = 0
-        for i in a.indices { dot += a[i] * b[i] }
-        return Double(1 - dot)
-    }
-
-    /// The card an endorsement re-attaches to: nearest representative
-    /// within the summary's match threshold. nil = orphan — the record's
-    /// clusters no longer contain the endorsed shape, and the panel
-    /// surfaces that instead of silently dropping the endorsement.
-    nonisolated public static func attachedCardIndex(
-        of endorsement: MorphologyEndorsement,
-        in summary: MorphologySummary
-    ) -> Int? {
-        var best: (index: Int, distance: Double)?
-        for card in summary.cards {
-            let d = representativeDistance(endorsement.representative, card.representative)
-            if best == nil || d < best!.distance {
-                best = (card.id, d)
-            }
-        }
-        guard let best, best.distance <= summary.matchThreshold else { return nil }
-        return best.index
     }
 
     // MARK: - Card-string builders

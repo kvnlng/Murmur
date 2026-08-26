@@ -2,23 +2,23 @@
 //  MorphologyContextTests.swift
 //  MurmurTests
 //
-//  X112 (#188) — the free-side half of the morphology panel: endorsement
-//  re-attachment by representative match, the card-string builders, and
-//  the .mur persistence contract for endorsements.
+//  X112 (#188) — the morphology panel's contracts: the endorsement
+//  re-attachment verdict (paid-side since #381), the card-string builders,
+//  and the .mur persistence contract for endorsements.
 //
 
 import Foundation
 @testable import MurmurCore
+import MurmurMetrics
 import Testing
 
+/// #381: the match itself is the paid verdict
+/// (`MorphologyClustering.nearestRepresentativeIndex`) — MurmurCore only
+/// renders the published result. These tests pin the verdict the App's
+/// orchestrator feeds the panel, against the same hand-checkable fixtures
+/// the pre-#381 mirror was pinned to.
 @Suite("Morphology endorsement re-attachment (X112)")
 struct MorphologyAttachmentTests {
-
-    private func card(_ id: Int, representative: [Float]) -> MorphologyClusterCard {
-        MorphologyClusterCard(id: id, title: "Cluster \(id)", burden: "",
-                              qrsWidth: nil, annotatorCodes: nil,
-                              representative: representative)
-    }
 
     /// Unit-norm zero-mean two-point windows make hand-checkable distances.
     private let up: [Float] = [0.7071068, -0.7071068]
@@ -26,36 +26,24 @@ struct MorphologyAttachmentTests {
 
     @Test("An endorsement re-attaches to the nearest cluster within threshold")
     func attachesNearest() {
-        let summary = MorphologySummary(
-            cards: [card(0, representative: up), card(1, representative: down)],
-            remainderCaption: nil, provenance: "", totalBeats: 10,
-            matchThreshold: 0.30)
-        let endorsement = MorphologyEndorsement(representative: up, endorsedAt: .distantPast)
-        #expect(MorphologyContext.attachedCardIndex(of: endorsement, in: summary) == 0)
-        let other = MorphologyEndorsement(representative: down, endorsedAt: .distantPast)
-        #expect(MorphologyContext.attachedCardIndex(of: other, in: summary) == 1)
+        let candidates = [up, down]
+        #expect(MorphologyClustering.nearestRepresentativeIndex(
+            of: up, among: candidates, threshold: 0.30) == 0)
+        #expect(MorphologyClustering.nearestRepresentativeIndex(
+            of: down, among: candidates, threshold: 0.30) == 1)
     }
 
     @Test("Beyond the threshold the endorsement is an orphan, never force-attached")
     func orphanBeyondThreshold() {
         // The only cluster is the INVERSE shape — distance 2, far past d₀.
-        let summary = MorphologySummary(
-            cards: [card(0, representative: down)],
-            remainderCaption: nil, provenance: "", totalBeats: 10,
-            matchThreshold: 0.30)
-        let endorsement = MorphologyEndorsement(representative: up, endorsedAt: .distantPast)
-        #expect(MorphologyContext.attachedCardIndex(of: endorsement, in: summary) == nil)
+        #expect(MorphologyClustering.nearestRepresentativeIndex(
+            of: up, among: [down], threshold: 0.30) == nil)
     }
 
     @Test("A parameters change (different window length) reads as no match")
     func lengthMismatchIsOrphan() {
-        let summary = MorphologySummary(
-            cards: [card(0, representative: up)],
-            remainderCaption: nil, provenance: "", totalBeats: 10,
-            matchThreshold: 0.30)
-        let endorsement = MorphologyEndorsement(
-            representative: [0.5, 0.5, -0.5, -0.5], endorsedAt: .distantPast)
-        #expect(MorphologyContext.attachedCardIndex(of: endorsement, in: summary) == nil)
+        #expect(MorphologyClustering.nearestRepresentativeIndex(
+            of: [0.5, 0.5, -0.5, -0.5], among: [up], threshold: 0.30) == nil)
     }
 }
 

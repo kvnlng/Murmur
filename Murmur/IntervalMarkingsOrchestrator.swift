@@ -435,27 +435,26 @@ private extension IntervalMarkingsOrchestrator {
             samples: clusterSamples, sampleRate: sampleRate,
             rPeaks: annotatedBeats.map(\.sampleIndex),
             parameters: parameters)
-        let total = clustering.totalBeats
-        let majors = clustering.clusters.filter {
-            !($0.count < 30 && Double($0.count) < 0.01 * Double(total))
-        }
+        // #382: the §3 fold rule and the letters are single-source on the
+        // clustering, so this rebuild and the drawer panel can never
+        // disagree about which cluster "B" is. #381: the re-attachment
+        // verdict is the same paid call the panel's published verdicts
+        // come from — one matcher, everywhere.
+        let majors = clustering.majorClusters
+        let candidates = majors.map(\.representative)
         var endorsedRanks = Set<Int>()
         for endorsement in endorsements {
-            var best: (rank: Int, distance: Double)?
-            for (rank, cluster) in majors.enumerated() {
-                guard cluster.representative.count == endorsement.representative.count
-                else { continue }
-                let d = MorphologyClustering.distance(
-                    endorsement.representative, cluster.representative)
-                if best == nil || d < best!.distance { best = (rank, d) }
-            }
-            if let best, best.distance <= parameters.distanceThreshold {
-                endorsedRanks.insert(best.rank)
+            if let rank = MorphologyClustering.nearestRepresentativeIndex(
+                of: endorsement.representative,
+                among: candidates,
+                threshold: parameters.distanceThreshold
+            ) {
+                endorsedRanks.insert(rank)
             }
         }
         return endorsedRanks.sorted().map { rank in
             ModeSpec(
-                name: String(UnicodeScalar(UInt8(65 + min(rank, 25)))),
+                name: MorphologyClustering.letter(forRank: rank),
                 beatSampleIndices: majors[rank].memberBeatIndices
                     .map { annotatedBeats[$0].sampleIndex }
                     .sorted())
