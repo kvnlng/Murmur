@@ -54,5 +54,23 @@ Carthage/Build/
 AuthKey_*
 issuer_id
 
+# Same failure mode, neighbouring formats (#387): none of these has ever
+# existed in this repo (verified across full history in the 2026-08-26
+# openness audit) — the patterns are a fence, not a cleanup.
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.cer
+*.mobileprovision
+id_rsa*
+*.keystore
+
 # Memory / agent artifacts (not part of the project)
 memory/
+
+# Agent config dirs — previously ignored only by the machine-global git
+# ignore, which does not travel to other clones or CI (#387).
+.claude/
+.superpowers/
