@@ -801,22 +801,23 @@ struct QRSProminenceLeadScorerTests {
 /// walks only the four files named below, not the whole app target.
 @Suite("Analysis lead — no-name-gate guard")
 struct AnalysisLeadNoNameGateTests {
-    /// Resolved from this test file's own `#filePath` rather than the
-    /// process's current directory, so the guard works the same way under
-    /// `xcrun xctest` (this repo's `xcodebuild test` workaround) as under a
-    /// normal `xcodebuild test` run.
+    /// Resolved from the test bundle's `GuardedSources/` resources (copied
+    /// in by the "Embed guarded sources" build phase), NOT from `#filePath`:
+    /// `#filePath` bakes in the build machine's checkout path at compile
+    /// time, and Xcode Cloud's test action runs the built bundle on a
+    /// runner with no source checkout at that path (#390). The bundle copy
+    /// runs identically under `xcrun xctest`, `xcodebuild test`, and Cloud.
     private var calculationSources: [URL] {
-        let thisFile = URL(fileURLWithPath: #filePath)
-        let repoRoot = thisFile
-            .deletingLastPathComponent() // MurmurTests/
-            .deletingLastPathComponent() // repo root
-        let murmur = repoRoot.appendingPathComponent("Murmur", isDirectory: true)
+        let bundle = Bundle(for: GuardedSourcesBundleToken.self)
         return [
-            "ArrhythmiaScanOrchestrator.swift",
-            "MorphologyOrchestrator.swift",
-            "IntervalMarkingsOrchestrator.swift",
-            "VTVFScanView.swift",
-        ].map { murmur.appendingPathComponent($0) }
+            "ArrhythmiaScanOrchestrator",
+            "MorphologyOrchestrator",
+            "IntervalMarkingsOrchestrator",
+            "VTVFScanView",
+        ].compactMap {
+            bundle.url(forResource: $0, withExtension: "swift",
+                       subdirectory: "GuardedSources")
+        }
     }
 
     @Test("No calculation path selects a channel by name or channels.first (#357)")
@@ -840,7 +841,12 @@ struct AnalysisLeadNoNameGateTests {
             }
         }
         // A guard that silently reads zero files is not a guard — assert the
-        // #filePath resolution actually reached all four calculation sources.
+        // bundle lookup (compactMap drops misses) actually reached all four
+        // calculation sources.
         #expect(filesChecked == 4)
     }
 }
+
+/// Anchor for `Bundle(for:)` — Swift Testing suites are structs, and the
+/// test bundle can only be located from a class defined inside it.
+private final class GuardedSourcesBundleToken {}
