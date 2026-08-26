@@ -16,6 +16,13 @@
 //  read-only remit (no arithmetic on physiological measurements — this is
 //  arithmetic on the label stream, like the existing summary chips).
 //
+//  Boundary ruling (#385): KEEP in MurmurCore, including the one step the
+//  paragraph above anticipates as a judgment call — converting a run's
+//  median RR to bpm for its caption. That conversion states the run's own
+//  coordinates in the unit an analyst reads (caption-tier display
+//  arithmetic, same class as BeatHeartRateSeries); it feeds no analysis
+//  and composes no verdict.
+//
 
 import Foundation
 

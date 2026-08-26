@@ -14,6 +14,13 @@
 //  its parent — like `VariabilityLane`, it hides itself when the
 //  context has nothing to show.
 //
+//  Boundary ruling (#385): KEEP in MurmurCore. The arithmetic here —
+//  the Δ-vs-normal hover text, the percent-above-guide figure (X46),
+//  the lane reading (median of eligible bin medians) — is display math
+//  over bins the paid pipeline computed and published (#380 moved that
+//  pipeline private). It summarises published numbers for captions; it
+//  measures nothing.
+//
 //  Rendering follows project_interval_trend_lanes_design.md:
 //    - Median + IQR ribbon per bin (never a single smoothed line).
 //    - Patient-normal baseline band from the fiducial-store template.
