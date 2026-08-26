@@ -273,20 +273,61 @@ public struct IntervalTrendData: Sendable, Equatable {
     /// Baseline median (the line inside the band) — powers the
     /// caption's "patient normal · X ms" readout.
     public let baselineMedian: Double?
-    /// Repro caption. Echoes formula (for QTc), bin length, template
-    /// N. Used verbatim by CitationBuilder / Copy citation.
-    public let reproCaption: String
+    /// #371: the repro caption travels SPLIT — prefix (metric · formula ·
+    /// bins · template), the declaration-FREE lead fragment, and the suffix
+    /// (the T-offset gate) — so a render-time surface can swap the lead
+    /// fragment for a declaration-aware one (`IntervalTrendLane.
+    /// renderedReproCaption`) without the compute path ever touching the
+    /// placement map. Compute and the memo key stay placement-free; only
+    /// sentence assembly moved.
+    public let captionPrefix: String
+    public let captionLeadFragment: String
+    public let captionSuffix: String
+    /// Raw as-recorded template source lead (#357's `sourceLead`), carried
+    /// so the renderer can resolve a declaration for it. `nil` when the
+    /// template has none — the caption then has no lead fragment either.
+    public let sourceLead: String?
 
+    /// The declaration-free repro caption — byte-identical to the pre-#371
+    /// stored sentence. Surfaces that can consult the placement map render
+    /// `IntervalTrendLane.renderedReproCaption` instead.
+    public var reproCaption: String { captionPrefix + captionLeadFragment + captionSuffix }
+
+    public init(
+        bins: [IntervalTrendBin],
+        baselineBand: ClosedRange<Double>?,
+        baselineMedian: Double?,
+        captionPrefix: String,
+        captionLeadFragment: String,
+        captionSuffix: String,
+        sourceLead: String?
+    ) {
+        self.bins = bins
+        self.baselineBand = baselineBand
+        self.baselineMedian = baselineMedian
+        self.captionPrefix = captionPrefix
+        self.captionLeadFragment = captionLeadFragment
+        self.captionSuffix = captionSuffix
+        self.sourceLead = sourceLead
+    }
+
+    /// Convenience for callers carrying a finished sentence (tests,
+    /// fixtures): the whole caption is the prefix, no swappable fragment.
     public init(
         bins: [IntervalTrendBin],
         baselineBand: ClosedRange<Double>?,
         baselineMedian: Double?,
         reproCaption: String
     ) {
-        self.bins = bins
-        self.baselineBand = baselineBand
-        self.baselineMedian = baselineMedian
-        self.reproCaption = reproCaption
+        self.init(
+            bins: bins,
+            baselineBand: baselineBand,
+            baselineMedian: baselineMedian,
+            captionPrefix: reproCaption,
+            captionLeadFragment: "",
+            captionSuffix: "",
+            sourceLead: nil
+        )
     }
 }
 
@@ -341,7 +382,7 @@ public enum IntervalTrendComputer {
         // bins — even the empty-beats state still shows where the
         // patient's normal falls on the y-axis.
         let (baselineBand, baselineMedian) = baseline(for: metric, template: template)
-        let caption = reproCaption(
+        let caption = reproCaptionParts(
             metric: metric,
             binSeconds: binSeconds,
             templateBeatCount: templateBeatCount ?? template?.sampleCount,
@@ -361,7 +402,10 @@ public enum IntervalTrendComputer {
                 bins: [],
                 baselineBand: baselineBand,
                 baselineMedian: baselineMedian,
-                reproCaption: caption
+                captionPrefix: caption.prefix,
+                captionLeadFragment: caption.leadFragment,
+                captionSuffix: caption.suffix,
+                sourceLead: template?.sourceLead
             )
         }
 
@@ -509,7 +553,10 @@ public enum IntervalTrendComputer {
             bins: bins,
             baselineBand: baselineBand,
             baselineMedian: baselineMedian,
-            reproCaption: caption
+            captionPrefix: caption.prefix,
+            captionLeadFragment: caption.leadFragment,
+            captionSuffix: caption.suffix,
+            sourceLead: template?.sourceLead
         )
     }
 
@@ -569,7 +616,8 @@ public enum IntervalTrendComputer {
     // MARK: - Repro caption
 
     /// Internal (not private) so the wording — a methods statement the
-    /// analyst copies verbatim — is pinned by unit tests.
+    /// analyst copies verbatim — is pinned by unit tests. Joins the split
+    /// parts; the declaration-free sentence, byte-identical to pre-#371.
     static func reproCaption(
         metric: IntervalTrendMetric,
         binSeconds: Double,
@@ -584,6 +632,42 @@ public enum IntervalTrendComputer {
         excludedUnreliableCount: Int = 0,
         tOffsetGateCaption: String? = nil
     ) -> String {
+        let parts = reproCaptionParts(
+            metric: metric,
+            binSeconds: binSeconds,
+            templateBeatCount: templateBeatCount,
+            qtcFormulaName: qtcFormulaName,
+            sourceLead: sourceLead,
+            templateSelectionBasis: templateSelectionBasis,
+            spanStartSample: spanStartSample,
+            spanEndSample: spanEndSample,
+            sampleRate: sampleRate,
+            excludedImplausibleCount: excludedImplausibleCount,
+            excludedUnreliableCount: excludedUnreliableCount,
+            tOffsetGateCaption: tOffsetGateCaption
+        )
+        return parts.prefix + parts.leadFragment + parts.suffix
+    }
+
+    /// #371: the caption in its three parts — everything before the lead
+    /// fragment, the declaration-free lead fragment itself, and everything
+    /// after it — so `IntervalTrendData` can carry them split and a render
+    /// surface can swap the middle for a declaration-aware fragment without
+    /// re-ordering the sentence.
+    static func reproCaptionParts(
+        metric: IntervalTrendMetric,
+        binSeconds: Double,
+        templateBeatCount: Int?,
+        qtcFormulaName: String,
+        sourceLead: String?,
+        templateSelectionBasis: String?,
+        spanStartSample: Int64?,
+        spanEndSample: Int64?,
+        sampleRate: Double,
+        excludedImplausibleCount: Int = 0,
+        excludedUnreliableCount: Int = 0,
+        tOffsetGateCaption: String? = nil
+    ) -> (prefix: String, leadFragment: String, suffix: String) {
         let binLabel = binLabel(seconds: binSeconds)
         // X48 §4(b): the template figure must disclose what the beats were
         // selected BY and over what SPAN — a departure is uninterpretable
@@ -630,30 +714,27 @@ public enum IntervalTrendComputer {
         // metric carries the clause, and it comes from `QTLeadDisclosure`
         // rather than a second spelling of the sentence.
         //
-        // #358 ruling — NO `declaredPlacement:` argument here, deliberately.
-        // Compute-cached citation captions stay declaration-free by design:
-        // this string is composed in the COMPUTE path, memoised by
-        // `IntervalTrendComputeMemo` and copied verbatim into citation
-        // payloads, and the jurisdiction bars giving an orchestrator a
-        // placement dependence (nothing may recompute when a declaration
-        // changes). Nor can it be decorated at render time: `IntervalTrendLane`
-        // receives only the finished `IntervalTrendData` — no raw source-lead
-        // name, no record id — so threading either would reach back through
-        // the memo key into compute. The declaration-aware disclosure lives on
-        // the render-time surfaces instead (the analysis-lead header line, the
-        // beat-caliper provenance footer, the Markdown export). See the
-        // plan-358 ledger.
+        // #358 ruling, upheld — still NO `declaredPlacement:` argument here.
+        // This fragment is composed in the COMPUTE path, memoised by
+        // `IntervalTrendComputeMemo`, and the jurisdiction bars giving an
+        // orchestrator a placement dependence (nothing may recompute when a
+        // declaration changes), so what compute produces is the
+        // declaration-FREE default. What #371 changed is where the finished
+        // sentence is assembled: the parts travel split on
+        // `IntervalTrendData` and `IntervalTrendLane.renderedReproCaption`
+        // swaps this fragment for a declaration-aware one at render time —
+        // the same pattern as the beat-caliper provenance footer (#370).
         let citedLead = sourceLead.map {
             metric == .qtc ? QTLeadDisclosure.citedLeadName(for: $0) : $0
         }
         let leadFragment = citedLead.map { " · measured in \($0)" } ?? ""
         switch metric {
         case .qtc:
-            return "QTc · \(qtcFormulaName) · \(binLabel) bins · \(templateFragment)\(leadFragment)\(gateFragment)"
+            return ("QTc · \(qtcFormulaName) · \(binLabel) bins · \(templateFragment)", leadFragment, gateFragment)
         case .pr:
-            return "PR · \(binLabel) bins · \(templateFragment)\(leadFragment)"
+            return ("PR · \(binLabel) bins · \(templateFragment)", leadFragment, "")
         case .qrs:
-            return "QRS-width · \(binLabel) bins · \(templateFragment)\(leadFragment)"
+            return ("QRS-width · \(binLabel) bins · \(templateFragment)", leadFragment, "")
         }
     }
 

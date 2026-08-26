@@ -72,6 +72,11 @@ struct IntervalTrendLaneMemoizedStrip: View, Equatable {
     let beats: [MarkingsBeat]
     let template: MarkingsTemplate?
     let sampleRate: Double
+    /// #371: threaded through to the lane so the repro caption's lead
+    /// fragment resolves declarations for THIS record. In the fingerprint —
+    /// a record change must never render under a stale id. NOT a compute
+    /// input: the memo key stays placement-free.
+    let recordID: String?
     let metric: IntervalTrendMetric
     let binSeconds: Double
     let templateBeatCount: Int?
@@ -122,6 +127,7 @@ struct IntervalTrendLaneMemoizedStrip: View, Equatable {
         }
         return lhs.templateBeatCount == rhs.templateBeatCount
             && lhs.sampleRate == rhs.sampleRate
+            && lhs.recordID == rhs.recordID
             && lhs.metric == rhs.metric
             && lhs.binSeconds == rhs.binSeconds
             && lhs.qtcFormulaName == rhs.qtcFormulaName
@@ -190,6 +196,7 @@ struct IntervalTrendLaneMemoizedStrip: View, Equatable {
             timeRangeSeconds: recordingTimeRange,
             data: data,
             metric: metric,
+            recordID: recordID,
             showMode: showMode,
             qtcFormula: qtcFormula,
             selectedBinPreset: selectedBinPreset,

@@ -6104,6 +6104,9 @@ struct IntervalTrendComputerTests {
             qtcFormulaName: "Fridericia"
         )
         #expect(out.reproCaption.contains("measured in MLII"))
+        // #371: the raw as-recorded lead rides the data so the lane can
+        // resolve a declaration for it at render time.
+        #expect(out.sourceLead == "MLII")
     }
 
     @Test("Only the QT metric carries the not-a-conventional-lead clause (#357 §1.5)")

@@ -104,6 +104,13 @@ struct IntervalTrendLane: View {
     /// the caption + control chip.
     let metric: IntervalTrendMetric
 
+    /// #371: the record whose placement declarations the caption's lead
+    /// fragment resolves against — the same navigator id every other
+    /// placement surface asks under (`BedsideView.recordID`), never a
+    /// second convention. Defaulted nil (snapshot fixtures, previews):
+    /// the caption then renders the declaration-free compute default.
+    let recordID: String?
+
     /// Show-mode ("median + IQR", etc.) — the analyst's PREFERENCE from the
     /// picker. The EFFECTIVE representation is this capped by `band` (X41):
     /// per-beat scatter is coerced to median + IQR at map scale.
@@ -211,6 +218,7 @@ struct IntervalTrendLane: View {
         timeRangeSeconds: ClosedRange<Double>,
         data: IntervalTrendData,
         metric: IntervalTrendMetric,
+        recordID: String? = nil,
         showMode: IntervalTrendShowMode,
         qtcFormula: MarkingsQTcFormula = .fridericia,
         selectedBinPreset: IntervalTrendBinPreset,
@@ -238,6 +246,7 @@ struct IntervalTrendLane: View {
         self.timeRangeSeconds = timeRangeSeconds
         self.data = data
         self.metric = metric
+        self.recordID = recordID
         self.showMode = showMode
         self.qtcFormula = qtcFormula
         self.onPickFormula = onPickFormula
@@ -1245,8 +1254,10 @@ struct IntervalTrendLane: View {
             // can assert screen == what the validated computer produced.
             .accessibilityLabel(summaryAXLabel)
             .accessibilityIdentifier("interval-trend-lane-summary")
-            // Repro caption emitted verbatim to the citation menu.
-            Text(data.reproCaption)
+            // Repro caption emitted verbatim to the citation menu — the
+            // #371 render-time composition, so a declared placement reaches
+            // the lead fragment here exactly as it does on the caliper card.
+            Text(renderedReproCaption)
                 .font(.caption2.monospaced())
                 .foregroundStyle(.tertiary)
                 .padding(.top, 2)
@@ -1279,8 +1290,47 @@ struct IntervalTrendLane: View {
     /// plotted reading (X52 §5). Extracted so the view builder isn't asked to
     /// type-check a string expression with an optional map inline.
     private var summaryAXLabel: String {
-        guard let reading = laneReadingText else { return data.reproCaption }
-        return "\(data.reproCaption) · reading \(reading) ms"
+        guard let reading = laneReadingText else { return renderedReproCaption }
+        return "\(renderedReproCaption) · reading \(reading) ms"
+    }
+
+    /// #371: the caption with its lead fragment composed at RENDER time
+    /// against the live placement map, so declaring `MLII → II` words the
+    /// QT lead here exactly as the caliper card does (#370) — same
+    /// `QTLeadDisclosure.citedLeadName` composer, same record id. Reading
+    /// the @Observable shared map inside `body` is what re-renders the
+    /// caption the moment the declare sheet writes; nothing is cached.
+    private var renderedReproCaption: String {
+        Self.renderedReproCaption(
+            data: data,
+            metric: metric,
+            placementMap: LeadPlacementMapContext.shared,
+            recordID: recordID
+        )
+    }
+
+    /// The composition itself, static so tests call it with a fresh
+    /// `LeadPlacementMapContext` (#358 test convention). QTc only: the
+    /// declaration parenthetical is the QT-disclosure grammar, and PR/QRS
+    /// captions keep the raw recorded name exactly as compute wrote it.
+    /// No declaration (or no lead) reproduces the compute default
+    /// byte-for-byte.
+    static func renderedReproCaption(
+        data: IntervalTrendData,
+        metric: IntervalTrendMetric,
+        placementMap: LeadPlacementMapContext,
+        recordID: String?
+    ) -> String {
+        guard metric == .qtc,
+              let lead = data.sourceLead, !lead.isEmpty,
+              let declared = placementMap.declaration(forRecordedName: lead, recordID: recordID)
+        else { return data.reproCaption }
+        let cited = QTLeadDisclosure.citedLeadName(
+            for: lead,
+            declaredPlacement: declared.declaration,
+            isOverride: declared.isOverride
+        )
+        return data.captionPrefix + " · measured in \(cited)" + data.captionSuffix
     }
 
     /// Whole-lane statement of the beats withheld from the medians —
@@ -1475,9 +1525,13 @@ struct IntervalTrendLane: View {
 
     /// IMMUTABLE citation payload — formula + bin + template + span.
     /// Reused by "Copy citation." Free-text label edits never touch
-    /// this. See project_citation_strategy.md.
+    /// this. See project_citation_strategy.md. #371: composed from the
+    /// render-time caption, so the payload states the lead wording that was
+    /// on screen when the analyst authored — a declaration made LATER never
+    /// rewrites an already-authored citation (the stored string stays
+    /// immutable, exactly as before).
     private func composeAuthoringCitation(range: ClosedRange<Double>) -> String {
-        "\(data.reproCaption) · \(formatTime(range.lowerBound))–\(formatTime(range.upperBound))"
+        "\(renderedReproCaption) · \(formatTime(range.lowerBound))–\(formatTime(range.upperBound))"
     }
 
     /// Live readout composed during the drag. Consumes the snapped
