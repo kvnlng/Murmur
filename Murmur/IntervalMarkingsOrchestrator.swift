@@ -282,60 +282,19 @@ private extension IntervalMarkingsOrchestrator {
         let template = MultiLeadQT.template(
             primaryStore: primaryStore, composites: composites, qtcFormula: qtcFormula)
         let readouts = IntervalMeasurement.measureAll(store: primaryStore)
-        let calibration = CalibrationTable.builtInTOffset
         let beats = primaryStore.beats.indices.map { i -> MarkingsBeat in
             let bf = primaryStore.beats[i]
-            let ro = readouts[i]
             let feat = i < primaryFeatures.count ? primaryFeatures[i] : .absent
-            let comp = composites[i]
-            // Value provenance: the gated measurement when the lead produced
-            // one; its raw readout (flagged) when the gates rejected it — the
-            // show-but-flag contract, unchanged from the composite path.
-            let qtMs = comp.qtMs ?? ro.qtMs
-            let qtcMs: Double?
-            let jtMs: Double?
-            let jtcMs: Double?
-            if let compositeQT = comp.qtMs {
-                qtcMs = ro.precedingRRMs.map {
-                    QTcFormula.corrected(qtMs: compositeQT, rrMs: $0, formula: qtcFormula)
-                }
-                jtMs = ro.qrsMs.map { compositeQT - $0 }
-                jtcMs = qtcMs.flatMap { qtc in ro.qrsMs.map { qtc - $0 } }
-            } else {
-                qtcMs = ro.qtcMs(formula: qtcFormula)
-                jtMs = ro.jtMs
-                jtcMs = ro.jtcMs(formula: qtcFormula)
-            }
-            return Self.markingsBeat(bf: bf, feat: feat, values: BeatValues(
-                prMs: ro.prMs, qrsMs: ro.qrsMs,
-                qtMs: qtMs, qtcMs: qtcMs,
-                precedingRRMs: ro.precedingRRMs,
-                jtMs: jtMs, jtcMs: jtcMs,
-                tOffsetCensored: comp.qtMs != nil ? comp.censored : feat.tOffsetCensored,
-                ciHalfWidthMs: comp.ciHalfWidthMs
-                    ?? calibration.bin(forScore: feat.tOffsetRiskScore)?.p95AbsErr,
-                isImplausible: comp.excludedImplausible,
-                isUnreliable: comp.excludedUnreliable || comp.censored
-            ))
+            // #384: value provenance, JT/JTc derivation, the CI calibration
+            // fallback and the composed reliability flag are the pipeline's
+            // (`MultiLeadQT.resolveBeatValues`) — this loop assembles
+            // fiducials and copies finished fields.
+            let values = MultiLeadQT.resolveBeatValues(
+                composite: composites[i], readout: readouts[i],
+                features: feat, qtcFormula: qtcFormula)
+            return Self.markingsBeat(bf: bf, feat: feat, values: values)
         }
         return (beats, template)
-    }
-
-    /// The measured values + flags one beat carries, from whichever
-    /// compute path produced them — bundled so the shared assembly below
-    /// has a single provenance-bearing argument.
-    struct BeatValues {
-        let prMs: Double?
-        let qrsMs: Double?
-        let qtMs: Double?
-        let qtcMs: Double?
-        let precedingRRMs: Double?
-        let jtMs: Double?
-        let jtcMs: Double?
-        let tOffsetCensored: Bool
-        let ciHalfWidthMs: Double?
-        let isImplausible: Bool
-        let isUnreliable: Bool
     }
 
     /// Shared `MarkingsBeat` assembly — fiducials from the analysis lead's
@@ -343,7 +302,7 @@ private extension IntervalMarkingsOrchestrator {
     static func markingsBeat(
         bf: BeatFiducials,
         feat: BeatConfidenceFeatures,
-        values v: BeatValues
+        values v: MultiLeadQT.ResolvedBeatValues
     ) -> MarkingsBeat {
         MarkingsBeat(
             rPeakSampleIndex: bf.rPeakSampleIndex,
@@ -469,7 +428,7 @@ private extension IntervalMarkingsOrchestrator {
     /// nil when no endorsement re-attaches — caller falls back to the
     /// unadjudicated default.
     /// Inputs for the endorsed rebuild, bundled (SwiftLint parameter budget —
-    /// same medicine as `BeatValues`).
+    /// same medicine as `MultiLeadQT.ResolvedBeatValues`).
     struct EndorsedComputeInput: Sendable {
         /// The analysis lead's samples — the one signal the modes cluster on
         /// AND the one every interval is measured in (#357 §1.5); before, the
