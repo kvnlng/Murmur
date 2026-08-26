@@ -203,6 +203,9 @@ struct BedsideView: View {
     @State private var trendLaneContext = IntervalTrendLaneContext.shared
     /// Paid per-bin qualifying facts (X42), published by the App orchestrator.
     @State private var qualifyingContext = QualifyingWindowContext.shared
+    /// #380: the produced trend bins, published by the App's
+    /// TrendBinsOrchestrator — MurmurCore renders, never computes them.
+    @State private var trendBinsContext = TrendBinsContext.shared
     /// True while the notes editor is the first responder. Published into
     /// `BedsideCommands.textEntryActive` so the App disables the bedside key
     /// commands during note typing and the editor keeps its keystrokes (X22).
@@ -2787,7 +2790,12 @@ struct BedsideView: View {
     private var intervalTrendLaneStrip: some View {
         if !markingsContext.beats.isEmpty {
             IntervalTrendLaneMemoizedStrip(
-                beats: markingsContext.beats,
+                // #380: finished bins from the App's TrendBinsOrchestrator —
+                // the per-bin production is paid compute and never runs here.
+                bins: trendBinsContext.bins(
+                    forMetric: trendLaneContext.metric,
+                    binSeconds: trendLaneContext.binSeconds
+                ),
                 template: markingsContext.template,
                 sampleRate: markingsContext.sampleRate,
                 // #371: the same navigator id every other placement surface
@@ -2798,7 +2806,6 @@ struct BedsideView: View {
                 templateBeatCount: markingsContext.template?.sampleCount,
                 qtcFormulaName: markingsContext.qtcFormula.displayName,
                 qtcFormula: markingsContext.qtcFormula,
-                qualifiers: qualifyingContext.qualifiers(forBinSeconds: trendLaneContext.binSeconds),
                 recordingTimeRange: recordingTimeRange,
                 showMode: trendLaneContext.showMode,
                 selectedBinPreset: trendLaneContext.binPreset,
