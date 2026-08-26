@@ -209,7 +209,7 @@ struct VariabilityMetricsOrchestrator: View {
 
     private static func summary(
         report: ECGMetricsReport,
-        qtvi: QTVISummary?,
+        qtvi: QTVISegmentMedians?,
         recordName: String,
         scope: MetricsScope
     ) -> VariabilityMetricsSummary {
@@ -285,15 +285,16 @@ struct VariabilityMetricsOrchestrator: View {
             .init(id: "vm-lfhf-nu", label: "LF / HF n.u.", value: nu),
         ]
         guard let fd else {
-            // Thresholds restated from `FrequencyDomainHRVAnalyzer`
-            // (internal to MurmurMetrics): 12 clean beats over 20 s.
+            // The thresholds are the analyzer's own published values (#383)
+            // — the caption renders what the analyzer reports, not a copy.
             return .init(
                 id: "variability-metrics-frequency-domain",
                 title: "Frequency-domain HRV",
                 rows: rows,
                 captions: [
-                    "Not measured — the spectrum needs at least 12 clean beats "
-                    + "spanning 20 s of RR data.",
+                    "Not measured — the spectrum needs at least "
+                    + "\(FrequencyDomainHRVAnalyzer.minBeats) clean beats "
+                    + "spanning \(Int(FrequencyDomainHRVAnalyzer.minWindowSeconds)) s of RR data.",
                 ]
             )
         }
@@ -317,8 +318,11 @@ struct VariabilityMetricsOrchestrator: View {
     }
 
     private static func qtviSection(
-        _ qtvi: QTVISummary?
+        _ qtvi: QTVISegmentMedians?
     ) -> VariabilityMetricsSummary.Section {
+        // The segment length is the package's published constant — the
+        // caption renders the recipe's own value (#383).
+        let segMin = Int(QTVarianceComputer.minSegmentSeconds / 60)
         guard let q = qtvi else {
             // Same id, same rows, values em-dash: absence is a state of this
             // section, not a different section. The old
@@ -334,7 +338,8 @@ struct VariabilityMetricsOrchestrator: View {
                     .init(id: "vm-qtvi-sdnn", label: "SDNN", value: "—", unit: "ms"),
                     .init(id: "vm-qtvi-meannn", label: "Mean NN", value: "—", unit: "ms"),
                 ],
-                captions: ["No qualifying 5-min segments (needs ≥ 5 min of stable, artifact-free rate)."]
+                captions: ["No qualifying \(segMin)-min segments "
+                           + "(needs ≥ \(segMin) min of stable, artifact-free rate)."]
             )
         }
         return .init(
@@ -349,7 +354,7 @@ struct VariabilityMetricsOrchestrator: View {
             // No reference range — QTVi tracks SDNN more tightly than mean QT,
             // so a normal/abnormal band isn't defensible (RUO stance).
             captions: [
-                "Median over \(q.segmentCount) qualifying 5-min segment"
+                "Median over \(q.segmentCount) qualifying \(segMin)-min segment"
                 + (q.segmentCount == 1 ? "" : "s")
                 + " (stable rate, no excluded beats). No reference range — "
                 + "QTVi tracks heart-rate variability (SDNN) more than QT duration.",
@@ -376,62 +381,24 @@ struct VariabilityMetricsOrchestrator: View {
 
     // MARK: - QT Variability Index (X47)
 
-    /// QTVI over qualifying 5-min segments of the delineated beats. A segment
-    /// qualifies when it is artifact-free (no excluded RR) AND its rate is
-    /// stable within Malik 2008's ±2 bpm — the spec's "stable rate, no ectopic
-    /// disturbance". Reported as the median across qualifying segments; nil
-    /// when none qualify.
-    ///
-    /// Stability comes from `QualifyingWindowComputer.isRateStable`, the same
-    /// definition the trend lane's X43 marker uses. This path used to carry its
-    /// own private copy that compared every beat's INSTANTANEOUS rate against
-    /// the ±2 bpm tolerance; respiratory sinus arrhythmia alone exceeds that
-    /// within a few beats, so it qualified 0 of 4,620 segments across the whole
-    /// normal-sinus database. Two copies of one rule is how they diverged —
-    /// there is now one.
-    /// Pure over its inputs — `nonisolated static` so the detached compute
-    /// can call it; the context reads happen on the main actor before
-    /// detaching.
+    /// The recipe — 5-min segmentation, artifact/rate-stability admission,
+    /// median across qualifying segments — is the paid computation
+    /// (`QTVarianceComputer.summarize`, moved behind the boundary in #383).
+    /// This translates `MarkingsBeat` to the package's primitive sample with
+    /// dumb field copies, nothing more.
     private nonisolated static func qtviSummary(
         beats: [MarkingsBeat],
         sampleRate: Double
-    ) -> QTVISummary? {
-        guard sampleRate > 0, beats.count > 1 else { return nil }
-        let segmentSeconds = QTVarianceComputer.minSegmentSeconds
-
-        var buckets: [Int: (qt: [Double], rr: [Double])] = [:]
-        for beat in beats {
-            guard let qt = beat.qtMs, let rr = beat.precedingRRMs,
-                  qt.isFinite, rr.isFinite, rr > 0 else { continue }
-            let segment = Int((Double(beat.rPeakSampleIndex) / sampleRate) / segmentSeconds)
-            buckets[segment, default: ([], [])].qt.append(qt)
-            buckets[segment, default: ([], [])].rr.append(rr)
-        }
-
-        var indices: [QTVariabilityIndex] = []
-        for (_, seg) in buckets {
-            guard RRArtifactFilter.excludedFraction(for: seg.rr) == 0,
-                  QualifyingWindowComputer.isRateStable(rrMs: seg.rr),
-                  let idx = QTVarianceComputer.compute(
-                      qtMs: seg.qt, rrMs: seg.rr, segmentSeconds: segmentSeconds
-                  ) else { continue }
-            indices.append(idx)
-        }
-        guard !indices.isEmpty else { return nil }
-        return QTVISummary(
-            medianQTVI: Self.median(indices.map(\.qtvi)),
-            medianSDQTMs: Self.median(indices.map(\.sdqtMs)),
-            medianSDNNMs: Self.median(indices.map(\.sdnnMs)),
-            medianMeanNNMs: Self.median(indices.map(\.meanNNMs)),
-            segmentCount: indices.count
+    ) -> QTVISegmentMedians? {
+        QTVarianceComputer.summarize(
+            beats: beats.map {
+                QTVIBeatSample(
+                    rPeakSampleIndex: $0.rPeakSampleIndex,
+                    qtMs: $0.qtMs,
+                    precedingRRMs: $0.precedingRRMs)
+            },
+            sampleRate: sampleRate
         )
-    }
-
-    private nonisolated static func median(_ values: [Double]) -> Double {
-        guard !values.isEmpty else { return 0 }
-        let sorted = values.sorted()
-        let mid = sorted.count / 2
-        return sorted.count.isMultiple(of: 2) ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
     }
 }
 
@@ -441,7 +408,7 @@ struct VariabilityMetricsOrchestrator: View {
 /// case so the insufficient-beats publish and the signpost can report it.
 private enum Outcome: Sendable {
     case empty(beatCount: Int)
-    case computed(report: ECGMetricsReport, qtvi: QTVISummary?, beatCount: Int)
+    case computed(report: ECGMetricsReport, qtvi: QTVISegmentMedians?, beatCount: Int)
 }
 
 /// The HRV report keyed by what it actually depends on. The recompute Key
@@ -468,12 +435,4 @@ private struct ReportCache {
             && rangeStart == range?.lowerBound
             && rangeEnd == range?.upperBound
     }
-}
-
-private struct QTVISummary: Sendable {
-    let medianQTVI: Double
-    let medianSDQTMs: Double
-    let medianSDNNMs: Double
-    let medianMeanNNMs: Double
-    let segmentCount: Int
 }

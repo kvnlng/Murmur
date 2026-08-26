@@ -6,8 +6,8 @@
       "kind": "remoteSourceControl",
       "location": "https://github.com/kvnlng/Murmur-Extensions",
       "state": {
-        "revision": "c1b789e16377979ddff17db80223fb2ff137f5d1",
-        "version": "0.29.0"
+        "revision": "c90ab14437a329ff6b9c1ec3da0738243fc0c56a",
+        "version": "0.30.0"
       }
     },
     {
