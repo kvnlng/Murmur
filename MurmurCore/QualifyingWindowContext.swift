@@ -16,7 +16,9 @@ import Observation
 
 /// Per-bin qualifying facts, as primitives (no MurmurMetrics types). `nil`
 /// deviation/fraction means "not computed" — distinct from a measured value.
-public struct IntervalBinQualifier: Sendable, Equatable {
+/// Hashable so the trend-bins orchestrator's `.task(id:)` key can carry the
+/// whole (small) set and recompute when the facts arrive (#380).
+public struct IntervalBinQualifier: Sendable, Equatable, Hashable {
     /// Bin start (seconds from recording start) — the join key to a trend bin.
     public let startSeconds: Double
     public let rateStable: Bool

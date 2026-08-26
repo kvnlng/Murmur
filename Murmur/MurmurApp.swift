@@ -180,6 +180,9 @@ struct MurmurApp: App {
                 // excluded fraction, published for the trend lane's X43 marker
                 // + X46 gate. Depends on the delineated beats above.
                 .background(QualifyingWindowOrchestrator())
+                // #380: produces the interval-trend bins (paid compute)
+                // and publishes them to TrendBinsContext for the lane.
+                .background(TrendBinsOrchestrator())
                 // Third invisible orchestrator: owns the VT/VF Core ML model +
                 // entitlement gate, presents the scan dialog, and publishes
                 // committed candidates to VTVFScanContext for the review queue.

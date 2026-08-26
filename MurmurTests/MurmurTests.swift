@@ -1641,7 +1641,7 @@ struct QualifierJoinTests {
             IntervalBinQualifier(startSeconds: 0, rateStable: false, rateMaxDeviationBpm: 7, excludedBeatFraction: 0.1),
             IntervalBinQualifier(startSeconds: 2, rateStable: true, rateMaxDeviationBpm: 0.5, excludedBeatFraction: 0)
         ]
-        let data = IntervalTrendComputer.compute(
+        let data = computeTrend(
             beats: beats, template: nil, sampleRate: 1000, metric: .qtc,
             binSeconds: 2, templateBeatCount: nil, qtcFormulaName: "Fridericia",
             qualifiers: qualifiers
@@ -1659,7 +1659,7 @@ struct QualifierJoinTests {
 
     @Test("No qualifiers → bins default to stable + unmarked (free viewer)")
     func defaultsWithoutQualifiers() {
-        let data = IntervalTrendComputer.compute(
+        let data = computeTrend(
             beats: [Int64(500), 1500].map(beat), template: nil, sampleRate: 1000,
             metric: .qtc, binSeconds: 2, templateBeatCount: nil, qtcFormulaName: "Fridericia"
         )
@@ -5947,7 +5947,7 @@ struct IntervalTrendComputerTests {
         let beats = rrs.enumerated().map { idx, rr in
             beat(rPeak: Int64(idx + 1) * 250, precedingRRMs: rr)
         }
-        let out = IntervalTrendComputer.compute(
+        let out = computeTrend(
             beats: beats,
             template: template(),
             sampleRate: 250,
@@ -5963,7 +5963,7 @@ struct IntervalTrendComputerTests {
 
     @Test("Empty beats yields empty bins")
     func emptyBeats() {
-        let out = IntervalTrendComputer.compute(
+        let out = computeTrend(
             beats: [],
             template: template(),
             sampleRate: 250,
@@ -5983,7 +5983,7 @@ struct IntervalTrendComputerTests {
         let beats: [MarkingsBeat] = (0..<10).map { i in
             beat(rPeak: Int64(500 + i * 500), qtcMs: 410 + Double(i) * 4)  // 410, 414, …, 446
         }
-        let out = IntervalTrendComputer.compute(
+        let out = computeTrend(
             beats: beats,
             template: template(),
             sampleRate: 250,
@@ -6008,7 +6008,7 @@ struct IntervalTrendComputerTests {
         let beats: [MarkingsBeat] = (0..<5).map { i in
             beat(rPeak: Int64(500 + i * 500), qtcMs: 460, fragileConfidence: 0.3)
         }
-        let out = IntervalTrendComputer.compute(
+        let out = computeTrend(
             beats: beats,
             template: template(),
             sampleRate: 250,
@@ -6027,7 +6027,7 @@ struct IntervalTrendComputerTests {
 
     @Test("Baseline band comes from the template's median±IQR/2 for the metric")
     func baselineFromTemplate() {
-        let out = IntervalTrendComputer.compute(
+        let out = computeTrend(
             beats: [beat(rPeak: 500)],
             template: template(),
             sampleRate: 250,
@@ -6049,15 +6049,15 @@ struct IntervalTrendComputerTests {
     @Test("Metric switch pulls the right field: PR / QRS / QTc")
     func metricSwitchPullsCorrectField() {
         let beats = [beat(rPeak: 500, qtcMs: 420, prMs: 160, qrsMs: 95, qtMs: 385)]
-        let qtcOut = IntervalTrendComputer.compute(
+        let qtcOut = computeTrend(
             beats: beats, template: template(), sampleRate: 250,
             metric: .qtc, binSeconds: 120, templateBeatCount: 200, qtcFormulaName: "Fridericia"
         )
-        let prOut = IntervalTrendComputer.compute(
+        let prOut = computeTrend(
             beats: beats, template: template(), sampleRate: 250,
             metric: .pr, binSeconds: 120, templateBeatCount: 200, qtcFormulaName: "Fridericia"
         )
-        let qrsOut = IntervalTrendComputer.compute(
+        let qrsOut = computeTrend(
             beats: beats, template: template(), sampleRate: 250,
             metric: .qrs, binSeconds: 120, templateBeatCount: 200, qtcFormulaName: "Fridericia"
         )
@@ -6068,7 +6068,7 @@ struct IntervalTrendComputerTests {
 
     @Test("Repro caption echoes formula, bin length, and template N verbatim")
     func reproCaptionEchoesParameters() {
-        let out = IntervalTrendComputer.compute(
+        let out = computeTrend(
             beats: [beat(rPeak: 500)],
             template: template(),
             sampleRate: 250,
@@ -6094,7 +6094,7 @@ struct IntervalTrendComputerTests {
             sourceLead: "MLII",
             spanStartSample: 0, spanEndSample: 90000
         )
-        let out = IntervalTrendComputer.compute(
+        let out = computeTrend(
             beats: [beat(rPeak: 500)],
             template: t,
             sampleRate: 250,
@@ -6126,7 +6126,7 @@ struct IntervalTrendComputerTests {
             spanStartSample: 0, spanEndSample: 90000
         )
         func caption(_ metric: IntervalTrendMetric) -> String {
-            IntervalTrendComputer.compute(
+            computeTrend(
                 beats: [beat(rPeak: 500)], template: t, sampleRate: 250,
                 metric: metric, binSeconds: 120, templateBeatCount: nil,
                 qtcFormulaName: "Fridericia"
@@ -6148,7 +6148,7 @@ struct IntervalTrendComputerTests {
             sourceLead: "V5",
             spanStartSample: 0, spanEndSample: 90000
         )
-        let out = IntervalTrendComputer.compute(
+        let out = computeTrend(
             beats: [beat(rPeak: 500)], template: conventional, sampleRate: 250,
             metric: .qtc, binSeconds: 120, templateBeatCount: nil,
             qtcFormulaName: "Fridericia")
@@ -6168,7 +6168,7 @@ struct IntervalTrendComputerTests {
             sourceLead: "MLII",
             spanStartSample: 0, spanEndSample: 15_000   // 0–60 s at 250 Hz
         )
-        let out = IntervalTrendComputer.compute(
+        let out = computeTrend(
             beats: [beat(rPeak: 500)],
             template: t,
             sampleRate: 250,
@@ -6187,7 +6187,7 @@ struct IntervalTrendComputerTests {
 
     @Test("No template → 'no template', never a fabricated zero (X48 §4c)")
     func reproCaptionNoTemplateStaysAbsent() {
-        let out = IntervalTrendComputer.compute(
+        let out = computeTrend(
             beats: [beat(rPeak: 500)],
             template: nil,
             sampleRate: 250,
@@ -6208,7 +6208,7 @@ struct IntervalTrendComputerTests {
         var beats: [MarkingsBeat] = []
         for i in 0..<5 { beats.append(beat(rPeak: Int64(500 + i * 500), qtcMs: 420)) }
         for i in 5..<10 { beats.append(beat(rPeak: Int64(500 + i * 500), qtcMs: 900, isImplausible: true)) }
-        let out = IntervalTrendComputer.compute(
+        let out = computeTrend(
             beats: beats, template: template(), sampleRate: 250,
             metric: .qtc, binSeconds: 120, templateBeatCount: 200, qtcFormulaName: "Fridericia"
         )
@@ -6223,7 +6223,7 @@ struct IntervalTrendComputerTests {
     @Test("A bin of only impossible beats is carried excluded, not dropped (K9)")
     func allImplausibleBinIsDistinctFromEmpty() {
         let beats = (0..<5).map { beat(rPeak: Int64(500 + $0 * 500), qtcMs: 900, isImplausible: true) }
-        let out = IntervalTrendComputer.compute(
+        let out = computeTrend(
             beats: beats, template: template(), sampleRate: 250,
             metric: .qtc, binSeconds: 120, templateBeatCount: 200, qtcFormulaName: "Fridericia"
         )
@@ -6243,7 +6243,7 @@ struct IntervalTrendComputerTests {
         var beats: [MarkingsBeat] = []
         for i in 0..<5 { beats.append(beat(rPeak: Int64(500 + i * 500), qtcMs: 420)) }
         for i in 5..<10 { beats.append(beat(rPeak: Int64(500 + i * 500), qtcMs: 620, isUnreliable: true)) }
-        let out = IntervalTrendComputer.compute(
+        let out = computeTrend(
             beats: beats, template: template(), sampleRate: 250,
             metric: .qtc, binSeconds: 120, templateBeatCount: 200, qtcFormulaName: "Fridericia"
         )
@@ -6261,7 +6261,7 @@ struct IntervalTrendComputerTests {
         var beats: [MarkingsBeat] = []
         for i in 0..<4 { beats.append(beat(rPeak: Int64(500 + i * 500), qrsMs: 90)) }
         for i in 4..<8 { beats.append(beat(rPeak: Int64(500 + i * 500), qrsMs: 94, isUnreliable: true)) }
-        let out = IntervalTrendComputer.compute(
+        let out = computeTrend(
             beats: beats, template: template(), sampleRate: 250,
             metric: .qrs, binSeconds: 120, templateBeatCount: 200, qtcFormulaName: "Fridericia"
         )
@@ -6274,7 +6274,7 @@ struct IntervalTrendComputerTests {
     @Test("A bin of only unreliable T-offsets is carried excluded, not dropped (K9)")
     func allUnreliableBinIsDistinctFromEmpty() {
         let beats = (0..<5).map { beat(rPeak: Int64(500 + $0 * 500), qtcMs: 620, isUnreliable: true) }
-        let out = IntervalTrendComputer.compute(
+        let out = computeTrend(
             beats: beats, template: template(), sampleRate: 250,
             metric: .qtc, binSeconds: 120, templateBeatCount: 200, qtcFormulaName: "Fridericia"
         )
@@ -6295,7 +6295,7 @@ struct IntervalTrendComputerTests {
             beat(rPeak: 30_500),   // 122 s → bin 1
             beat(rPeak: 55_000)    // 220 s → bin 1
         ]
-        let out = IntervalTrendComputer.compute(
+        let out = computeTrend(
             beats: beats,
             template: template(),
             sampleRate: 250,
@@ -7118,6 +7118,105 @@ struct FiducialRenderPolicyTests {
 
 import MurmurMetrics
 
+// MARK: - #380 trend-pipeline test entry
+
+/// #380: the trend per-bin production moved behind the paid boundary
+/// (`TrendBinComputer` in MurmurMetrics). This helper reproduces the old
+/// `computeTrend(beats:...)` entry so the behavioural
+/// suites keep their fixtures and assertions: it performs the SAME dumb
+/// translation the App's `TrendBinsOrchestrator` does (field copies, no
+/// policy), runs the private computer, and assembles with the slim public
+/// `compute`. Exercising the private API from here is deliberate — these
+/// suites are the end-to-end behaviour pins for the lane.
+private func computeTrend(
+    beats: [MarkingsBeat],
+    template: MarkingsTemplate?,
+    sampleRate: Double,
+    metric: IntervalTrendMetric,
+    binSeconds: Double,
+    templateBeatCount: Int?,
+    qtcFormulaName: String,
+    templateSelectionBasis: String? = nil,
+    qualifiers: [IntervalBinQualifier] = [],
+    confidenceFloor: Double = TrendBinComputer.defaultConfidenceFloor,
+    tOffsetGateCaption: String? = nil
+) -> IntervalTrendData {
+    let kind: TrendMetricKind
+    switch metric {
+    case .qtc: kind = .qtc
+    case .pr:  kind = .pr
+    case .qrs: kind = .qrs
+    }
+    let samples: [TrendBeatSample] = sampleRate > 0 ? beats.map { beat in
+        TrendBeatSample(
+            timeSeconds: Double(beat.rPeakSampleIndex) / sampleRate,
+            valueMs: {
+                switch metric {
+                case .qtc: return beat.qtcMs
+                case .pr:  return beat.prMs
+                case .qrs: return beat.qrsMs
+                }
+            }(),
+            precedingRRMs: beat.precedingRRMs,
+            isImplausible: beat.isImplausible,
+            isUnreliableTOffset: beat.isUnreliable,
+            tOffsetCensored: beat.tOffsetCensored,
+            tOffsetConfidence: beat.tOffset?.confidence,
+            qrsOnsetConfidence: beat.qrsOnset?.confidence,
+            qrsOffsetConfidence: beat.qrsOffset?.confidence,
+            pOnsetConfidence: beat.pOnset?.confidence
+        )
+    } : []
+    let rows = TrendBinComputer.computeBins(
+        samples: samples,
+        metric: kind,
+        binSeconds: binSeconds,
+        qualifiers: qualifiers.map {
+            TrendBinQualifierFacts(
+                startSeconds: $0.startSeconds,
+                rateStable: $0.rateStable,
+                rateMaxDeviationBpm: $0.rateMaxDeviationBpm,
+                rateDriftBpm: $0.rateDriftBpm,
+                excludedBeatFraction: $0.excludedBeatFraction
+            )
+        },
+        confidenceFloor: confidenceFloor
+    )
+    let bins = rows.map { row in
+        IntervalTrendBin(
+            startSeconds: row.startSeconds,
+            endSeconds: row.endSeconds,
+            median: row.median,
+            q1: row.q1,
+            q3: row.q3,
+            bandLowerMs: row.bandLowerMs,
+            bandUpperMs: row.bandUpperMs,
+            hasCensoredBeats: row.hasCensoredBeats,
+            isEligible: row.isEligible,
+            beatCount: row.beatCount,
+            perBeatValues: row.perBeatValues,
+            rrCVPercent: row.rrCVPercent,
+            rateMaxDeviationBpm: row.rateMaxDeviationBpm,
+            rateDriftBpm: row.rateDriftBpm,
+            rateStable: row.rateStable,
+            excludedBeatFraction: row.excludedBeatFraction,
+            qtImplausibleFraction: row.qtImplausibleFraction,
+            qtUnreliableFraction: row.qtUnreliableFraction
+        )
+    }
+    return IntervalTrendComputer.compute(
+        bins: bins,
+        template: template,
+        sampleRate: sampleRate,
+        metric: metric,
+        binSeconds: binSeconds,
+        templateBeatCount: templateBeatCount,
+        qtcFormulaName: qtcFormulaName,
+        templateSelectionBasis: templateSelectionBasis,
+        tOffsetGateCaption: tOffsetGateCaption
+    )
+}
+
 @Suite("HRV analytic tests — whole-recording ECGMetricsReport")
 struct HRVAnalyticTests {
 
@@ -7929,7 +8028,7 @@ struct BeatDelineatorMetamorphicTests {
         // heuristic to clear the production 0.60 floor, but the bin
         // math itself is the same. We're testing pipeline mechanics
         // (drift recovery), not production confidence tuning.
-        let trend = IntervalTrendComputer.compute(
+        let trend = computeTrend(
             beats: beats,
             template: coreTemplate,
             sampleRate: ecg.sampleRate,
