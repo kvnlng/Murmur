@@ -208,6 +208,13 @@ public enum SyntheticECG {
     /// (2σ — the point the wave has risen to ~13.5% of its peak). All in
     /// seconds from record start; P fields are nil where the P wave is
     /// suppressed (inside the AF span) — that absence IS truth.
+    ///
+    /// Boundary ruling (#385): KEEP in MurmurCore. Truth generation must
+    /// state the boundary convention (centre ± 2σ) to be gradable at all —
+    /// a truth fixture that hides its convention grades nothing. Publishing
+    /// what the tests grade against is inherent to keeping the truth tests
+    /// public; whether the graded operating point itself should be public
+    /// is #386's question, ruled separately.
     public struct TruthBeatFiducials: Equatable, Sendable, Codable {
         /// X104: `.sinus` unless this beat was constructed as ectopy.
         public var kind: BeatKind

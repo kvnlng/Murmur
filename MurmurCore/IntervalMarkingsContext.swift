@@ -748,6 +748,12 @@ public final class IntervalMarkingsContext {
     /// Beats without any usable interval measurement are omitted
     /// rather than sorted to a defaulted position — navigation
     /// shouldn't take the analyst to nothing.
+    ///
+    /// Boundary ruling (#385): KEEP in MurmurCore. This is ranking for
+    /// navigation, not measurement — it orders values the pipeline
+    /// published (beat QTc/QRS, template medians) by absolute distance
+    /// and produces no new measurement. Reading paid-published fields is
+    /// exactly what this context exists for.
     public var beatsRankedByDeviation: [MarkingsBeat] {
         guard let t = template else { return [] }
         // Score each beat; keep only those with a defined score.

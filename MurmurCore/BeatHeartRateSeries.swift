@@ -22,6 +22,12 @@
 //  non-finite samples, so NaN-filled gaps render as gaps rather than as
 //  interpolated fabrications.
 //
+//  Boundary ruling (#385): KEEP in MurmurCore. This is display-tier
+//  derivation over beats the pipeline already found — a unit conversion
+//  (60000/RR) plus per-bin median for the HR lane, which is part of the
+//  shared render surface both tiers draw. It produces no measurement the
+//  paid pipeline doesn't already publish per-beat.
+//
 
 import Foundation
 
